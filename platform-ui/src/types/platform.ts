@@ -130,3 +130,31 @@ export type StartRunInput = {
   profileId?: string
   triggeredBy?: string
 }
+
+export type ApiSpecRecord = {
+  id: string
+  projectId: string
+  name: string
+  title?: string | null
+  specVersion?: string | null
+  sourceFormat?: string | null
+  operationCount: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type ApiOperationRecord = {
+  id: string
+  projectId: string
+  apiSpecId: string
+  apiSpecName?: string | null
+  tagName?: string | null
+  method: string
+  path: string
+  operationId?: string | null
+  summary?: string | null
+  description?: string | null
+  requestBody: unknown
+  responses: unknown
+  createdAt: string
+}

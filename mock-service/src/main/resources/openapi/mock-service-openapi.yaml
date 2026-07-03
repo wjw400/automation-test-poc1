@@ -1,0 +1,361 @@
+openapi: 3.0.3
+info:
+  title: Mock Secure Service API
+  version: 1.0.0
+  description: |
+    OpenAPI definition for the mock-service module used by the automation testing POC.
+
+    This service simulates a backend that exchanges PGP-protected payloads with clients.
+    Some endpoints accept or return the encrypted payload as raw text, while others place
+    the armored ciphertext inside a JSON field such as `payload`.
+servers:
+  - url: http://localhost:8081
+    description: Local mock-service
+tags:
+  - name: secure
+    description: Secure mock endpoints with PGP-encrypted payload exchange
+paths:
+  /secure/raw:
+    post:
+      tags:
+        - secure
+      summary: Submit encrypted raw-text payload
+      description: |
+        Accepts an ASCII-armored PGP message as the raw request body. The service decrypts
+        the body, interprets the plaintext as JSON, and returns a normal JSON envelope with
+        an encrypted `payload` field in the response.
+      operationId: submitSecureRaw
+      parameters:
+        - $ref: '#/components/parameters/ProfileParam'
+      requestBody:
+        required: true
+        content:
+          text/plain:
+            schema:
+              type: string
+              description: ASCII-armored PGP message containing a JSON object
+            example: |
+              -----BEGIN PGP MESSAGE-----
+              Version: BCPG v1.72
+
+              hQGMA0mockExampleAQvAQwAtd4nFakeCipherTextForDemoOnly
+              =ABCD
+              -----END PGP MESSAGE-----
+      responses:
+        '200':
+          description: Request accepted and business payload returned in encrypted form
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecureRawResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /secure/json-field:
+    post:
+      tags:
+        - secure
+      summary: Submit encrypted payload inside a JSON field
+      description: |
+        Accepts a JSON object where one field contains an ASCII-armored PGP string. The
+        field name is configurable through the `field` query parameter and defaults to
+        `payload`.
+      operationId: submitSecureJsonField
+      parameters:
+        - $ref: '#/components/parameters/ProfileParam'
+        - $ref: '#/components/parameters/FieldParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncryptedFieldRequest'
+      responses:
+        '200':
+          description: Request accepted and encrypted business payload returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecureJsonFieldResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /secure/multi-step/create:
+    post:
+      tags:
+        - secure
+      summary: Create an entity with encrypted request payload
+      description: |
+        Expects a JSON request with an encrypted `payload` field. After decryption, the
+        service creates an in-memory entity and returns the created entity inside an
+        encrypted response `payload`.
+      operationId: createSecureEntity
+      parameters:
+        - $ref: '#/components/parameters/ProfileParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayloadEnvelopeRequest'
+      responses:
+        '200':
+          description: Entity created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecureEnvelopeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /secure/multi-step/query:
+    post:
+      tags:
+        - secure
+      summary: Query an entity with encrypted request payload
+      description: |
+        Expects a JSON request with an encrypted `payload` field containing an `entityId`.
+        If the entity exists, the service returns an encrypted business payload. If not,
+        it returns a not-found style error envelope in plaintext JSON.
+      operationId: querySecureEntity
+      parameters:
+        - $ref: '#/components/parameters/ProfileParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PayloadEnvelopeRequest'
+      responses:
+        '200':
+          description: Query completed
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/SecureEnvelopeResponse'
+                  - $ref: '#/components/schemas/NotFoundResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+  /secure/error-case:
+    post:
+      tags:
+        - secure
+      summary: Trigger error and abnormal payload scenarios
+      description: |
+        Produces deliberately malformed or failing responses to exercise the automation
+        framework's error handling, decryption handling, and validation flow.
+      operationId: triggerSecureErrorCase
+      parameters:
+        - $ref: '#/components/parameters/ProfileParam'
+        - name: mode
+          in: query
+          required: false
+          description: Scenario to simulate
+          schema:
+            type: string
+            default: bad-payload
+            enum:
+              - bad-payload
+              - wrong-field
+              - decrypt-fail
+              - bad-signature
+      responses:
+        '200':
+          description: Abnormal but HTTP-success response
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - $ref: '#/components/schemas/BadPayloadResponse'
+                  - $ref: '#/components/schemas/WrongPayloadFieldResponse'
+                  - $ref: '#/components/schemas/BusinessErrorResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
+components:
+  parameters:
+    ProfileParam:
+      name: profile
+      in: query
+      required: false
+      description: |
+        Crypto profile used to resolve key material. If omitted, the server uses its
+        configured default profile, currently `secureEcho`.
+      schema:
+        type: string
+        example: secureEcho
+    FieldParam:
+      name: field
+      in: query
+      required: false
+      description: Name of the JSON field that carries the encrypted payload
+      schema:
+        type: string
+        default: payload
+        example: payload
+  responses:
+    BadRequest:
+      description: Invalid request or decryption setup
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+    InternalError:
+      description: Unexpected server-side failure
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorResponse'
+  schemas:
+    ResponseEnvelope:
+      type: object
+      required:
+        - code
+        - message
+        - traceId
+        - profileUsed
+      properties:
+        code:
+          type: string
+          example: SUCCESS
+        message:
+          type: string
+          example: ok
+        traceId:
+          type: string
+          example: T1002
+        profileUsed:
+          type: string
+          example: secureEcho
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          example: BAD_REQUEST
+        message:
+          type: string
+          example: payload must contain an armored PGP string
+    EncryptedFieldRequest:
+      type: object
+      description: Request envelope with one encrypted field and optional plaintext metadata
+      additionalProperties: true
+      properties:
+        traceId:
+          type: string
+          description: Optional plaintext trace identifier echoed by the service
+          example: client-trace-001
+        payload:
+          type: string
+          description: ASCII-armored PGP message containing a JSON object
+      example:
+        traceId: client-trace-001
+        payload: |
+          -----BEGIN PGP MESSAGE-----
+          Version: BCPG v1.72
+
+          hQGMA0mockExampleAQvAQvAnotherFakeCipherTextForDemoOnly
+          =WXYZ
+          -----END PGP MESSAGE-----
+    PayloadEnvelopeRequest:
+      type: object
+      required:
+        - payload
+      properties:
+        payload:
+          type: string
+          description: ASCII-armored PGP message containing a JSON object
+      example:
+        payload: |
+          -----BEGIN PGP MESSAGE-----
+          Version: BCPG v1.72
+
+          hQGMA0mockExampleAQvAQwCreateOrQueryCipherTextForDemoOnly
+          =1234
+          -----END PGP MESSAGE-----
+    SecureEnvelopeResponse:
+      allOf:
+        - $ref: '#/components/schemas/ResponseEnvelope'
+        - type: object
+          required:
+            - payload
+          properties:
+            payload:
+              type: string
+              description: ASCII-armored PGP message containing the business response JSON
+    SecureRawResponse:
+      allOf:
+        - $ref: '#/components/schemas/SecureEnvelopeResponse'
+        - type: object
+          required:
+            - receivedRequest
+          properties:
+            receivedRequest:
+              type: object
+              additionalProperties: true
+              description: Decrypted version of the inbound request body
+              example:
+                amount: 128
+                currency: USD
+    SecureJsonFieldResponse:
+      allOf:
+        - $ref: '#/components/schemas/SecureEnvelopeResponse'
+        - type: object
+          required:
+            - fieldUsed
+          properties:
+            fieldUsed:
+              type: string
+              example: payload
+    NotFoundResponse:
+      allOf:
+        - $ref: '#/components/schemas/ResponseEnvelope'
+        - type: object
+          properties:
+            code:
+              type: string
+              example: NOT_FOUND
+            message:
+              type: string
+              example: Entity not found
+    BadPayloadResponse:
+      allOf:
+        - $ref: '#/components/schemas/ResponseEnvelope'
+        - type: object
+          required:
+            - payload
+          properties:
+            payload:
+              type: string
+              example: BROKEN_ENCRYPTED_DATA
+    WrongPayloadFieldResponse:
+      allOf:
+        - $ref: '#/components/schemas/ResponseEnvelope'
+        - type: object
+          required:
+            - wrongPayloadField
+          properties:
+            wrongPayloadField:
+              type: string
+              description: Encrypted payload returned under an unexpected field name
+    BusinessErrorResponse:
+      allOf:
+        - $ref: '#/components/schemas/ResponseEnvelope'
+        - type: object
+          properties:
+            code:
+              type: string
+              example: BAD_SIGNATURE
+            message:
+              type: string
+              example: Signature verification failed

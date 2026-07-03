@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { PlayCircleOutlined, PlusOutlined, SaveOutlined } from '@ant-design/icons'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { CaseDesigner } from '../components/CaseDesigner'
 import { platformApi } from '../api/platformApi'
 import { StatusPill } from '../components/StatusPill'
 import type {
@@ -307,16 +308,7 @@ export function CasesPage() {
             </Space>
           </section>
 
-          <div className="editor-shell">
-            <div className="plain-editor-shell">
-              <Input.TextArea
-                className="plain-editor-input"
-                value={draft.content}
-                onChange={(event) => setDraft({ ...draft, content: event.target.value })}
-                autoSize={false}
-              />
-            </div>
-          </div>
+          <CaseDesigner draft={draft} onChange={setDraft} />
         </section>
       </div>
     </div>

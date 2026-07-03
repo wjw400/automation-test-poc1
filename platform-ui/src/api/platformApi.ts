@@ -1,5 +1,6 @@
 import { apiClient } from './client'
 import type {
+  ApiSpecRecord,
   CaseRecord,
   Environment,
   Profile,
@@ -81,5 +82,29 @@ export const platformApi = {
   async startRun(payload: StartRunInput) {
     const { data } = await apiClient.post<RunRecord>('/runs', payload)
     return data
+  },
+
+  async listApiSpecs(projectId: string) {
+    const { data } = await apiClient.get<ApiSpecRecord[]>(`/projects/${projectId}/api-specs`)
+    return data
+  },
+
+  async importApiSpec(projectId: string, file: File) {
+    const formData = new FormData()
+    formData.append('file', file)
+    const { data } = await apiClient.post<ApiSpecRecord>(
+      `/projects/${projectId}/api-specs/import`,
+      formData,
+      {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      },
+    )
+    return data
+  },
+
+  getApiSpecContentUrl(projectId: string, apiSpecId: string) {
+    return `/api/projects/${encodeURIComponent(projectId)}/api-specs/${encodeURIComponent(apiSpecId)}/content`
   },
 }

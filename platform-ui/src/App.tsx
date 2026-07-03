@@ -1,9 +1,10 @@
-import { ApartmentOutlined, DatabaseOutlined, ExperimentOutlined, PlaySquareOutlined } from '@ant-design/icons'
+import { ApartmentOutlined, ApiOutlined, DatabaseOutlined, ExperimentOutlined, PlaySquareOutlined } from '@ant-design/icons'
 import { App as AntApp, ConfigProvider, Layout, Menu, Typography } from 'antd'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { ConfigPage } from './pages/ConfigPage'
 import { CasesPage } from './pages/CasesPage'
+import { ApiCatalogPage } from './pages/ApiCatalogPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { RunsPage } from './pages/RunsPage'
 
@@ -18,6 +19,8 @@ function AppShell() {
     ? '/cases'
     : location.pathname.startsWith('/runs')
       ? '/runs'
+      : location.pathname.startsWith('/apis')
+        ? '/apis'
       : location.pathname.startsWith('/config')
         ? '/config'
         : '/projects'
@@ -36,6 +39,7 @@ function AppShell() {
           selectedKeys={[selectedKey]}
           items={[
             { key: '/projects', icon: <ApartmentOutlined />, label: 'Projects' },
+            { key: '/apis', icon: <ApiOutlined />, label: 'APIs' },
             { key: '/cases', icon: <ExperimentOutlined />, label: 'Cases' },
             { key: '/runs', icon: <PlaySquareOutlined />, label: 'Runs' },
             { key: '/config', icon: <DatabaseOutlined />, label: 'Config' },
@@ -57,6 +61,7 @@ function AppShell() {
           <Routes>
             <Route path="/" element={<Navigate to="/projects" replace />} />
             <Route path="/projects" element={<ProjectsPage />} />
+            <Route path="/apis" element={<ApiCatalogPage />} />
             <Route path="/cases" element={<CasesPage />} />
             <Route path="/runs" element={<RunsPage />} />
             <Route path="/config" element={<ConfigPage />} />
