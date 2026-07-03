@@ -1,0 +1,14 @@
+server:
+  port: 8081
+
+mock-service:
+  crypto:
+    default-profile: secureEcho
+    profiles:
+      secureEcho:
+        senderPublicKey: classpath:keys/client-public.asc
+        senderPrivateKey: classpath:keys/server-private.asc
+        senderPrivateKeyPassphrase: demo-server-passphrase
+        recipientPublicKey: classpath:keys/client-public.asc
+        recipientPrivateKey: classpath:keys/server-private.asc
+        recipientPrivateKeyPassphrase: demo-server-passphrase

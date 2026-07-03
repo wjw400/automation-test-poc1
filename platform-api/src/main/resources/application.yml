@@ -1,0 +1,17 @@
+spring:
+  application:
+    name: platform-api
+  datasource:
+    url: jdbc:postgresql://localhost:5432/automation_test_poc
+    username: postgres
+    password: postgres
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+server:
+  port: 8090

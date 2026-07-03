@@ -1,0 +1,295 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.com/schemas/api-case.schema.json",
+  "title": "Structured API Test Case",
+  "type": "object",
+  "required": ["name"],
+  "anyOf": [
+    {
+      "required": ["steps"]
+    },
+    {
+      "required": ["request", "expect"]
+    }
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "variables": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "profiles": {
+      "type": "object",
+      "additionalProperties": {
+        "$ref": "#/$defs/profile"
+      }
+    },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/apiStep"
+      }
+    },
+    "request": {
+      "$ref": "#/$defs/request"
+    },
+    "expect": {
+      "$ref": "#/$defs/expect"
+    },
+    "extract": {
+      "type": "object",
+      "additionalProperties": {
+        "oneOf": [
+          {
+            "type": "string"
+          },
+          {
+            "$ref": "#/$defs/extractValue"
+          }
+        ]
+      }
+    }
+  },
+  "$defs": {
+    "apiStep": {
+      "type": "object",
+      "required": ["request", "expect"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string",
+          "minLength": 1
+        },
+        "continueOnFailure": {
+          "type": "boolean",
+          "default": false
+        },
+        "request": {
+          "$ref": "#/$defs/request"
+        },
+        "expect": {
+          "$ref": "#/$defs/expect"
+        },
+        "extract": {
+          "type": "object",
+          "additionalProperties": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "$ref": "#/$defs/extractValue"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "senderPublicKey": {
+          "type": "string"
+        },
+        "senderPrivateKey": {
+          "type": "string"
+        },
+        "senderPrivateKeyPassphrase": {
+          "type": "string"
+        },
+        "recipientPublicKey": {
+          "type": "string"
+        },
+        "recipientPrivateKey": {
+          "type": "string"
+        },
+        "recipientPrivateKeyPassphrase": {
+          "type": "string"
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "required": ["method", "baseUrl"],
+      "additionalProperties": false,
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+        },
+        "baseUrl": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "query": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "body": true
+        ,
+        "transform": {
+          "$ref": "#/$defs/requestTransform"
+        }
+      }
+    },
+    "requestTransform": {
+      "type": "object",
+      "required": ["type", "output"],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["pgp"]
+        },
+        "algorithm": {
+          "type": "string",
+          "enum": ["pgp", "fake"]
+        },
+        "plaintextFormat": {
+          "type": "string"
+        },
+        "output": {
+          "$ref": "#/$defs/transformOutput"
+        }
+      }
+    },
+    "transformOutput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["raw", "jsonField"]
+        },
+        "field": {
+          "type": "string"
+        }
+      }
+    },
+    "expect": {
+      "type": "object",
+      "required": ["status"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "integer",
+          "minimum": 100,
+          "maximum": 599
+        },
+        "jsonPath": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "decrypt": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/decrypt"
+          }
+        },
+        "validations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/validation"
+          }
+        }
+      }
+    },
+    "decrypt": {
+      "type": "object",
+      "required": ["name", "input"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "algorithm": {
+          "type": "string"
+        },
+        "plaintextFormat": {
+          "type": "string"
+        },
+        "input": {
+          "$ref": "#/$defs/decryptInput"
+        }
+      }
+    },
+    "decryptInput": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "mode": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      }
+    },
+    "validation": {
+      "type": "object",
+      "required": ["source", "path", "operator"],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operator": {
+          "type": "string",
+          "enum": ["equals", "exists"]
+        },
+        "expected": true
+      }
+    },
+    "extractValue": {
+      "type": "object",
+      "required": ["source", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

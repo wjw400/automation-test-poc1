@@ -1,0 +1,132 @@
+export type Project = {
+  id: string
+  code: string
+  name: string
+  description: string
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type Environment = {
+  id: string
+  projectId: string
+  name: string
+  baseUrl: string
+  variables: Record<string, string>
+  status: string
+}
+
+export type Profile = {
+  id: string
+  projectId: string
+  name: string
+  type: string
+  senderPublicKey?: string | null
+  senderPrivateKey?: string | null
+  senderPrivateKeyPassphrase?: string | null
+  recipientPublicKey?: string | null
+  recipientPrivateKey?: string | null
+  recipientPrivateKeyPassphrase?: string | null
+  enabled: boolean
+}
+
+export type CaseRecord = {
+  id: string
+  projectId: string
+  name: string
+  code: string
+  description: string
+  tags: string[]
+  dslVersion: string
+  content: string
+  status: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type ReportRequest = {
+  method: string
+  url: string
+  headers: Record<string, string>
+  body: unknown
+}
+
+export type ReportResponse = {
+  statusCode: number
+  headers: Record<string, string[]>
+  body: string
+}
+
+export type ValidationReport = {
+  status: string
+  type: string
+  target: string
+  expected: unknown
+  actual: unknown
+  message: string
+}
+
+export type StepRun = {
+  index: number
+  name: string
+  profile: string
+  status: string
+  errorMessage?: string | null
+  request: ReportRequest | null
+  response: ReportResponse | null
+  decryptedPayloads: Record<string, unknown>
+  validations: ValidationReport[]
+  extractedValues: Record<string, unknown>
+}
+
+export type RunRecord = {
+  id: string
+  projectId: string
+  caseId: string
+  environmentId?: string | null
+  profileId?: string | null
+  triggeredBy: string
+  status: string
+  startedAt: string
+  finishedAt: string
+  durationMs: number
+  errorMessage?: string | null
+  steps: StepRun[]
+}
+
+export type SaveCaseInput = {
+  name: string
+  code: string
+  description: string
+  tags: string[]
+  dslVersion: string
+  content: string
+  status: string
+}
+
+export type SaveEnvironmentInput = {
+  name: string
+  baseUrl: string
+  variables: Record<string, string>
+  status: string
+}
+
+export type SaveProfileInput = {
+  name: string
+  type: string
+  senderPublicKey: string
+  senderPrivateKey: string
+  senderPrivateKeyPassphrase: string
+  recipientPublicKey: string
+  recipientPrivateKey: string
+  recipientPrivateKeyPassphrase: string
+  enabled: boolean
+}
+
+export type StartRunInput = {
+  caseId: string
+  environmentId?: string
+  profileId?: string
+  triggeredBy?: string
+}

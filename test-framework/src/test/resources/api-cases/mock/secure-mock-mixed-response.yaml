@@ -1,0 +1,64 @@
+name: Secure mock service mixed response
+description: Example case against the local mock secure backend.
+tags:
+  - mock-service
+  - mixed-response
+
+variables:
+  baseUrl: http://localhost:8081
+
+profiles:
+  secureEcho:
+    senderPublicKey: classpath:keys/server-public.asc
+    senderPrivateKey: classpath:keys/client-private.asc
+    senderPrivateKeyPassphrase: demo-client-passphrase
+    recipientPublicKey: classpath:keys/server-public.asc
+    recipientPrivateKey: classpath:keys/client-private.asc
+    recipientPrivateKeyPassphrase: demo-client-passphrase
+
+steps:
+  - name: Validate local secure mock response
+    profile: secureEcho
+    request:
+      method: POST
+      baseUrl: ${baseUrl}
+      path: /secure/json-field
+      query:
+        field: bizData
+      headers:
+        Content-Type: application/json
+      body:
+        customerId: C1
+        amount: 88
+      transform:
+        type: pgp
+        algorithm: pgp
+        plaintextFormat: json
+        output:
+          mode: jsonField
+          field: bizData
+    expect:
+      status: 200
+      decrypt:
+        - name: securePayload
+          input:
+            path: $.payload
+          algorithm: pgp
+          plaintextFormat: json
+      validations:
+        - source: raw
+          path: $.code
+          operator: equals
+          expected: SUCCESS
+        - source: raw
+          path: $.fieldUsed
+          operator: equals
+          expected: bizData
+        - source: decrypted.securePayload
+          path: $.result
+          operator: equals
+          expected: ACCEPTED
+        - source: decrypted.securePayload
+          path: $.customerId
+          operator: equals
+          expected: C1

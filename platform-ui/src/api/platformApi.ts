@@ -1,0 +1,85 @@
+import { apiClient } from './client'
+import type {
+  CaseRecord,
+  Environment,
+  Profile,
+  Project,
+  RunRecord,
+  SaveCaseInput,
+  SaveEnvironmentInput,
+  SaveProfileInput,
+  StartRunInput,
+} from '../types/platform'
+
+export const platformApi = {
+  async listProjects() {
+    const { data } = await apiClient.get<Project[]>('/projects')
+    return data
+  },
+
+  async listCases(projectId: string) {
+    const { data } = await apiClient.get<CaseRecord[]>(`/projects/${projectId}/cases`)
+    return data
+  },
+
+  async getCase(caseId: string) {
+    const { data } = await apiClient.get<CaseRecord>(`/cases/${caseId}`)
+    return data
+  },
+
+  async createCase(projectId: string, payload: SaveCaseInput) {
+    const { data } = await apiClient.post<CaseRecord>(`/projects/${projectId}/cases`, payload)
+    return data
+  },
+
+  async updateCase(projectId: string, caseId: string, payload: SaveCaseInput) {
+    const { data } = await apiClient.put<CaseRecord>(
+      `/projects/${projectId}/cases/${caseId}`,
+      payload,
+    )
+    return data
+  },
+
+  async listEnvironments(projectId: string) {
+    const { data } = await apiClient.get<Environment[]>(
+      `/projects/${projectId}/environments`,
+    )
+    return data
+  },
+
+  async createEnvironment(projectId: string, payload: SaveEnvironmentInput) {
+    const { data } = await apiClient.post<Environment>(
+      `/projects/${projectId}/environments`,
+      payload,
+    )
+    return data
+  },
+
+  async listProfiles(projectId: string) {
+    const { data } = await apiClient.get<Profile[]>(`/projects/${projectId}/profiles`)
+    return data
+  },
+
+  async createProfile(projectId: string, payload: SaveProfileInput) {
+    const { data } = await apiClient.post<Profile>(
+      `/projects/${projectId}/profiles`,
+      payload,
+    )
+    return data
+  },
+
+  async listRuns() {
+    const { data } = await apiClient.get<RunRecord[]>('/runs')
+    return data
+  },
+
+  async getRun(runId: string) {
+    const { data } = await apiClient.get<RunRecord>(`/runs/${runId}`)
+    return data
+  },
+
+  async startRun(payload: StartRunInput) {
+    const { data } = await apiClient.post<RunRecord>('/runs', payload)
+    return data
+  },
+}

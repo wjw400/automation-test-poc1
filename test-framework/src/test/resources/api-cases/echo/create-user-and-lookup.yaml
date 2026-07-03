@@ -1,0 +1,48 @@
+name: Create user and lookup by extracted value
+description: Multi-step API case that shares extracted context between API calls.
+tags:
+  - poc
+  - multi-step
+
+variables:
+  baseUrl: https://postman-echo.com
+  userName: Alice
+  email: poc_${random.uuid}@example.com
+
+profiles:
+  clientToServer:
+    senderPrivateKey: classpath:keys/client-private.asc
+    recipientPublicKey: classpath:keys/server-public.asc
+
+steps:
+  - name: Create user through echo API
+    profile: clientToServer
+    request:
+      method: POST
+      baseUrl: ${baseUrl}
+      path: /post
+      headers:
+        Content-Type: application/json
+      body:
+        name: ${userName}
+        email: ${email}
+    expect:
+      status: 200
+      jsonPath:
+        $.json.name: ${userName}
+        $.json.email: ${email}
+    extract:
+      createdEmail: $.json.email
+
+  - name: Lookup user by extracted email
+    profile: clientToServer
+    request:
+      method: GET
+      baseUrl: ${baseUrl}
+      path: /get
+      query:
+        email: ${createdEmail}
+    expect:
+      status: 200
+      jsonPath:
+        $.args.email: ${createdEmail}
