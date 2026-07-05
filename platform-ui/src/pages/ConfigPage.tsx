@@ -131,7 +131,7 @@ export function ConfigPage() {
                 title: 'Variables',
                 dataIndex: 'variables',
                 render: (value: Record<string, string>) => (
-                  <code>{JSON.stringify(value)}</code>
+                  <Text type="secondary">{formatVariableCount(value)}</Text>
                 ),
               },
               {
@@ -223,7 +223,7 @@ export function ConfigPage() {
               onChange={(value) => setEnvironmentDraft({ ...environmentDraft, status: value })}
             />
           </Form.Item>
-          <Form.Item label="Variables (JSON)">
+          <Form.Item label="Variables" extra="Paste a JSON object for runtime variables. A structured editor can replace this later.">
             <Input.TextArea
               rows={8}
               value={variablePreview}
@@ -340,4 +340,9 @@ export function ConfigPage() {
       </Drawer>
     </div>
   )
+}
+
+function formatVariableCount(value?: Record<string, string>) {
+  const count = Object.keys(value ?? {}).length
+  return count === 1 ? '1 variable' : `${count} variables`
 }

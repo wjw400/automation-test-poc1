@@ -1,4 +1,4 @@
-import { ApartmentOutlined, ApiOutlined, DatabaseOutlined, ExperimentOutlined, PlaySquareOutlined } from '@ant-design/icons'
+import { ApartmentOutlined, ApiOutlined, DatabaseOutlined, ExperimentOutlined, PlaySquareOutlined, ProfileOutlined } from '@ant-design/icons'
 import { App as AntApp, ConfigProvider, Layout, Menu, Typography } from 'antd'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
@@ -7,6 +7,7 @@ import { CasesPage } from './pages/CasesPage'
 import { ApiCatalogPage } from './pages/ApiCatalogPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { RunsPage } from './pages/RunsPage'
+import { SuitesPage } from './pages/SuitesPage'
 
 const queryClient = new QueryClient()
 const { Header, Sider, Content } = Layout
@@ -17,6 +18,8 @@ function AppShell() {
 
   const selectedKey = location.pathname.startsWith('/cases')
     ? '/cases'
+    : location.pathname.startsWith('/suites')
+      ? '/suites'
     : location.pathname.startsWith('/runs')
       ? '/runs'
       : location.pathname.startsWith('/apis')
@@ -41,6 +44,7 @@ function AppShell() {
             { key: '/projects', icon: <ApartmentOutlined />, label: 'Projects' },
             { key: '/apis', icon: <ApiOutlined />, label: 'APIs' },
             { key: '/cases', icon: <ExperimentOutlined />, label: 'Cases' },
+            { key: '/suites', icon: <ProfileOutlined />, label: 'Suites' },
             { key: '/runs', icon: <PlaySquareOutlined />, label: 'Runs' },
             { key: '/config', icon: <DatabaseOutlined />, label: 'Config' },
           ]}
@@ -53,7 +57,7 @@ function AppShell() {
             <Typography.Text strong>Platform POC</Typography.Text>
             <Typography.Text type="secondary">
               {' '}
-              | YAML cases, secure profiles, step evidence
+              | API assets, scenarios, execution evidence
             </Typography.Text>
           </div>
         </Header>
@@ -63,6 +67,7 @@ function AppShell() {
             <Route path="/projects" element={<ProjectsPage />} />
             <Route path="/apis" element={<ApiCatalogPage />} />
             <Route path="/cases" element={<CasesPage />} />
+            <Route path="/suites" element={<SuitesPage />} />
             <Route path="/runs" element={<RunsPage />} />
             <Route path="/config" element={<ConfigPage />} />
           </Routes>

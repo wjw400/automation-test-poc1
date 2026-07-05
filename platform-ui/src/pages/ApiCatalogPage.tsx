@@ -72,7 +72,7 @@ export function ApiCatalogPage() {
       <section className="hero-band">
         <div>
           <h1>API Catalog</h1>
-          <p>Import OpenAPI 3.x YAML once, then browse the selected API through Stoplight Elements.</p>
+          <p>Manage imported OpenAPI assets and inspect reusable operations.</p>
         </div>
         <Space wrap>
           <Select

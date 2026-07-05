@@ -1,5 +1,6 @@
 import { apiClient } from './client'
 import type {
+  ApiOperationRecord,
   ApiSpecRecord,
   CaseRecord,
   Environment,
@@ -9,7 +10,9 @@ import type {
   SaveCaseInput,
   SaveEnvironmentInput,
   SaveProfileInput,
+  SaveSuiteInput,
   StartRunInput,
+  SuiteRecord,
 } from '../types/platform'
 
 export const platformApi = {
@@ -39,6 +42,28 @@ export const platformApi = {
       payload,
     )
     return data
+  },
+
+  async listSuites(projectId: string) {
+    const { data } = await apiClient.get<SuiteRecord[]>(`/projects/${projectId}/suites`)
+    return data
+  },
+
+  async createSuite(projectId: string, payload: SaveSuiteInput) {
+    const { data } = await apiClient.post<SuiteRecord>(`/projects/${projectId}/suites`, payload)
+    return data
+  },
+
+  async updateSuite(projectId: string, suiteId: string, payload: SaveSuiteInput) {
+    const { data } = await apiClient.put<SuiteRecord>(
+      `/projects/${projectId}/suites/${suiteId}`,
+      payload,
+    )
+    return data
+  },
+
+  async deleteSuite(suiteId: string) {
+    await apiClient.delete(`/suites/${suiteId}`)
   },
 
   async listEnvironments(projectId: string) {
@@ -101,6 +126,11 @@ export const platformApi = {
         },
       },
     )
+    return data
+  },
+
+  async listOperations(projectId: string) {
+    const { data } = await apiClient.get<ApiOperationRecord[]>(`/projects/${projectId}/operations`)
     return data
   },
 

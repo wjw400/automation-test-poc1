@@ -5,11 +5,14 @@ import com.example.poc.platform.catalog.PlatformCatalogService.CaseRecord;
 import com.example.poc.platform.catalog.PlatformCatalogService.EnvironmentRecord;
 import com.example.poc.platform.catalog.PlatformCatalogService.ProfileRecord;
 import com.example.poc.platform.catalog.PlatformCatalogService.ProjectRecord;
+import com.example.poc.platform.catalog.PlatformCatalogService.SuiteRecord;
 import com.example.poc.platform.catalog.PlatformCatalogService.UpsertCaseRequest;
 import com.example.poc.platform.catalog.PlatformCatalogService.UpsertEnvironmentRequest;
 import com.example.poc.platform.catalog.PlatformCatalogService.UpsertProfileRequest;
+import com.example.poc.platform.catalog.PlatformCatalogService.UpsertSuiteRequest;
 import jakarta.validation.Valid;
 import java.util.List;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -86,5 +89,38 @@ public class CatalogController {
                 request.dslVersion(),
                 request.content(),
                 request.status()));
+    }
+
+    @GetMapping("/projects/{projectId}/suites")
+    public List<SuiteRecord> listSuites(@PathVariable("projectId") String projectId) {
+        return catalogService.listSuites(projectId);
+    }
+
+    @GetMapping("/suites/{suiteId}")
+    public SuiteRecord getSuite(@PathVariable("suiteId") String suiteId) {
+        return catalogService.getSuite(suiteId);
+    }
+
+    @PostMapping("/projects/{projectId}/suites")
+    public SuiteRecord createSuite(@PathVariable("projectId") String projectId, @Valid @RequestBody UpsertSuiteRequest request) {
+        return catalogService.saveSuite(projectId, request);
+    }
+
+    @PutMapping("/projects/{projectId}/suites/{suiteId}")
+    public SuiteRecord updateSuite(
+            @PathVariable("projectId") String projectId,
+            @PathVariable("suiteId") String suiteId,
+            @Valid @RequestBody UpsertSuiteRequest request) {
+        return catalogService.saveSuite(projectId, new UpsertSuiteRequest(
+                suiteId,
+                request.name(),
+                request.description(),
+                request.status(),
+                request.cases()));
+    }
+
+    @DeleteMapping("/suites/{suiteId}")
+    public void deleteSuite(@PathVariable("suiteId") String suiteId) {
+        catalogService.deleteSuite(suiteId);
     }
 }

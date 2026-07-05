@@ -45,6 +45,30 @@ export type CaseRecord = {
   updatedAt: string
 }
 
+export type SuiteCaseRecord = {
+  id: string
+  caseId: string
+  caseName: string
+  caseCode: string
+  alias?: string | null
+  order: number
+  enabled: boolean
+  variableOverrides: Record<string, unknown>
+  environmentId?: string | null
+  profileId?: string | null
+}
+
+export type SuiteRecord = {
+  id: string
+  projectId: string
+  name: string
+  description?: string | null
+  status: string
+  cases: SuiteCaseRecord[]
+  createdAt: string
+  updatedAt: string
+}
+
 export type ReportRequest = {
   method: string
   url: string
@@ -103,6 +127,24 @@ export type SaveCaseInput = {
   dslVersion: string
   content: string
   status: string
+}
+
+export type SaveSuiteCaseInput = {
+  id?: string
+  caseId: string
+  alias?: string
+  order: number
+  enabled: boolean
+  variableOverrides: Record<string, unknown>
+  environmentId?: string
+  profileId?: string
+}
+
+export type SaveSuiteInput = {
+  name: string
+  description: string
+  status: string
+  cases: SaveSuiteCaseInput[]
 }
 
 export type SaveEnvironmentInput = {

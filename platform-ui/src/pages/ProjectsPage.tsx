@@ -1,3 +1,4 @@
+import { ApiOutlined, DatabaseOutlined, ExperimentOutlined, PlaySquareOutlined, ProfileOutlined } from '@ant-design/icons'
 import { Alert, App, Button, Space, Table, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useQuery } from '@tanstack/react-query'
@@ -45,7 +46,7 @@ export function ProjectsPage() {
       <section className="hero-band">
         <div>
           <h1>Projects</h1>
-          <p>Use projects to hold cases, execution profiles, and run history.</p>
+          <p>Select a workspace for API assets, scenarios, configuration, and runs.</p>
         </div>
       </section>
 
@@ -53,7 +54,7 @@ export function ProjectsPage() {
         <div className="panel-title-row">
           <div>
             <h2 className="panel-title">Workspace Projects</h2>
-            <Text type="secondary">Pick a project and jump straight into cases or configuration.</Text>
+            <Text type="secondary">Open the project context before editing scenarios or runtime settings.</Text>
           </div>
         </div>
         {projectsQuery.isError ? (
@@ -73,11 +74,24 @@ export function ProjectsPage() {
             {
               title: 'Actions',
               key: 'actions',
-              width: 220,
+              width: 440,
               render: (_value, record) => (
-                <Space>
-                  <Button onClick={() => navigate(`/cases?projectId=${record.id}`)}>Open Cases</Button>
-                  <Button onClick={() => navigate(`/config?projectId=${record.id}`)}>Config</Button>
+                <Space wrap size={[8, 8]}>
+                  <Button icon={<ApiOutlined />} onClick={() => navigate(`/apis?projectId=${record.id}`)}>
+                    APIs
+                  </Button>
+                  <Button icon={<ExperimentOutlined />} onClick={() => navigate(`/cases?projectId=${record.id}`)}>
+                    Cases
+                  </Button>
+                  <Button icon={<ProfileOutlined />} onClick={() => navigate(`/suites?projectId=${record.id}`)}>
+                    Suites
+                  </Button>
+                  <Button icon={<PlaySquareOutlined />} onClick={() => navigate(`/runs?projectId=${record.id}`)}>
+                    Runs
+                  </Button>
+                  <Button icon={<DatabaseOutlined />} onClick={() => navigate(`/config?projectId=${record.id}`)}>
+                    Config
+                  </Button>
                 </Space>
               ),
             },

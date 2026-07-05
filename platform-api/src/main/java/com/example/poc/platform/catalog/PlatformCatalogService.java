@@ -5,10 +5,15 @@ import com.example.poc.platform.persistence.entity.CaseEntity;
 import com.example.poc.platform.persistence.entity.EnvironmentEntity;
 import com.example.poc.platform.persistence.entity.ProfileEntity;
 import com.example.poc.platform.persistence.entity.ProjectEntity;
+import com.example.poc.platform.persistence.entity.SuiteCaseEntity;
+import com.example.poc.platform.persistence.entity.SuiteEntity;
 import com.example.poc.platform.persistence.repo.CaseRepository;
 import com.example.poc.platform.persistence.repo.EnvironmentRepository;
 import com.example.poc.platform.persistence.repo.ProfileRepository;
 import com.example.poc.platform.persistence.repo.ProjectRepository;
+import com.example.poc.platform.persistence.repo.SuiteCaseRepository;
+import com.example.poc.platform.persistence.repo.SuiteRepository;
+import com.fasterxml.jackson.core.type.TypeReference;
 import jakarta.annotation.PostConstruct;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -16,6 +21,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -28,6 +34,8 @@ public class PlatformCatalogService {
     private final EnvironmentRepository environmentRepository;
     private final ProfileRepository profileRepository;
     private final CaseRepository caseRepository;
+    private final SuiteRepository suiteRepository;
+    private final SuiteCaseRepository suiteCaseRepository;
     private final JsonCodec jsonCodec;
 
     public PlatformCatalogService(
@@ -35,11 +43,15 @@ public class PlatformCatalogService {
             EnvironmentRepository environmentRepository,
             ProfileRepository profileRepository,
             CaseRepository caseRepository,
+            SuiteRepository suiteRepository,
+            SuiteCaseRepository suiteCaseRepository,
             JsonCodec jsonCodec) {
         this.projectRepository = projectRepository;
         this.environmentRepository = environmentRepository;
         this.profileRepository = profileRepository;
         this.caseRepository = caseRepository;
+        this.suiteRepository = suiteRepository;
+        this.suiteCaseRepository = suiteCaseRepository;
         this.jsonCodec = jsonCodec;
     }
 
@@ -61,6 +73,7 @@ public class PlatformCatalogService {
 
         seedCase(project.getId(), "echo-create-user", "Echo Create User", "echo/create-user.yaml");
         seedCase(project.getId(), "secure-mixed-response", "Secure Mixed Response", "mock/secure-mock-mixed-response.yaml");
+        ensureDemoSuite(project.getId());
     }
 
     @Transactional(readOnly = true)
@@ -166,6 +179,61 @@ public class PlatformCatalogService {
     }
 
     @Transactional(readOnly = true)
+    public List<SuiteRecord> listSuites(String projectId) {
+        requireProject(projectId);
+        return suiteRepository.findByProjectIdOrderByUpdatedAtDesc(projectId).stream()
+                .map(this::toSuiteRecord)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public SuiteRecord getSuite(String suiteId) {
+        return toSuiteRecord(requireSuite(suiteId));
+    }
+
+    @Transactional
+    public SuiteRecord saveSuite(String projectId, @Valid UpsertSuiteRequest request) {
+        requireProject(projectId);
+        SuiteEntity entity = request.id() == null || request.id().isBlank()
+                ? new SuiteEntity()
+                : requireSuite(request.id());
+        entity.setProjectId(projectId);
+        entity.setName(request.name());
+        entity.setDescription(request.description());
+        entity.setStatus(defaultStatus(request.status()));
+        SuiteEntity saved = suiteRepository.save(entity);
+
+        suiteCaseRepository.deleteBySuiteId(saved.getId());
+        List<UpsertSuiteCaseRequest> cases = request.cases() == null ? List.of() : request.cases();
+        for (int i = 0; i < cases.size(); i++) {
+            UpsertSuiteCaseRequest suiteCaseRequest = cases.get(i);
+            CaseEntity testCase = requireCase(suiteCaseRequest.caseId());
+            if (!projectId.equals(testCase.getProjectId())) {
+                throw new IllegalArgumentException("Case does not belong to project: " + suiteCaseRequest.caseId());
+            }
+            SuiteCaseEntity suiteCase = new SuiteCaseEntity();
+            suiteCase.setSuiteId(saved.getId());
+            suiteCase.setCaseId(suiteCaseRequest.caseId());
+            suiteCase.setAlias(suiteCaseRequest.alias());
+            suiteCase.setCaseOrder(suiteCaseRequest.order() == null ? i + 1 : suiteCaseRequest.order());
+            suiteCase.setEnabled(suiteCaseRequest.enabled() == null || suiteCaseRequest.enabled());
+            suiteCase.setVariableOverridesJson(jsonCodec.write(
+                    suiteCaseRequest.variableOverrides() == null ? Map.of() : suiteCaseRequest.variableOverrides()));
+            suiteCase.setEnvironmentId(blankToNull(suiteCaseRequest.environmentId()));
+            suiteCase.setProfileId(blankToNull(suiteCaseRequest.profileId()));
+            suiteCaseRepository.save(suiteCase);
+        }
+
+        return toSuiteRecord(saved);
+    }
+
+    @Transactional
+    public void deleteSuite(String suiteId) {
+        SuiteEntity suite = requireSuite(suiteId);
+        suiteRepository.delete(suite);
+    }
+
+    @Transactional(readOnly = true)
     public ProjectRecord requireProjectRecord(String projectId) {
         return toProjectRecord(requireProject(projectId));
     }
@@ -186,6 +254,36 @@ public class PlatformCatalogService {
         entity.setContent(content);
         entity.setStatus("ACTIVE");
         caseRepository.save(entity);
+    }
+
+    private void ensureDemoSuite(String projectId) {
+        boolean exists = suiteRepository.findByProjectIdOrderByUpdatedAtDesc(projectId).stream()
+                .anyMatch(suite -> "Secure Smoke Suite".equals(suite.getName()));
+        if (exists) {
+            return;
+        }
+        List<CaseEntity> cases = new ArrayList<>();
+        caseRepository.findByProjectIdAndCode(projectId, "secure-mixed-response").ifPresent(cases::add);
+        caseRepository.findByProjectIdAndCode(projectId, "echo-create-user").ifPresent(cases::add);
+        if (cases.isEmpty()) {
+            return;
+        }
+        SuiteEntity suite = new SuiteEntity();
+        suite.setProjectId(projectId);
+        suite.setName("Secure Smoke Suite");
+        suite.setDescription("Demo suite that references existing seeded cases");
+        suite.setStatus("ACTIVE");
+        SuiteEntity savedSuite = suiteRepository.save(suite);
+        for (int i = 0; i < cases.size(); i++) {
+            SuiteCaseEntity suiteCase = new SuiteCaseEntity();
+            suiteCase.setSuiteId(savedSuite.getId());
+            suiteCase.setCaseId(cases.get(i).getId());
+            suiteCase.setAlias(cases.get(i).getName());
+            suiteCase.setCaseOrder(i + 1);
+            suiteCase.setEnabled(true);
+            suiteCase.setVariableOverridesJson(jsonCodec.write(Map.of()));
+            suiteCaseRepository.save(suiteCase);
+        }
     }
 
     private void ensureEnvironment(String projectId) {
@@ -243,6 +341,11 @@ public class PlatformCatalogService {
                 .orElseThrow(() -> new NoSuchElementException("Case not found: " + caseId));
     }
 
+    private SuiteEntity requireSuite(String suiteId) {
+        return suiteRepository.findById(suiteId)
+                .orElseThrow(() -> new NoSuchElementException("Suite not found: " + suiteId));
+    }
+
     private ProjectRecord toProjectRecord(ProjectEntity entity) {
         return new ProjectRecord(
                 entity.getId(),
@@ -294,8 +397,42 @@ public class PlatformCatalogService {
                 entity.getUpdatedAt());
     }
 
+    private SuiteRecord toSuiteRecord(SuiteEntity entity) {
+        List<SuiteCaseRecord> cases = suiteCaseRepository.findBySuiteIdOrderByCaseOrderAsc(entity.getId()).stream()
+                .map(this::toSuiteCaseRecord)
+                .toList();
+        return new SuiteRecord(
+                entity.getId(),
+                entity.getProjectId(),
+                entity.getName(),
+                entity.getDescription(),
+                entity.getStatus(),
+                cases,
+                entity.getCreatedAt(),
+                entity.getUpdatedAt());
+    }
+
+    private SuiteCaseRecord toSuiteCaseRecord(SuiteCaseEntity entity) {
+        CaseEntity testCase = requireCase(entity.getCaseId());
+        return new SuiteCaseRecord(
+                entity.getId(),
+                entity.getCaseId(),
+                testCase.getName(),
+                testCase.getCode(),
+                entity.getAlias(),
+                entity.getCaseOrder(),
+                entity.isEnabled(),
+                jsonCodec.read(entity.getVariableOverridesJson(), new TypeReference<Map<String, Object>>() {}, Map.of()),
+                entity.getEnvironmentId(),
+                entity.getProfileId());
+    }
+
     private String defaultStatus(String status) {
         return status == null || status.isBlank() ? "ACTIVE" : status;
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 
     private String readOptionalFile(String relativePath) {
@@ -364,6 +501,30 @@ public class PlatformCatalogService {
             Instant updatedAt) {
     }
 
+    public record SuiteRecord(
+            String id,
+            String projectId,
+            String name,
+            String description,
+            String status,
+            List<SuiteCaseRecord> cases,
+            Instant createdAt,
+            Instant updatedAt) {
+    }
+
+    public record SuiteCaseRecord(
+            String id,
+            String caseId,
+            String caseName,
+            String caseCode,
+            String alias,
+            Integer order,
+            boolean enabled,
+            Map<String, Object> variableOverrides,
+            String environmentId,
+            String profileId) {
+    }
+
     public record UpsertEnvironmentRequest(
             String id,
             @NotBlank String name,
@@ -394,5 +555,24 @@ public class PlatformCatalogService {
             String dslVersion,
             @NotBlank String content,
             String status) {
+    }
+
+    public record UpsertSuiteRequest(
+            String id,
+            @NotBlank String name,
+            String description,
+            String status,
+            List<UpsertSuiteCaseRequest> cases) {
+    }
+
+    public record UpsertSuiteCaseRequest(
+            String id,
+            @NotBlank String caseId,
+            String alias,
+            Integer order,
+            Boolean enabled,
+            Map<String, Object> variableOverrides,
+            String environmentId,
+            String profileId) {
     }
 }
