@@ -91,6 +91,11 @@ public class CatalogController {
                 request.status()));
     }
 
+    @DeleteMapping("/cases/{caseId}")
+    public void deleteCase(@PathVariable("caseId") String caseId) {
+        catalogService.deleteCase(caseId);
+    }
+
     @GetMapping("/projects/{projectId}/suites")
     public List<SuiteRecord> listSuites(@PathVariable("projectId") String projectId) {
         return catalogService.listSuites(projectId);

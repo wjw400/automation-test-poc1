@@ -151,7 +151,7 @@ public class PlatformCatalogService {
     @Transactional(readOnly = true)
     public List<CaseRecord> listCases(String projectId) {
         requireProject(projectId);
-        return caseRepository.findByProjectIdOrderByUpdatedAtDesc(projectId).stream()
+        return caseRepository.findByProjectIdAndStatusNotOrderByUpdatedAtDesc(projectId, "DELETED").stream()
                 .map(this::toCaseRecord)
                 .toList();
     }
@@ -176,6 +176,14 @@ public class PlatformCatalogService {
         entity.setContent(request.content());
         entity.setStatus(defaultStatus(request.status()));
         return toCaseRecord(caseRepository.save(entity));
+    }
+
+    @Transactional
+    public void deleteCase(String caseId) {
+        CaseEntity testCase = requireCase(caseId);
+        suiteCaseRepository.deleteByCaseId(testCase.getId());
+        testCase.setStatus("DELETED");
+        caseRepository.save(testCase);
     }
 
     @Transactional(readOnly = true)
@@ -239,12 +247,14 @@ public class PlatformCatalogService {
     }
 
     private void seedCase(String projectId, String code, String name, String relativePath) {
+        if (caseRepository.findByProjectIdAndCode(projectId, code).isPresent()) {
+            return;
+        }
         String content = readOptionalFile("test-framework/src/test/resources/api-cases/" + relativePath);
         if (content == null || content.isBlank()) {
             return;
         }
-        CaseEntity entity = caseRepository.findByProjectIdAndCode(projectId, code)
-                .orElseGet(CaseEntity::new);
+        CaseEntity entity = new CaseEntity();
         entity.setProjectId(projectId);
         entity.setName(name);
         entity.setCode(code);
@@ -263,8 +273,12 @@ public class PlatformCatalogService {
             return;
         }
         List<CaseEntity> cases = new ArrayList<>();
-        caseRepository.findByProjectIdAndCode(projectId, "secure-mixed-response").ifPresent(cases::add);
-        caseRepository.findByProjectIdAndCode(projectId, "echo-create-user").ifPresent(cases::add);
+        caseRepository.findByProjectIdAndCode(projectId, "secure-mixed-response")
+                .filter(testCase -> !"DELETED".equals(testCase.getStatus()))
+                .ifPresent(cases::add);
+        caseRepository.findByProjectIdAndCode(projectId, "echo-create-user")
+                .filter(testCase -> !"DELETED".equals(testCase.getStatus()))
+                .ifPresent(cases::add);
         if (cases.isEmpty()) {
             return;
         }

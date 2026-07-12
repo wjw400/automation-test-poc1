@@ -44,6 +44,10 @@ export const platformApi = {
     return data
   },
 
+  async deleteCase(caseId: string) {
+    await apiClient.delete(`/cases/${caseId}`)
+  },
+
   async listSuites(projectId: string) {
     const { data } = await apiClient.get<SuiteRecord[]>(`/projects/${projectId}/suites`)
     return data

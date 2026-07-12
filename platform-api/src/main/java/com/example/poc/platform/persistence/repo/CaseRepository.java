@@ -7,5 +7,6 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface CaseRepository extends JpaRepository<CaseEntity, String> {
     List<CaseEntity> findByProjectIdOrderByUpdatedAtDesc(String projectId);
+    List<CaseEntity> findByProjectIdAndStatusNotOrderByUpdatedAtDesc(String projectId, String status);
     Optional<CaseEntity> findByProjectIdAndCode(String projectId, String code);
 }
