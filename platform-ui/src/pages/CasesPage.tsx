@@ -3,18 +3,15 @@ import {
   App,
   AutoComplete,
   Button,
-  Drawer,
   Input,
   Modal,
   Popover,
   Select,
   Space,
-  Tag,
   Typography,
 } from 'antd'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  ApiOutlined,
   ControlOutlined,
   DeleteOutlined,
   DownOutlined,
@@ -31,9 +28,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { CaseDesigner } from '../components/CaseDesigner'
-import { JsonPane } from '../components/JsonPane'
 import { RunDetail } from '../components/RunDetail'
-import { StoplightApi } from '../components/StoplightApi'
 import { platformApi } from '../api/platformApi'
 import { StatusPill } from '../components/StatusPill'
 import { parseDsl, stringifyDsl } from '../utils/caseDsl'
@@ -75,7 +70,6 @@ export function CasesPage() {
   const [profileId, setProfileId] = useState<string>()
   const [isCreating, setIsCreating] = useState(false)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
-  const [isApiReferenceDrawerOpen, setIsApiReferenceDrawerOpen] = useState(false)
   const [createOperationId, setCreateOperationId] = useState<string>()
   const [caseToMove, setCaseToMove] = useState<CaseRecord>()
   const [moveFolderPath, setMoveFolderPath] = useState('')
@@ -176,24 +170,6 @@ export function CasesPage() {
     ? Math.min(Math.max(requestedStepIndex, 0), Math.max(draftSteps.length - 1, 0))
     : 0
   const selectedEditorView = selectedStepParam != null && draftSteps[activeStepIndex] ? 'step' : 'case'
-  const selectedDraftStep = draftSteps[activeStepIndex]
-
-  const selectedOperation = useMemo(() => {
-    if (!selectedDraftStep) {
-      return null
-    }
-    const operations = operationsQuery.data ?? []
-    const operationRefId = selectedDraftStep.operation?.id
-    if (operationRefId) {
-      return operations.find((item) => item.id === operationRefId) ?? null
-    }
-    const operationId = selectedDraftStep.operation?.operationId
-    if (operationId) {
-      return operations.find((item) => item.operationId === operationId) ?? null
-    }
-    return null
-  }, [operationsQuery.data, selectedDraftStep])
-
   const latestPersistedCaseRun = useMemo(() => {
     if (!selectedCase?.id) {
       return undefined
@@ -352,28 +328,6 @@ export function CasesPage() {
     },
   })
 
-  const saveDescriptionMutation = useMutation({
-    mutationFn: async ({ record, description }: { record: CaseRecord; description: string }) => {
-      if (!selectedProjectId) {
-        throw new Error('Select a project first.')
-      }
-      return platformApi.updateCase(
-        selectedProjectId,
-        record.id,
-        normalizeDraftForSave({
-          ...draftFromCase(record),
-          description,
-        }),
-      )
-    },
-    onSuccess: async () => {
-      await queryClient.invalidateQueries({ queryKey: ['cases', selectedProjectId] })
-    },
-    onError: () => {
-      void message.error('Unable to save description')
-    },
-  })
-
   const saveTitleMutation = useMutation({
     mutationFn: async ({ record, name }: { record: CaseRecord; name: string }) => {
       if (!selectedProjectId) {
@@ -423,12 +377,6 @@ export function CasesPage() {
 
   const handleSelectCase = (record: CaseRecord) => {
     setSearchParams({ projectId: selectedProjectId!, caseId: record.id })
-    setIsCreating(false)
-  }
-
-  const handleSelectStep = (record: CaseRecord, stepIndex: number) => {
-    setSearchParams({ projectId: selectedProjectId!, caseId: record.id, step: String(stepIndex) })
-    setSelectedEvidenceStepIndex(stepIndex + 1)
     setIsCreating(false)
   }
 
@@ -497,13 +445,6 @@ export function CasesPage() {
     setMoveFolderPath(record.folderPath ?? '')
   }
 
-  const autoSaveDescription = (description: string) => {
-    if (!selectedCase || isCreating || description === (selectedCase.description ?? '')) {
-      return
-    }
-    void saveDescriptionMutation.mutateAsync({ record: selectedCase, description })
-  }
-
   const autoSaveTitle = (name: string) => {
     if (!selectedCase || isCreating) {
       return
@@ -570,7 +511,7 @@ export function CasesPage() {
 
     const record = node.record
     const isSelectedCase = record.id === selectedCase?.id && !isCreating
-    const steps = node.steps
+    const stepCount = node.stepCount
     const latestRun = latestRunsByCaseId.get(record.id)
 
     return (
@@ -578,7 +519,7 @@ export function CasesPage() {
         <div
           role="button"
           tabIndex={0}
-          className={isSelectedCase && selectedEditorView === 'case' ? 'scenario-case-row active' : 'scenario-case-row'}
+          className={isSelectedCase ? 'scenario-case-row active' : 'scenario-case-row'}
           style={{ paddingLeft: 8 + depth * 14 }}
           onClick={() => handleSelectCase(record)}
           onKeyDown={(event) => {
@@ -591,7 +532,7 @@ export function CasesPage() {
           <FileTextOutlined className="scenario-tree-icon" />
           <span className="scenario-case-copy">
             <span className="scenario-case-name">{record.name}</span>
-            <span className="scenario-case-path">{steps.length} step{steps.length === 1 ? '' : 's'}</span>
+            <span className="scenario-case-path">{stepCount} step{stepCount === 1 ? '' : 's'}</span>
           </span>
           {latestRun ? <span className={`scenario-run-indicator ${latestRun.status.toLowerCase()}`} title={`Last run: ${latestRun.status}`} /> : null}
           <Button
@@ -623,37 +564,6 @@ export function CasesPage() {
             onKeyDown={(event) => event.stopPropagation()}
           />
         </div>
-        {isSelectedCase ? (
-          <div className="scenario-tree-children" style={{ marginLeft: 13 + depth * 14 }}>
-            {steps.length ? steps.map((step, index) => {
-            const active = isSelectedCase && selectedEditorView === 'step' && activeStepIndex === index
-            return (
-              <div
-                key={`${record.id}-step-${index}`}
-                role="button"
-                tabIndex={0}
-                className={active ? 'scenario-step-row active' : 'scenario-step-row'}
-                onClick={() => handleSelectStep(record, index)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' || event.key === ' ') {
-                    event.preventDefault()
-                    handleSelectStep(record, index)
-                  }
-                }}
-              >
-                <ApiOutlined className="scenario-tree-icon" />
-                <span className={`method-pill method-${step.method.toLowerCase()}`}>{step.method}</span>
-                <span className="scenario-case-copy">
-                  <span className="scenario-case-name">{step.name}</span>
-                  <span className="scenario-case-path">{step.path}</span>
-                </span>
-              </div>
-            )
-            }) : (
-              <div className="scenario-empty-step-row">No steps</div>
-            )}
-          </div>
-        ) : null}
       </div>
     )
   }
@@ -806,9 +716,6 @@ export function CasesPage() {
             onSelectCaseOverview={handleSelectCaseOverview}
             onSelectStep={handleSelectDraftStep}
             onActiveStepChange={setSelectedEvidenceStepIndex}
-            onOpenApiReference={() => setIsApiReferenceDrawerOpen(true)}
-            onDescriptionCommit={autoSaveDescription}
-            isDescriptionSaving={saveDescriptionMutation.isPending}
           />
 
           <section
@@ -851,35 +758,6 @@ export function CasesPage() {
         </main>
 
       </div>
-
-      <Drawer
-        open={isApiReferenceDrawerOpen}
-        width={540}
-        title="API Reference"
-        onClose={() => setIsApiReferenceDrawerOpen(false)}
-      >
-        {selectedProjectId && selectedOperation ? (
-          <div className="drawer-stack">
-            <div>
-              <Space wrap size={[8, 8]}>
-                <Tag color="blue">{selectedOperation.method}</Tag>
-                <Text code>{selectedOperation.path}</Text>
-              </Space>
-              <Text strong>{selectedOperation.summary || selectedOperation.operationId || 'Selected operation'}</Text>
-            </div>
-            <JsonPane value={selectedOperation.requestBody} emptyLabel="No request schema" />
-            <JsonPane value={selectedOperation.responses} emptyLabel="No response schema" />
-            <div className="mini-stoplight-shell">
-              <StoplightApi
-                apiDescriptionUrl={platformApi.getApiSpecContentUrl(selectedProjectId, selectedOperation.apiSpecId)}
-              />
-            </div>
-          </div>
-        ) : (
-          <div className="panel-empty">Select a step with a bound operation to inspect its API reference.</div>
-        )}
-      </Drawer>
-
       <Modal
         title="Move Scenario"
         open={Boolean(caseToMove)}
@@ -940,7 +818,7 @@ function createDraftFromOperation(operation: ApiOperationRecord): SaveCaseInput 
     variables: {},
     steps: [
       {
-        name: operation.summary || `${operation.method} ${operation.path}`,
+        name: operation.path,
         type: 'http',
         operation: {
           id: operation.id,
@@ -1057,12 +935,6 @@ function collectFolderPaths(records: CaseRecord[]) {
   return [...paths].sort((left, right) => left.localeCompare(right))
 }
 
-type ExplorerStep = {
-  method: string
-  name: string
-  path: string
-}
-
 type ExplorerFolderNode = {
   type: 'folder'
   key: string
@@ -1073,7 +945,7 @@ type ExplorerFolderNode = {
 type ExplorerCaseNode = {
   type: 'case'
   record: CaseRecord
-  steps: ExplorerStep[]
+  stepCount: number
 }
 
 type ExplorerNode = ExplorerFolderNode | ExplorerCaseNode
@@ -1111,7 +983,7 @@ function buildCaseExplorerTree(records: CaseRecord[]) {
     parent.children.push({
       type: 'case',
       record,
-      steps: getCaseSteps(record),
+      stepCount: getCaseStepCount(record),
     })
   })
 
@@ -1151,14 +1023,10 @@ function normalizeFolderPath(value: string) {
     .join('/')
 }
 
-function getCaseSteps(record: CaseRecord) {
+function getCaseStepCount(record: CaseRecord) {
   const parsed = parseDsl(record.content)
   const steps = Array.isArray(parsed.data?.steps) ? parsed.data.steps : []
-  return steps.map((step: any, index: number) => ({
-    method: String(step?.operation?.method ?? 'HTTP').toUpperCase(),
-    name: String(step?.name ?? `Step ${index + 1}`),
-    path: String(step?.operation?.path ?? 'Select operation'),
-  }))
+  return steps.length
 }
 
 function slugify(value: string) {
