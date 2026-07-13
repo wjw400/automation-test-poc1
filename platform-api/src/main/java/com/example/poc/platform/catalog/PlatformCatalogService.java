@@ -22,6 +22,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
@@ -71,8 +72,8 @@ public class PlatformCatalogService {
         ensureEnvironment(project.getId());
         ensureProfile(project.getId());
 
-        seedCase(project.getId(), "echo-create-user", "Echo Create User", "echo/create-user.yaml");
-        seedCase(project.getId(), "secure-mixed-response", "Secure Mixed Response", "mock/secure-mock-mixed-response.yaml");
+        seedCase(project.getId(), "echo-create-user", "Echo Create User", "echo/create-user.yaml", "Echo");
+        seedCase(project.getId(), "secure-mixed-response", "Secure Mixed Response", "mock/secure-mock-mixed-response.yaml", "Mock/Secure");
         ensureDemoSuite(project.getId());
     }
 
@@ -171,6 +172,7 @@ public class PlatformCatalogService {
         entity.setName(request.name());
         entity.setCode(request.code());
         entity.setDescription(request.description());
+        entity.setFolderPath(normalizeFolderPath(request.folderPath()));
         entity.setTagsJson(jsonCodec.write(request.tags() == null ? List.of() : request.tags()));
         entity.setDslVersion(request.dslVersion() == null || request.dslVersion().isBlank() ? "v1" : request.dslVersion());
         entity.setContent(request.content());
@@ -246,7 +248,7 @@ public class PlatformCatalogService {
         return toProjectRecord(requireProject(projectId));
     }
 
-    private void seedCase(String projectId, String code, String name, String relativePath) {
+    private void seedCase(String projectId, String code, String name, String relativePath, String folderPath) {
         if (caseRepository.findByProjectIdAndCode(projectId, code).isPresent()) {
             return;
         }
@@ -259,6 +261,7 @@ public class PlatformCatalogService {
         entity.setName(name);
         entity.setCode(code);
         entity.setDescription("Seeded from existing test-framework resources");
+        entity.setFolderPath(normalizeFolderPath(folderPath));
         entity.setTagsJson(jsonCodec.write(List.of("seed")));
         entity.setDslVersion("v1");
         entity.setContent(content);
@@ -403,6 +406,7 @@ public class PlatformCatalogService {
                 entity.getName(),
                 entity.getCode(),
                 entity.getDescription(),
+                entity.getFolderPath(),
                 jsonCodec.readStringList(entity.getTagsJson()),
                 entity.getDslVersion(),
                 entity.getContent(),
@@ -447,6 +451,17 @@ public class PlatformCatalogService {
 
     private String blankToNull(String value) {
         return value == null || value.isBlank() ? null : value;
+    }
+
+    private String normalizeFolderPath(String folderPath) {
+        if (folderPath == null || folderPath.isBlank()) {
+            return null;
+        }
+        List<String> segments = Arrays.stream(folderPath.replace('\\', '/').split("/"))
+                .map(String::trim)
+                .filter(segment -> !segment.isBlank())
+                .toList();
+        return segments.isEmpty() ? null : String.join("/", segments);
     }
 
     private String readOptionalFile(String relativePath) {
@@ -507,6 +522,7 @@ public class PlatformCatalogService {
             String name,
             String code,
             String description,
+            String folderPath,
             List<String> tags,
             String dslVersion,
             String content,
@@ -565,6 +581,7 @@ public class PlatformCatalogService {
             @NotBlank String name,
             @NotBlank String code,
             String description,
+            String folderPath,
             List<String> tags,
             String dslVersion,
             @NotBlank String content,

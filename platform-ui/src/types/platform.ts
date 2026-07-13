@@ -37,6 +37,7 @@ export type CaseRecord = {
   name: string
   code: string
   description: string
+  folderPath?: string | null
   tags: string[]
   dslVersion: string
   content: string
@@ -123,6 +124,7 @@ export type SaveCaseInput = {
   name: string
   code: string
   description: string
+  folderPath: string
   tags: string[]
   dslVersion: string
   content: string

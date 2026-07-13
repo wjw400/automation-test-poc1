@@ -1,13 +1,15 @@
 import {
   Alert,
   Button,
+  Collapse,
   Input,
   Select,
   Space,
+  Tag,
   Tabs,
   Typography,
 } from 'antd'
-import { ApiOutlined, DeleteOutlined, PlusOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, DeleteOutlined, FileSearchOutlined, PlusOutlined } from '@ant-design/icons'
 import { useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ApiOperationRecord, SaveCaseInput } from '../types/platform'
@@ -30,6 +32,9 @@ type CaseDesignerProps = {
   onSelectCaseOverview: () => void
   onSelectStep: (stepIndex: number) => void
   onActiveStepChange?: (stepIndex: number) => void
+  onOpenApiReference: () => void
+  onDescriptionCommit: (description: string) => void
+  isDescriptionSaving: boolean
 }
 
 type AssertionRule = {
@@ -105,6 +110,9 @@ export function CaseDesigner({
   onSelectCaseOverview,
   onSelectStep,
   onActiveStepChange,
+  onOpenApiReference,
+  onDescriptionCommit,
+  isDescriptionSaving,
 }: CaseDesignerProps) {
   const parsed = useMemo(() => parseDsl(draft.content), [draft.content])
   const [activeTab, setActiveTab] = useState('overview')
@@ -151,7 +159,6 @@ export function CaseDesigner({
   const steps = dsl.steps as any[]
   const selectedStep = steps[activeStepIndex]
   const selectedOperation = resolveOperation(selectedStep, operations)
-  const flowSummary = summarizeFlow(steps)
 
   const updateDsl = (recipe: (next: DslObject) => void) => {
     const clone = structuredClone(dsl)
@@ -194,10 +201,12 @@ export function CaseDesigner({
         <CaseOverview
           draft={draft}
           dsl={dsl}
-          flowSummary={flowSummary}
           steps={steps}
           onAddStep={addStep}
+          onChange={onChange}
+          onDescriptionCommit={onDescriptionCommit}
           onSelectStep={onSelectStep}
+          isDescriptionSaving={isDescriptionSaving}
           updateDsl={updateDsl}
         />
       </section>
@@ -232,6 +241,7 @@ export function CaseDesigner({
         onAddStep={addStep}
         onChange={onChange}
         onDeleteStep={() => deleteStep(activeStepIndex)}
+        onOpenApiReference={onOpenApiReference}
         onSelectCaseOverview={onSelectCaseOverview}
         onTabChange={setActiveTab}
         setSelectedOperation={(value) => {
@@ -261,45 +271,98 @@ export function CaseDesigner({
 function CaseOverview({
   draft,
   dsl,
-  flowSummary,
   steps,
   onAddStep,
+  onChange,
+  onDescriptionCommit,
   onSelectStep,
+  isDescriptionSaving,
   updateDsl,
 }: {
   draft: SaveCaseInput
   dsl: DslObject
-  flowSummary: ReturnType<typeof summarizeFlow>
   steps: any[]
   onAddStep: () => void
+  onChange: (next: SaveCaseInput) => void
+  onDescriptionCommit: (description: string) => void
   onSelectStep: (stepIndex: number) => void
+  isDescriptionSaving: boolean
   updateDsl: (recipe: (next: DslObject) => void) => void
 }) {
+  const [isAddingTag, setIsAddingTag] = useState(false)
+  const [tagInput, setTagInput] = useState('')
+
+  const addTag = () => {
+    const nextTag = tagInput.trim()
+    if (nextTag && !draft.tags.includes(nextTag)) {
+      onChange({ ...draft, tags: [...draft.tags, nextTag] })
+    }
+    setTagInput('')
+    setIsAddingTag(false)
+  }
+
   return (
     <div className="case-overview-panel">
-      <div className="flow-panel-head">
-        <div>
-          <Text className="scenario-nav-label">Case Overview</Text>
-          <h3 className="flow-title">{draft.name || dsl.name || 'Untitled scenario'}</h3>
+      <section className="case-overview-details">
+          <Input.TextArea
+            autoSize={{ minRows: 1, maxRows: 3 }}
+            className="case-overview-description-input"
+            placeholder="Add description"
+            value={draft.description}
+            variant="borderless"
+            onBlur={(event) => onDescriptionCommit(event.target.value)}
+            onChange={(event) => onChange({ ...draft, description: event.target.value })}
+          />
+        {isDescriptionSaving ? <Text type="secondary" className="case-overview-description-saving">Saving...</Text> : null}
+        <div className="case-overview-tags">
+          <Text className="case-overview-tags-label">Tags</Text>
+          <div className="case-overview-tags-list">
+            {draft.tags.map((tag) => (
+              <Tag
+                key={tag}
+                closable
+                className="case-overview-tag"
+                onClose={(event) => {
+                  event.preventDefault()
+                  onChange({ ...draft, tags: draft.tags.filter((value) => value !== tag) })
+                }}
+              >
+                {tag}
+              </Tag>
+            ))}
+            {isAddingTag ? (
+              <Input
+                autoFocus
+                className="case-overview-tag-input"
+                size="small"
+                value={tagInput}
+                placeholder="Add tag"
+                onBlur={addTag}
+                onChange={(event) => setTagInput(event.target.value)}
+                onPressEnter={(event) => event.currentTarget.blur()}
+              />
+            ) : (
+              <Button
+                type="text"
+                size="small"
+                className="case-overview-add-tag"
+                icon={<PlusOutlined />}
+                title="Add tag"
+                onClick={() => setIsAddingTag(true)}
+              />
+            )}
+          </div>
         </div>
-        <Button icon={<PlusOutlined />} onClick={onAddStep}>
-          Add Step
-        </Button>
-      </div>
-
-      <div className="flow-summary-strip">
-        <FlowMetric label="Steps" value={flowSummary.steps} />
-        <FlowMetric label="Actions" value={flowSummary.actions} />
-        <FlowMetric label="Tests" value={flowSummary.assertions} />
-        <FlowMetric label="Extract" value={flowSummary.extracts} />
-      </div>
+      </section>
 
       <section className="case-overview-section">
         <div className="panel-title-row compact">
           <div>
-            <h4 className="panel-subtitle">Flow Sequence</h4>
-            <Text type="secondary">Select a step in the explorer or from this compact sequence to edit it.</Text>
+            <h4 className="panel-subtitle">Scenario Steps</h4>
           </div>
+          <Button icon={<PlusOutlined />} onClick={onAddStep}>
+            Add Step
+          </Button>
         </div>
         {steps.length ? (
           <div className="case-flow-sequence">
@@ -315,6 +378,7 @@ function CaseOverview({
                 <span className="case-flow-step-copy">
                   <span className="case-flow-step-name">{step.name || `Step ${index + 1}`}</span>
                   <span className="case-flow-step-path">{operationPath(step)}</span>
+                  <StepFlowSummary step={step} />
                 </span>
               </button>
             ))}
@@ -327,24 +391,35 @@ function CaseOverview({
         )}
       </section>
 
-      <section className="case-overview-section">
-        <div className="designer-grid">
-          <StructuredEditor
-            label="Runtime"
-            value={dsl.runtime ?? {}}
-            onCommit={(value) => updateDsl((next) => {
-              next.runtime = value
-            })}
-          />
-          <StructuredEditor
-            label="Variables"
-            value={dsl.variables ?? {}}
-            onCommit={(value) => updateDsl((next) => {
-              next.variables = value
-            })}
-          />
-        </div>
-      </section>
+      <Collapse
+        className="scenario-advanced-collapse"
+        ghost
+        size="small"
+        items={[
+          {
+            key: 'scenario-context',
+            label: 'Scenario runtime and variables',
+            children: (
+              <div className="designer-grid">
+                <StructuredEditor
+                  label="Runtime"
+                  value={dsl.runtime ?? {}}
+                  onCommit={(value) => updateDsl((next) => {
+                    next.runtime = value
+                  })}
+                />
+                <StructuredEditor
+                  label="Variables"
+                  value={dsl.variables ?? {}}
+                  onCommit={(value) => updateDsl((next) => {
+                    next.variables = value
+                  })}
+                />
+              </div>
+            ),
+          },
+        ]}
+      />
     </div>
   )
 }
@@ -364,6 +439,7 @@ function StepEditor({
   onAddStep,
   onChange,
   onDeleteStep,
+  onOpenApiReference,
   onSelectCaseOverview,
   onTabChange,
   setSelectedOperation,
@@ -384,6 +460,7 @@ function StepEditor({
   onAddStep: () => void
   onChange: (next: SaveCaseInput) => void
   onDeleteStep: () => void
+  onOpenApiReference: () => void
   onSelectCaseOverview: () => void
   onTabChange: (nextTab: string) => void
   setSelectedOperation: (value?: string) => void
@@ -402,8 +479,11 @@ function StepEditor({
           </Space>
         </div>
         <Space>
-          <Button type="text" icon={<ApiOutlined />} onClick={onSelectCaseOverview}>
+          <Button type="text" icon={<ArrowLeftOutlined />} onClick={onSelectCaseOverview}>
             Case
+          </Button>
+          <Button type="text" icon={<FileSearchOutlined />} disabled={!selectedOperation} onClick={onOpenApiReference}>
+            API
           </Button>
           <Button type="text" icon={<PlusOutlined />} onClick={onAddStep}>
             Step
@@ -751,12 +831,18 @@ function StepEditor({
   )
 }
 
-function FlowMetric({ label, value }: { label: string; value: number }) {
+function StepFlowSummary({ step }: { step: any }) {
+  const actionCount = asActions(step.actions?.beforeSend).length + asActions(step.actions?.afterReceive).length
+  const assertionCount = asAssertions(step.response?.assertions).length
+  const extractCount = asExtractEntries(step.response?.extract).length
+
   return (
-    <div className="flow-metric">
-      <Text className="flow-metric-value">{value}</Text>
-      <Text type="secondary">{label}</Text>
-    </div>
+    <span className="case-flow-step-summary">
+      {actionCount ? <span>{actionCount} action{actionCount === 1 ? '' : 's'}</span> : null}
+      {assertionCount ? <span>{assertionCount} test{assertionCount === 1 ? '' : 's'}</span> : null}
+      {extractCount ? <span>{extractCount} extract{extractCount === 1 ? '' : 's'}</span> : null}
+      {!actionCount && !assertionCount && !extractCount ? <span>Request only</span> : null}
+    </span>
   )
 }
 
@@ -1042,23 +1128,6 @@ function stepMethod(step: any) {
 
 function operationPath(step: any) {
   return String(step?.operation?.path ?? 'Select operation')
-}
-
-function summarizeFlow(steps: any[]) {
-  return steps.reduce(
-    (summary, step) => {
-      summary.actions += asActions(step?.actions?.beforeSend).length + asActions(step?.actions?.afterReceive).length
-      summary.assertions += asAssertions(step?.response?.assertions).length
-      summary.extracts += asExtractEntries(step?.response?.extract).length
-      return summary
-    },
-    {
-      steps: steps.length,
-      actions: 0,
-      assertions: 0,
-      extracts: 0,
-    },
-  )
 }
 
 function asActions(value: unknown): CaseAction[] {

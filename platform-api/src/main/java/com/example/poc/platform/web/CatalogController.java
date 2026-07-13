@@ -85,6 +85,7 @@ public class CatalogController {
                 request.name(),
                 request.code(),
                 request.description(),
+                request.folderPath(),
                 request.tags(),
                 request.dslVersion(),
                 request.content(),
