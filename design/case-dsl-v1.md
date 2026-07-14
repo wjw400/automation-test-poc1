@@ -2,104 +2,96 @@
 
 ## 1. Purpose
 
-Case DSL v1 defines the standard YAML structure for API automation cases in this platform.
+Case DSL v1 is the only supported YAML structure for API automation cases in the platform.
 
-The main design goal is to keep the test scenario centered on meaningful API interactions, while still allowing protocol-specific processing such as encryption, signing, decryption, token generation, body wrapping, and response normalization to evolve through an action pipeline.
+The scenario remains centered on business-level API requests. Protocol processing around a request is modeled as an ordered Action pipeline so that encryption, encoding, request-body construction, decryption, assertions, and extraction remain visible and debuggable without turning each technical operation into a Scenario Step.
 
-This document is the target design for new cases created by the platform UI and AI generation. Older YAML structures remain compatibility inputs, but should not be the default shape for newly authored cases.
+The application is still under development. Legacy case structures and legacy Action names are intentionally not supported or migrated.
 
-## 2. Core Decision
+## 2. Core Model
 
-The top-level `steps` array represents business-level API interactions.
+- `steps` contains business-level HTTP interactions.
+- `actions.beforeSend` transforms request-side data before transmission.
+- `actions.afterReceive` transforms response-side data before assertions and extraction.
+- `response.assertions` decides whether the Step passed.
+- `response.extract` promotes response values into Scenario Variables for later Steps.
+- `artifacts.*` carries temporary values between Actions in the same Step.
+- `decrypted.*` contains processed response payloads while the raw response remains unchanged.
 
-Each `step` should answer:
+Actions execute sequentially in YAML list order. The output of one Action is immediately available to the next Action.
 
-- Which API operation is being tested?
-- What request data is supplied?
-- What response behavior is expected?
-- Which values are extracted for later steps?
+## 3. Standard Example
 
-Technical processing inside a step is modeled through `actions`, not through extra top-level steps.
-
-This avoids returning to a keyword-heavy style where one business API call becomes many small steps such as `prepare request`, `encrypt`, `send`, `decrypt`, and `validate`. That style is flexible, but it can make scenarios noisy and hard to review.
-
-## 3. Industry Reference
-
-This design follows a similar separation used by mature API testing tools:
-
-- Postman keeps the request as the primary unit, while pre-request and post-response scripts add processing around it.
-  Reference: https://learning.postman.com/docs/tests-and-scripts/write-scripts/pre-request-scripts/
-
-- Tavern models YAML tests as multiple stages, where each stage has a request and response.
-  Reference: https://github.com/taverntesting/tavern/blob/master/docs/source/basics.md
-
-- Karate keeps scenarios readable around request execution and response matching, while allowing reusable setup and logic.
-  Reference: https://docs.karatelabs.io/
-
-- Robot Framework shows the power and risk of keyword-driven testing: everything can become a keyword, but over-fragmentation can produce many low-level repeated steps.
-  Reference: https://robotframework.org/robotframework/latest/RobotFrameworkUserGuide.html
-
-The platform should borrow the extensibility of action/script hooks, but keep API interaction as the visible scenario unit.
-
-## 4. Standard Structure
+The following case starts with an XML business payload, signs and encrypts it with PGP, Base64-encodes the armored encrypted text, and constructs the final JSON Wire Request Body.
 
 ```yaml
 dslVersion: v1
-
-name: Secure mock service mixed response
-description: Validate plaintext response fields and decrypted secure payload fields.
+name: Submit secure XML payment
+description: Validate plaintext response metadata and the decrypted secure payload.
 tags:
-  - mock-service
-  - secure-response
+  - payment
+  - pgp
 
 runtime:
-  environment: local
-  profile: defaultSecureProfile
+  profile: paymentSecureProfile
 
 variables:
-  customerId: C1
-  amount: 88
+  paymentId: P1001
 
 steps:
-  - name: Submit encrypted request and validate mixed response
+  - name: Submit encrypted payment
     type: http
 
     operation:
-      apiSpecId: mock-service-api
-      operationId: submitEncryptedJsonField
-      service: mockService
+      id: imported-operation-id
+      apiSpecId: payment-api
+      operationId: submitPayment
+      service: paymentService
       method: POST
-      path: /secure/json-field
+      path: /payments
 
-    runtime:
-      profile: clientToServerProfile
+    runtime: {}
 
     request:
-      query:
-        field: bizData
+      query: {}
       headers:
         Content-Type: application/json
-      body:
-        customerId: ${customerId}
-        amount: ${amount}
+      body: |
+        <Payment>
+          <Id>${paymentId}</Id>
+          <Amount>100</Amount>
+        </Payment>
 
     actions:
       beforeSend:
-        - type: crypto.encrypt
-          name: Encrypt request body into bizData
-          profile: clientToServerProfile
+        - type: crypto.pgp.signAndEncrypt
+          name: Protect XML payload
           input:
             source: request.body
-            format: json
+            format: xml
+          output:
+            target: artifacts.encryptedPayload
+            format: text
+
+        - type: data.encodeBase64
+          name: Encode protected payload
+          input:
+            source: artifacts.encryptedPayload
+          output:
+            target: artifacts.encryptedPayloadBase64
+
+        - type: body.buildJson
+          name: Build wire request body
+          template:
+            meta:
+              channel: platform-poc
+            encryptBase64: ${artifacts.encryptedPayloadBase64}
           output:
             target: request.body
-            mode: jsonField
-            field: bizData
 
       afterReceive:
-        - type: crypto.decrypt
-          name: Decrypt secure payload
-          profile: serverToClientProfile
+        - type: crypto.pgp.decryptAndVerify
+          name: Read secure response payload
           input:
             source: response.body
             path: $.payload
@@ -114,275 +106,232 @@ steps:
           path: $.code
           operator: equals
           expected: SUCCESS
-        - source: response.body
-          path: $.fieldUsed
-          operator: equals
-          expected: bizData
         - source: decrypted.securePayload
-          path: $.result
+          path: $.paymentId
           operator: equals
-          expected: ACCEPTED
-        - source: decrypted.securePayload
-          path: $.customerId
-          operator: equals
-          expected: ${customerId}
-
+          expected: ${paymentId}
       extract:
-        acceptedCustomerId:
-          source: decrypted.securePayload
-          path: $.customerId
+        traceId:
+          source: response.body
+          path: $.traceId
 ```
 
-## 5. Execution Order
+## 4. Execution Order
 
-The runner should execute an HTTP step in this order:
+An HTTP Step executes in this order:
 
-1. Resolve case variables and runtime context.
-2. Resolve step operation from the imported OpenAPI catalog.
-3. Build the request from operation metadata, environment service base URL, and `request`.
-4. Run `actions.beforeSend`.
-5. Send the HTTP request.
-6. Capture raw response evidence.
-7. Run `actions.afterReceive`.
-8. Evaluate `response.status`.
-9. Evaluate `response.assertions`.
-10. Run `response.extract`.
-11. Write step evidence.
+1. Resolve Scenario Variables and runtime context.
+2. Resolve the operation snapshot and environment Base URL.
+3. Resolve the Step Profile, falling back to the Scenario Profile.
+4. Build the initial request from `request`.
+5. Execute `actions.beforeSend` in list order.
+6. Send the final Wire Request.
+7. Capture the raw HTTP response.
+8. Execute `actions.afterReceive` in list order.
+9. Evaluate `response.status` and `response.assertions`.
+10. Evaluate `response.extract`.
+11. Write request, response, Action, assertion, extraction, and error evidence.
 
-The report should preserve evidence for every major stage: request before actions, request after actions, raw response, processed response artifacts, assertions, extracted values, and errors.
+An Action failure immediately fails the Step. V1 does not provide `continueOnError` or conditional Action execution.
 
-## 6. Semantics Boundary
+## 5. Supported Actions
 
-### 6.1 actions.beforeSend
+DSL v1 supports exactly four Actions.
 
-`actions.beforeSend` is for request-side data processing before the request is sent.
+### 5.1 `crypto.pgp.signAndEncrypt`
 
-Examples:
+Stage: `beforeSend`
 
-- `crypto.encrypt`
-- `crypto.sign`
-- `auth.oauth2.clientCredentials`
-- `body.wrapJsonField`
-- `body.encodeBase64`
-- `headers.set`
+Signs the input with the sender private key and encrypts it with the recipient public key. It uses the resolved Step or Scenario Profile and produces ASCII-armored PGP text.
 
-It may mutate `request.body`, `request.headers`, `request.query`, or create intermediate artifacts.
+Supported input formats:
 
-### 6.2 actions.afterReceive
+- `json`: serialize structured input as JSON before protection.
+- `text`: protect the input string unchanged.
+- `xml`: protect the XML string unchanged.
 
-`actions.afterReceive` is for response-side data processing after the response is received.
+Typical output targets:
 
-Examples:
+- `request.body` for an encrypted raw-text Wire Request.
+- `artifacts.<name>` when later Actions must encode or embed the result.
 
-- `crypto.decrypt`
-- `body.parseJson`
-- `body.parseXml`
-- `body.decodeBase64`
-- `body.decompress`
-- `response.normalize`
+### 5.2 `data.encodeBase64`
 
-It should prepare data for assertions and extraction, but it should not decide whether the test passed.
+Stage: `beforeSend`
 
-### 6.3 response.assertions
+Base64-encodes its input. String input is encoded as UTF-8 bytes. Structured input is serialized as JSON before encoding.
 
-`response.assertions` is the test verdict layer.
+This Action is intentionally separate from encryption. A protocol that accepts ASCII-armored PGP directly does not need it. A protocol that requires Base64 around the armored PGP text uses it explicitly.
 
-It answers: did the system behave as expected?
+### 5.3 `body.buildJson`
 
-Assertions should remain separate from `actions.afterReceive`, even though they run after the response is received. This keeps the DSL readable and keeps reports focused on test intent.
+Stage: `beforeSend`
 
-### 6.4 response.extract
+Builds the final JSON Wire Request Body from a YAML template. The template may contain fixed values, Scenario Variables, and `artifacts.*` references.
 
-`response.extract` is the context propagation layer.
-
-It answers: which values should later steps reuse?
-
-Extraction should also remain separate from `actions.afterReceive`. It is not just data processing; it changes scenario context.
-
-## 7. Action Model
-
-Each action should follow a common shape:
+The template must resolve to a JSON object or array, and the output target must be `request.body`.
 
 ```yaml
-- type: crypto.encrypt
-  name: Encrypt request body
-  profile: clientToServerProfile
-  input:
-    source: request.body
-    format: json
+- type: body.buildJson
+  template:
+    meta:
+      requestId: ${requestId}
+    payload: ${artifacts.encryptedPayload}
   output:
     target: request.body
-    mode: jsonField
-    field: bizData
+```
+
+`body.wrapJsonField` is not a DSL Action. A one-field wrapper is simply a small `body.buildJson` template and may be offered by the UI as a preset.
+
+### 5.4 `crypto.pgp.decryptAndVerify`
+
+Stage: `afterReceive`
+
+Reads an encrypted value from the raw response, decrypts it with the recipient private key, and verifies the embedded signature with the sender public key.
+
+Supported output formats:
+
+- `json`: parse plaintext into a structured JSON value.
+- `text`: keep plaintext as a string.
+- `xml`: keep XML plaintext as a string.
+
+The output target must use `decrypted.<name>`. Signature or integrity verification failure fails the Action and Step.
+
+## 6. Action Structure
+
+```yaml
+- type: crypto.pgp.signAndEncrypt
+  name: Protect request payload
+  enabled: true
+  input:
+    source: request.body
+    path:
+    format: json
+  output:
+    target: artifacts.encryptedPayload
+    path:
+    format: text
 ```
 
 Common fields:
 
-- `type`: Required. Selects the action handler.
-- `name`: Optional. Human-readable report label.
-- `profile`: Optional. Security or protocol profile used by the action.
-- `input`: Optional. Declares where the action reads data from.
-- `output`: Optional. Declares where the action writes data to.
+- `type`: required Action handler name.
+- `name`: optional human-readable report label.
+- `enabled`: optional; defaults to `true`.
+- `input`: source, optional JSONPath, and input format.
+- `output`: target, optional JSONPath, and output format.
+- `template`: Action-specific input used by `body.buildJson`.
 
-The runner should reject unknown action types unless a plugin mechanism is explicitly enabled.
+Unknown Action types and Actions placed in the wrong stage are validation errors.
 
-## 8. Source And Target Paths
+## 7. Sources, Targets, And Artifacts
 
-Use consistent source names across actions, assertions, and extraction:
+Supported Action sources:
 
 - `request.body`
-- `request.headers`
-- `request.query`
 - `response.body`
-- `response.headers`
-- `decrypted.<name>`
 - `variables.<name>`
+- `artifacts.<name>`
+- `decrypted.<name>`
 
-JSONPath should be used for structured JSON payload access:
+Supported Action targets:
 
-```yaml
-source: response.body
-path: $.code
-```
+- `request.body`
+- `artifacts.<name>`
+- `decrypted.<name>`
 
-For decrypted payloads:
+`artifacts.*` is scoped to one Step and is not automatically available to later Steps. Values that later Steps need must be declared under `response.extract` and become Scenario Variables.
 
-```yaml
-source: decrypted.securePayload
-path: $.customerId
-```
-
-## 9. Operation, Service, Environment, And Profile
-
-### 9.1 Operation
-
-When a step binds an OpenAPI operation, the operation is the primary source for method and path.
+JSONPath is used when an Action reads a nested value:
 
 ```yaml
-operation:
-  apiSpecId: mock-service-api
-  operationId: submitEncryptedJsonField
-  service: mockService
-  method: POST
-  path: /secure/json-field
+input:
+  source: response.body
+  path: $.payload
 ```
 
-`method` and `path` may be kept as a snapshot for traceability, but UI should treat them as read-only when `operationId` is present.
+## 8. Profile Resolution
 
-Resolution priority:
+Actions never define their own Profile.
 
-1. OpenAPI operation matched by `apiSpecId` and `operationId`.
-2. Operation snapshot `method` and `path`.
-3. Legacy `request.method` and `request.path`.
+Profile resolution order:
 
-### 9.2 Service And Environment
-
-`service` identifies the target system. `environment` identifies a set of runtime bindings.
-
-A single environment can provide multiple service base URLs:
-
-```yaml
-environment: local
-services:
-  mockService:
-    baseUrl: http://localhost:8081
-  paymentService:
-    baseUrl: http://localhost:8090
-```
-
-New DSL cases should prefer `operation.service` or `request.service` instead of hard-coded `request.baseUrl`.
-
-### 9.3 Profile
-
-Real keys and passphrases should not live in case YAML.
-
-Case YAML should reference logical profile names:
+1. `step.runtime.profile`
+2. `scenario.runtime.profile`
 
 ```yaml
 runtime:
   profile: defaultSecureProfile
 
-actions:
-  beforeSend:
-    - type: crypto.encrypt
-      profile: clientToServerProfile
+steps:
+  - name: Use a different communication identity
+    runtime:
+      profile: paymentSecureProfile
 ```
 
-Resolution priority:
+If a Step contains a crypto Action and neither level resolves a Profile, validation fails before the HTTP request is sent.
 
-1. Action-level `profile`.
-2. Step-level `runtime.profile`.
-3. Case-level `runtime.profile`.
-4. Run-selected profile.
+A Profile contains both directions of a communication relationship:
 
-## 10. Compatibility Mapping
+- Outbound protection uses the sender private key and recipient public key.
+- Inbound processing uses the recipient private key and sender public key.
 
-The runner and migration tools should continue to support current POC YAML structures.
+Private keys and passphrases are provided by the platform Profile catalog at execution time and should not be stored in managed Case YAML.
 
-Legacy mapping:
+## 9. Operation And Environment
 
-- Top-level `request`, `expect`, and `extract` become a single `steps[0]`.
-- `request.baseUrl` is treated as a legacy direct URL source.
-- `request.transform` maps to `actions.beforeSend` with `type: crypto.encrypt` or a compatible transform action.
-- `expect.decrypt` maps to `actions.afterReceive` with `type: crypto.decrypt`.
-- `expect.status` maps to `response.status`.
-- `expect.validations` maps to `response.assertions`.
-- `expect.jsonPath` maps to `response.assertions` with `source: response.body`, `operator: equals`.
-- Existing `extract` map moves to `response.extract`.
-- Existing source `raw` maps to `response.body`.
-- Existing source `decrypted.<name>` remains valid.
+An imported OpenAPI operation is the source of method and path. The YAML keeps method and path snapshots for traceability and execution stability.
 
-The UI should generate only the v1 standard structure for new cases, while allowing old cases to be opened and migrated.
+The runtime environment supplies `baseUrl`. The current POC also supports a service-specific variable named `<service>.baseUrl`, falling back to `baseUrl`.
 
-## 11. UI Mapping
+The UI treats operation method and path as read-only after the user selects an imported operation.
 
-The case editor should expose the v1 model like this:
+## 10. Assertions And Extraction
 
-- Scenario toolbar: case name, environment, profile, save, run.
-- Step rail: one card per API interaction.
-- Request tab: operation binding, query, headers, body.
-- Actions or Security tab: `beforeSend` and `afterReceive` processors, especially crypto actions.
-- Assertions tab: `response.assertions`.
-- Extract tab: `response.extract`.
-- Advanced tab: raw YAML and low-frequency fields.
+`actions.afterReceive` prepares response data but does not define the test verdict.
 
-The UI should not force users to think in low-level action order for common cases. Common actions should be edited through structured controls.
+Assertions remain under `response.assertions`, allowing the same Step to validate both raw plaintext fields and decrypted fields:
 
-## 12. Report Mapping
+```yaml
+assertions:
+  - source: response.body
+    path: $.code
+    operator: equals
+    expected: SUCCESS
+  - source: decrypted.securePayload
+    path: $.result
+    operator: equals
+    expected: ACCEPTED
+```
 
-Step evidence should show:
+Extraction remains under `response.extract` because it changes Scenario context for later Steps.
 
-- Operation summary.
-- Runtime environment and profile resolution.
-- Request before `beforeSend`.
-- Action evidence for each `beforeSend` action.
-- Wire request.
-- Raw response.
-- Action evidence for each `afterReceive` action.
-- Assertion results.
-- Extracted values.
-- Error details.
+## 11. Reporting
 
-This keeps protocol debugging visible without turning the test scenario itself into a low-level workflow.
+Each Step report records:
+
+- resolved Profile name
+- final Wire Request
+- raw HTTP response
+- every Action stage, index, type, name, status, duration, input, output, and error
+- decrypted payloads
+- assertion results
+- extracted values
+
+The raw response is never overwritten by an After Action. This allows reports to show both received data and processed artifacts.
+
+## 12. UI Mapping
+
+- Before tab offers PGP Sign & Encrypt, Encode Base64, and Build JSON Body.
+- After tab offers PGP Decrypt & Verify.
+- Action order is visible and reorderable.
+- Action editors do not contain a Profile field.
+- Scenario and Step runtime settings own Profile selection.
+- Tests and Extract remain separate tabs.
+- Unsupported or legacy YAML is shown as a validation error rather than migrated.
 
 ## 13. Non-Goals
 
-Case DSL v1 is not intended to be a general workflow engine.
+DSL v1 is not a general workflow or scripting engine.
 
-It should not model every technical action as a top-level step by default.
-
-It should not store plaintext private keys or passphrases inside case YAML.
-
-It should not require users to manually maintain HTTP method and path after selecting an OpenAPI operation.
-
-It should not require all users to edit raw YAML for common request, action, assertion, and extraction patterns.
-
-## 14. Design Conclusion
-
-Use `steps` for business-level API interactions.
-
-Use `actions.beforeSend` and `actions.afterReceive` for extensible request/response data processing.
-
-Keep `response.assertions` and `response.extract` as first-class test concepts, not generic actions.
-
-This gives the platform a stable center: API requests remain the scenario backbone, while action pipelines provide the extension points needed for security protocols and future integrations.
+It does not support arbitrary scripts, conditional Actions, `continueOnError`, Action-level Profiles, fake encryption, legacy transforms, or automatic migration from earlier POC YAML structures.

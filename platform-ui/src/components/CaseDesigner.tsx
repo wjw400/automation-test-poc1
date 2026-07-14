@@ -2,6 +2,7 @@ import {
   Alert,
   App,
   Button,
+  Dropdown,
   Input,
   Select,
   Tag,
@@ -55,9 +56,15 @@ type ExtractRule = {
 type CaseAction = {
   type?: string
   name?: string
-  profile?: string
+  enabled?: boolean
   input?: unknown
   output?: unknown
+  template?: unknown
+}
+
+type ActionTypeOption = {
+  value: string
+  label: string
 }
 
 const assertionOperators = [
@@ -70,15 +77,14 @@ const assertionOperators = [
   'lessThan',
 ]
 
-const actionTypes = [
-  'crypto.encrypt',
-  'crypto.decrypt',
-  'crypto.sign',
-  'auth.oauth2.clientCredentials',
-  'body.wrapJsonField',
-  'body.parseJson',
-  'body.decodeBase64',
-  'response.normalize',
+const beforeSendActionTypes: ActionTypeOption[] = [
+  { value: 'crypto.pgp.signAndEncrypt', label: 'PGP Sign & Encrypt' },
+  { value: 'data.encodeBase64', label: 'Encode Base64' },
+  { value: 'body.buildJson', label: 'Build JSON Body' },
+]
+
+const afterReceiveActionTypes: ActionTypeOption[] = [
+  { value: 'crypto.pgp.decryptAndVerify', label: 'PGP Decrypt & Verify' },
 ]
 
 const emptyStep = () => ({
@@ -617,7 +623,7 @@ function StepEditor({
                   title="Before Send"
                   description="Prepare the request before it is sent."
                   actions={beforeSendActions}
-                  defaultAction={defaultBeforeSendAction}
+                  availableTypes={beforeSendActionTypes}
                   onAdd={(action) => updateActionList(updateSelectedStep, 'beforeSend', (items) => {
                     items.push(action)
                   })}
@@ -626,6 +632,9 @@ function StepEditor({
                   })}
                   onChange={(index, action) => updateActionList(updateSelectedStep, 'beforeSend', (items) => {
                     items[index] = action
+                  })}
+                  onMove={(index, direction) => updateActionList(updateSelectedStep, 'beforeSend', (items) => {
+                    moveItem(items, index, index + direction)
                   })}
                 />
               </div>
@@ -640,7 +649,7 @@ function StepEditor({
                   title="After Receive"
                   description="Process response data before assertions and extraction."
                   actions={afterReceiveActions}
-                  defaultAction={defaultAfterReceiveAction}
+                  availableTypes={afterReceiveActionTypes}
                   onAdd={(action) => updateActionList(updateSelectedStep, 'afterReceive', (items) => {
                     items.push(action)
                   })}
@@ -649,6 +658,9 @@ function StepEditor({
                   })}
                   onChange={(index, action) => updateActionList(updateSelectedStep, 'afterReceive', (items) => {
                     items[index] = action
+                  })}
+                  onMove={(index, direction) => updateActionList(updateSelectedStep, 'afterReceive', (items) => {
+                    moveItem(items, index, index + direction)
                   })}
                 />
               </div>
@@ -844,18 +856,20 @@ function ActionSection({
   title,
   description,
   actions,
-  defaultAction,
+  availableTypes,
   onAdd,
   onDelete,
   onChange,
+  onMove,
 }: {
   title: string
   description: string
   actions: CaseAction[]
-  defaultAction: () => CaseAction
+  availableTypes: ActionTypeOption[]
   onAdd: (action: CaseAction) => void
   onDelete: (index: number) => void
   onChange: (index: number, action: CaseAction) => void
+  onMove: (index: number, direction: -1 | 1) => void
 }) {
   return (
     <section className="action-section">
@@ -864,20 +878,48 @@ function ActionSection({
           <h4 className="panel-subtitle">{title}</h4>
           <Text type="secondary">{description}</Text>
         </div>
-        <Button icon={<PlusOutlined />} onClick={() => onAdd(defaultAction())}>
-          Add Action
-        </Button>
+        <Dropdown
+          trigger={['click']}
+          menu={{
+            items: availableTypes.map((item) => ({ key: item.value, label: item.label })),
+            onClick: ({ key }) => onAdd(createAction(key)),
+          }}
+        >
+          <Button icon={<PlusOutlined />}>Add Action <DownOutlined /></Button>
+        </Dropdown>
       </div>
       <div className="rule-stack">
         {actions.map((action, index) => (
-          <RuleCard key={`${title}-${index}`} title={action.name || action.type || `Action ${index + 1}`} onDelete={() => onDelete(index)}>
+          <RuleCard
+            key={`${title}-${index}`}
+            title={action.name || action.type || `Action ${index + 1}`}
+            onDelete={() => onDelete(index)}
+            headerActions={(
+              <>
+                <Button
+                  type="text"
+                  icon={<ArrowUpOutlined />}
+                  disabled={index === 0}
+                  title="Move action up"
+                  onClick={() => onMove(index, -1)}
+                />
+                <Button
+                  type="text"
+                  icon={<ArrowDownOutlined />}
+                  disabled={index === actions.length - 1}
+                  title="Move action down"
+                  onClick={() => onMove(index, 1)}
+                />
+              </>
+            )}
+          >
             <div className="designer-grid narrow">
               <LabeledField label="Type">
                 <Select
                   showSearch
                   value={action.type}
-                  options={actionTypes.map((value) => ({ label: value, value }))}
-                  onChange={(value) => onChange(index, { ...action, type: value })}
+                  options={availableTypes}
+                  onChange={(value) => onChange(index, createAction(value))}
                 />
               </LabeledField>
               <LabeledField label="Name">
@@ -886,19 +928,21 @@ function ActionSection({
                   onChange={(event) => onChange(index, { ...action, name: event.target.value })}
                 />
               </LabeledField>
-              <LabeledField label="Profile">
-                <Input
-                  value={action.profile ?? ''}
-                  onChange={(event) => onChange(index, { ...action, profile: event.target.value })}
-                />
-              </LabeledField>
             </div>
             <div className="designer-grid">
-              <StructuredEditor
-                label="Input"
-                value={action.input ?? {}}
-                onCommit={(value) => onChange(index, { ...action, input: value })}
-              />
+              {action.type === 'body.buildJson' ? (
+                <StructuredEditor
+                  label="JSON Template"
+                  value={action.template ?? {}}
+                  onCommit={(value) => onChange(index, { ...action, template: value })}
+                />
+              ) : (
+                <StructuredEditor
+                  label="Input"
+                  value={action.input ?? {}}
+                  onCommit={(value) => onChange(index, { ...action, input: value })}
+                />
+              )}
               <StructuredEditor
                 label="Output"
                 value={action.output ?? {}}
@@ -974,16 +1018,21 @@ function RuleCard({
   title,
   children,
   onDelete,
+  headerActions,
 }: {
   title: string
   children: ReactNode
   onDelete: () => void
+  headerActions?: ReactNode
 }) {
   return (
     <section className="rule-card">
       <div className="panel-title-row compact">
         <Text strong>{title}</Text>
-        <Button type="text" danger icon={<DeleteOutlined />} onClick={onDelete} />
+        <div className="rule-card-actions">
+          {headerActions}
+          <Button type="text" danger icon={<DeleteOutlined />} title="Delete" onClick={onDelete} />
+        </div>
       </div>
       {children}
     </section>
@@ -1033,6 +1082,8 @@ function validateCaseDslV1(dsl: DslObject) {
       if (step.actions.afterReceive && !Array.isArray(step.actions.afterReceive)) {
         errors.push(`${prefix}.actions.afterReceive must be an array.`)
       }
+      validateActions(step.actions.beforeSend, beforeSendActionTypes, `${prefix}.actions.beforeSend`, errors)
+      validateActions(step.actions.afterReceive, afterReceiveActionTypes, `${prefix}.actions.afterReceive`, errors)
     }
     if (step.response?.assertions && !Array.isArray(step.response.assertions)) {
       errors.push(`${prefix}.response.assertions must be an array.`)
@@ -1167,35 +1218,74 @@ function nextExtractName(extract: Record<string, unknown>) {
   return `${base}${index}`
 }
 
-function defaultBeforeSendAction(): CaseAction {
-  return {
-    type: 'crypto.encrypt',
-    name: 'Encrypt request body',
-    input: {
-      source: 'request.body',
-      format: 'json',
-    },
-    output: {
-      target: 'request.body',
-      mode: 'jsonField',
-      field: 'payload',
-    },
+function createAction(type: string): CaseAction {
+  switch (type) {
+    case 'crypto.pgp.signAndEncrypt':
+      return {
+        type,
+        name: 'Sign and encrypt request payload',
+        input: { source: 'request.body', format: 'json' },
+        output: { target: 'artifacts.encryptedPayload', format: 'text' },
+      }
+    case 'data.encodeBase64':
+      return {
+        type,
+        name: 'Encode encrypted payload as Base64',
+        input: { source: 'artifacts.encryptedPayload' },
+        output: { target: 'artifacts.encryptedPayloadBase64' },
+      }
+    case 'body.buildJson':
+      return {
+        type,
+        name: 'Build JSON request body',
+        template: {
+          meta: {},
+          encryptBase64: '${artifacts.encryptedPayloadBase64}',
+        },
+        output: { target: 'request.body' },
+      }
+    case 'crypto.pgp.decryptAndVerify':
+      return {
+        type,
+        name: 'Decrypt and verify response payload',
+        input: { source: 'response.body', path: '$.payload' },
+        output: { target: 'decrypted.securePayload', format: 'json' },
+      }
+    default:
+      return { type, name: type, input: {}, output: {} }
   }
 }
 
-function defaultAfterReceiveAction(): CaseAction {
-  return {
-    type: 'crypto.decrypt',
-    name: 'Decrypt response payload',
-    input: {
-      source: 'response.body',
-      path: '$.payload',
-    },
-    output: {
-      target: 'decrypted.securePayload',
-      format: 'json',
-    },
+function validateActions(
+  value: unknown,
+  availableTypes: ActionTypeOption[],
+  prefix: string,
+  errors: string[],
+) {
+  if (!Array.isArray(value)) {
+    return
   }
+  const allowed = new Set(availableTypes.map((item) => item.value))
+  value.forEach((action, index) => {
+    if (!action || typeof action !== 'object' || Array.isArray(action)) {
+      errors.push(`${prefix}[${index}] must be an object.`)
+      return
+    }
+    if (!allowed.has(action.type)) {
+      errors.push(`${prefix}[${index}].type is not supported in this stage.`)
+    }
+    if ('profile' in action) {
+      errors.push(`${prefix}[${index}] cannot define profile. Use Step or Scenario runtime.profile.`)
+    }
+  })
+}
+
+function moveItem<T>(items: T[], fromIndex: number, toIndex: number) {
+  if (toIndex < 0 || toIndex >= items.length || fromIndex === toIndex) {
+    return
+  }
+  const [item] = items.splice(fromIndex, 1)
+  items.splice(toIndex, 0, item)
 }
 
 function parseInlineValue(value: string) {

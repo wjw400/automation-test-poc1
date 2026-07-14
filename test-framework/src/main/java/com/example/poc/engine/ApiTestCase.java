@@ -5,15 +5,22 @@ import java.util.List;
 import java.util.Map;
 
 public class ApiTestCase {
+    private String dslVersion;
     private String name;
     private String description;
     private List<String> tags = List.of();
+    private RuntimeSpec runtime = new RuntimeSpec();
     private Map<String, Object> variables = new LinkedHashMap<>();
     private Map<String, CryptoProfile> profiles = new LinkedHashMap<>();
     private List<ApiStep> steps = List.of();
-    private RequestSpec request;
-    private ExpectSpec expect;
-    private Map<String, Object> extract = new LinkedHashMap<>();
+
+    public String getDslVersion() {
+        return dslVersion;
+    }
+
+    public void setDslVersion(String dslVersion) {
+        this.dslVersion = dslVersion;
+    }
 
     public String getName() {
         return name;
@@ -39,6 +46,14 @@ public class ApiTestCase {
         this.tags = tags == null ? List.of() : tags;
     }
 
+    public RuntimeSpec getRuntime() {
+        return runtime;
+    }
+
+    public void setRuntime(RuntimeSpec runtime) {
+        this.runtime = runtime == null ? new RuntimeSpec() : runtime;
+    }
+
     public Map<String, Object> getVariables() {
         return variables;
     }
@@ -61,29 +76,5 @@ public class ApiTestCase {
 
     public void setSteps(List<ApiStep> steps) {
         this.steps = steps == null ? List.of() : steps;
-    }
-
-    public RequestSpec getRequest() {
-        return request;
-    }
-
-    public void setRequest(RequestSpec request) {
-        this.request = request;
-    }
-
-    public ExpectSpec getExpect() {
-        return expect;
-    }
-
-    public void setExpect(ExpectSpec expect) {
-        this.expect = expect;
-    }
-
-    public Map<String, Object> getExtract() {
-        return extract;
-    }
-
-    public void setExtract(Map<String, Object> extract) {
-        this.extract = extract == null ? new LinkedHashMap<>() : extract;
     }
 }

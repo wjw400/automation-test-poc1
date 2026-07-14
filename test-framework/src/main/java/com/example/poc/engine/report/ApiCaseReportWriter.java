@@ -120,7 +120,8 @@ public class ApiCaseReportWriter {
                     .append(escape(step.getRequest() == null ? "" : step.getRequest().getMethod()))
                     .append("</div><div class=\"label\">URL</div><div>")
                     .append(escape(step.getRequest() == null ? "" : step.getRequest().getUrl()))
-                    .append("</div></div>")
+                    .append("</div></div><h2>Actions</h2>")
+                    .append(actionTable(step))
                     .append("<h2>Request Headers</h2><pre>")
                     .append(escape(toJson(step.getRequest() == null ? null : step.getRequest().getHeaders())))
                     .append("</pre><h2>Request Body</h2><pre>")
@@ -139,6 +140,30 @@ public class ApiCaseReportWriter {
                     .append(escape(toJson(step.getExtractedValues())))
                     .append("</pre></section>");
         }
+        return html.toString();
+    }
+
+    private String actionTable(ApiStepExecutionReport step) {
+        if (step.getActions().isEmpty()) {
+            return "<p>No actions were executed.</p>";
+        }
+        StringBuilder html = new StringBuilder();
+        html.append("<table><thead><tr><th>Stage</th><th>#</th><th>Status</th><th>Action</th><th>Duration</th><th>Input</th><th>Output</th><th>Error</th></tr></thead><tbody>");
+        for (ActionExecutionReport action : step.getActions()) {
+            html.append("<tr>")
+                    .append("<td>").append(escape(action.getStage())).append("</td>")
+                    .append("<td>").append(action.getIndex()).append("</td>")
+                    .append("<td><span class=\"status ").append(escape(action.getStatus())).append("\">")
+                    .append(escape(action.getStatus())).append("</span></td>")
+                    .append("<td>").append(escape(action.getName())).append("<br><small>")
+                    .append(escape(action.getType())).append("</small></td>")
+                    .append("<td>").append(action.getDurationMs()).append(" ms</td>")
+                    .append("<td><pre>").append(escape(toJson(action.getInput()))).append("</pre></td>")
+                    .append("<td><pre>").append(escape(toJson(action.getOutput()))).append("</pre></td>")
+                    .append("<td>").append(escape(action.getErrorMessage())).append("</td>")
+                    .append("</tr>");
+        }
+        html.append("</tbody></table>");
         return html.toString();
     }
 

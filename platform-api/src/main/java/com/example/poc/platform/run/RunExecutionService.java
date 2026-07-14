@@ -1,9 +1,10 @@
 package com.example.poc.platform.run;
 
 import com.example.poc.engine.ApiCaseRunner;
-import com.example.poc.engine.ApiStep;
 import com.example.poc.engine.ApiTestCase;
 import com.example.poc.engine.CryptoProfile;
+import com.example.poc.engine.RuntimeSpec;
+import com.example.poc.engine.report.ActionExecutionReport;
 import com.example.poc.engine.report.ApiCaseExecutionReport;
 import com.example.poc.engine.report.ApiStepExecutionReport;
 import com.example.poc.engine.report.ReportRequest;
@@ -120,18 +121,15 @@ public class RunExecutionService {
 
             if (profile != null) {
                 CryptoProfile cryptoProfile = toCryptoProfile(profile);
-                if (testCase.getSteps().isEmpty()) {
-                    Map<String, CryptoProfile> profiles = new LinkedHashMap<>(testCase.getProfiles());
-                    profiles.put("default", cryptoProfile);
-                    testCase.setProfiles(profiles);
-                } else {
-                    Map<String, CryptoProfile> profiles = new LinkedHashMap<>(testCase.getProfiles());
-                    profiles.put("__platform_selected__", cryptoProfile);
-                    testCase.setProfiles(profiles);
-                    for (ApiStep step : testCase.getSteps()) {
-                        step.setProfile("__platform_selected__");
-                    }
+                Map<String, CryptoProfile> profiles = new LinkedHashMap<>(testCase.getProfiles());
+                profiles.put(profile.name(), cryptoProfile);
+                testCase.setProfiles(profiles);
+                RuntimeSpec runtime = testCase.getRuntime();
+                if (runtime == null) {
+                    runtime = new RuntimeSpec();
+                    testCase.setRuntime(runtime);
                 }
+                runtime.setProfile(profile.name());
             }
 
             return yamlMapper.writeValueAsString(testCase);
@@ -161,6 +159,7 @@ public class RunExecutionService {
         entity.setErrorMessage(step.getErrorMessage());
         entity.setRequestJson(jsonCodec.write(step.getRequest()));
         entity.setResponseJson(jsonCodec.write(step.getResponse()));
+        entity.setActionsJson(jsonCodec.write(step.getActions()));
         entity.setDecryptedPayloadsJson(jsonCodec.write(step.getDecryptedPayloads()));
         entity.setValidationsJson(jsonCodec.write(step.getValidations()));
         entity.setExtractedValuesJson(jsonCodec.write(step.getExtractedValues()));
@@ -192,6 +191,7 @@ public class RunExecutionService {
                 entity.getErrorMessage(),
                 jsonCodec.read(entity.getRequestJson(), new TypeReference<ReportRequest>() {}, null),
                 jsonCodec.read(entity.getResponseJson(), new TypeReference<ReportResponse>() {}, null),
+                jsonCodec.read(entity.getActionsJson(), new TypeReference<List<ActionExecutionReport>>() {}, List.of()),
                 jsonCodec.readObjectMap(entity.getDecryptedPayloadsJson()),
                 jsonCodec.read(entity.getValidationsJson(), new TypeReference<List<ValidationReport>>() {}, List.of()),
                 jsonCodec.readObjectMap(entity.getExtractedValuesJson()));
@@ -227,6 +227,7 @@ public class RunExecutionService {
             String errorMessage,
             ReportRequest request,
             ReportResponse response,
+            List<ActionExecutionReport> actions,
             Map<String, Object> decryptedPayloads,
             List<ValidationReport> validations,
             Map<String, Object> extractedValues) {

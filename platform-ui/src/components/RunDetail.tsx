@@ -165,6 +165,44 @@ function StepEvidence({ step }: { step: StepRun }) {
             ),
           },
           {
+            key: 'actions',
+            label: 'Actions',
+            children: (
+              <List
+                dataSource={step.actions ?? []}
+                locale={{ emptyText: 'No actions executed' }}
+                renderItem={(action) => (
+                  <List.Item>
+                    <div className="action-evidence">
+                      <div className="panel-title-row compact">
+                        <Space>
+                          <Text strong>{`${action.stage} #${action.index}`}</Text>
+                          <Text>{action.name}</Text>
+                          <Text type="secondary">{action.type}</Text>
+                        </Space>
+                        <Space>
+                          <Text type="secondary">{`${action.durationMs} ms`}</Text>
+                          <StatusPill status={action.status} />
+                        </Space>
+                      </div>
+                      <div className="designer-grid">
+                        <div>
+                          <Text type="secondary">Input</Text>
+                          <JsonPane value={action.input} emptyLabel="-" />
+                        </div>
+                        <div>
+                          <Text type="secondary">Output</Text>
+                          <JsonPane value={action.output} emptyLabel="-" />
+                        </div>
+                      </div>
+                      {action.errorMessage ? <Alert type="error" showIcon message={action.errorMessage} /> : null}
+                    </div>
+                  </List.Item>
+                )}
+              />
+            ),
+          },
+          {
             key: 'decrypted',
             label: 'Decrypted',
             children: <JsonPane value={step.decryptedPayloads} emptyLabel="No decrypted payloads" />,

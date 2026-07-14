@@ -1,15 +1,15 @@
 package com.example.poc.engine;
 
+import com.example.poc.engine.report.ActionExecutionReport;
 import com.example.poc.engine.report.ApiCaseExecutionReport;
 import com.example.poc.engine.report.ApiCaseReportWriter;
 import com.example.poc.engine.report.ApiStepExecutionReport;
 import com.example.poc.engine.report.ReportRequest;
 import com.example.poc.engine.report.ReportResponse;
 import com.example.poc.engine.report.ValidationReport;
+import com.example.poc.pgp.PgpCryptoService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-import com.example.poc.pgp.PgpCryptoService;
-import com.example.poc.pgp.PgpProfileMaterial;
 import com.jayway.jsonpath.JsonPath;
 import java.io.IOException;
 import java.io.InputStream;
@@ -20,7 +20,8 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -34,8 +35,10 @@ public class ApiCaseRunner {
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final VariableResolver variableResolver = new VariableResolver();
     private final ApiCaseReportWriter reportWriter = new ApiCaseReportWriter();
-    private final FakeDecryptor fakeDecryptor = new FakeDecryptor();
-    private final PgpCryptoService pgpCryptoService = new PgpCryptoService();
+    private final CaseActionExecutor actionExecutor = new CaseActionExecutor(
+            jsonMapper,
+            variableResolver,
+            new PgpCryptoService());
 
     public ApiCaseExecutionReport run(String caseFile) {
         return runInternal(caseFile, () -> loadCase(caseFile), true);
@@ -49,52 +52,43 @@ public class ApiCaseRunner {
         return loadInlineCase(caseRef, caseContent);
     }
 
-    private ApiCaseExecutionReport runInternal(String caseRef, Supplier<ApiTestCase> caseLoader, boolean propagateFailure) {
+    private ApiCaseExecutionReport runInternal(
+            String caseRef,
+            Supplier<ApiTestCase> caseLoader,
+            boolean propagateFailure) {
         ApiCaseExecutionReport report = new ApiCaseExecutionReport();
         report.setCaseFile(caseRef);
-        report.setStartedAt(java.time.Instant.now());
+        report.setStartedAt(Instant.now());
         Throwable failure = null;
         TestContext context = new TestContext();
 
         try {
             ApiTestCase testCase = caseLoader.get();
             report.setCaseName(testCase.getName());
-            testCase.getVariables().forEach((key, value) -> context.put(key, variableResolver.resolveObject(value, context)));
+            testCase.getVariables().forEach(
+                    (key, value) -> context.put(key, variableResolver.resolveObject(value, context)));
 
-            List<ApiStep> steps = resolveSteps(testCase);
-            boolean caseHasStepFailure = false;
-            for (int i = 0; i < steps.size(); i++) {
-                ApiStep step = steps.get(i);
+            for (int i = 0; i < testCase.getSteps().size(); i++) {
+                ApiStep step = testCase.getSteps().get(i);
                 ApiStepExecutionReport stepReport = new ApiStepExecutionReport();
                 stepReport.setIndex(i + 1);
                 stepReport.setName(stepName(step, i));
-                stepReport.setProfile(step.getProfile());
+                stepReport.setProfile(resolveProfileName(testCase, step));
                 report.getSteps().add(stepReport);
 
                 try {
-                    CryptoProfile profile = resolveProfile(testCase, step, context);
-                    HttpExchange exchange = execute(step.getRequest(), context, stepReport, profile);
-                    stepReport.setResponse(toReportResponse(exchange.response()));
-                    Map<String, Object> decryptedPayloads = decryptPayloads(step, exchange.response().body(), stepReport, profile);
-                    assertResponse(testCase, step, exchange.response(), context, stepReport, decryptedPayloads);
-                    extractValues(step, exchange.response().body(), context, stepReport, decryptedPayloads);
+                    executeStep(testCase, step, context, stepReport);
                 } catch (Throwable stepFailure) {
-                    caseHasStepFailure = true;
                     stepReport.setStatus("FAILED");
                     stepReport.setErrorMessage(stepFailure.getMessage());
-                    if (!step.isContinueOnFailure()) {
-                        rethrow(stepFailure);
-                    }
+                    rethrow(stepFailure);
                 }
-            }
-            if (caseHasStepFailure) {
-                throw new AssertionError("API case has failed step(s): " + testCase.getName());
             }
         } catch (Throwable e) {
             failure = e;
         } finally {
-            report.setFinishedAt(java.time.Instant.now());
-            report.setDurationMs(java.time.Duration.between(report.getStartedAt(), report.getFinishedAt()).toMillis());
+            report.setFinishedAt(Instant.now());
+            report.setDurationMs(Duration.between(report.getStartedAt(), report.getFinishedAt()).toMillis());
             if (failure != null) {
                 report.setStatus("FAILED");
                 report.setErrorMessage(failure.getMessage());
@@ -106,17 +100,44 @@ public class ApiCaseRunner {
         }
 
         if (propagateFailure) {
-            if (failure instanceof RuntimeException runtimeException) {
-                throw runtimeException;
-            }
-            if (failure instanceof Error error) {
-                throw error;
-            }
-            if (failure != null) {
-                throw new RuntimeException(failure);
-            }
+            rethrow(failure);
         }
         return report;
+    }
+
+    private void executeStep(
+            ApiTestCase testCase,
+            ApiStep step,
+            TestContext context,
+            ApiStepExecutionReport stepReport) throws IOException, InterruptedException {
+        CryptoProfile profile = resolveProfile(testCase, step, context);
+        PreparedRequest prepared = prepareRequest(step, context);
+        ActionExecutionState actionState = new ActionExecutionState();
+        actionState.setRequestBody(prepared.body());
+
+        executeActions(
+                "beforeSend",
+                step.getActions().getBeforeSend(),
+                actionState,
+                context,
+                profile,
+                stepReport);
+
+        HttpResponse<String> response = send(prepared, actionState.getRequestBody(), stepReport);
+        stepReport.setResponse(toReportResponse(response));
+        actionState.setResponseBody(response.body());
+
+        executeActions(
+                "afterReceive",
+                step.getActions().getAfterReceive(),
+                actionState,
+                context,
+                profile,
+                stepReport);
+        stepReport.getDecryptedPayloads().putAll(actionState.getDecryptedPayloads());
+
+        assertResponse(testCase, step, response, context, stepReport, actionState.getDecryptedPayloads());
+        extractValues(step, response.body(), context, stepReport, actionState.getDecryptedPayloads());
     }
 
     private ApiTestCase loadCase(String caseFile) {
@@ -143,68 +164,109 @@ public class ApiCaseRunner {
         }
     }
 
-    private void validate(ApiTestCase testCase, String caseFile) {
-        List<ApiStep> steps = resolveSteps(testCase);
-        if (steps.isEmpty()) {
-            throw new IllegalArgumentException("Missing steps or request section in " + caseFile);
+    private void validate(ApiTestCase testCase, String caseRef) {
+        if (!"v1".equals(testCase.getDslVersion())) {
+            throw new IllegalArgumentException("dslVersion must be v1 in " + caseRef);
         }
-        for (int i = 0; i < steps.size(); i++) {
-            ApiStep step = steps.get(i);
-            String prefix = "Step " + (i + 1) + " in " + caseFile;
-            if (isBlank(step.getProfile())) {
-                throw new IllegalArgumentException(prefix + " is missing profile");
+        if (testCase.getSteps().isEmpty()) {
+            throw new IllegalArgumentException("Missing steps in " + caseRef);
+        }
+        for (int i = 0; i < testCase.getSteps().size(); i++) {
+            ApiStep step = testCase.getSteps().get(i);
+            String prefix = "Step " + (i + 1) + " in " + caseRef;
+            if (!"http".equals(step.getType())) {
+                throw new IllegalArgumentException(prefix + " has unsupported type " + step.getType());
             }
-            if (!testCase.getProfiles().containsKey(step.getProfile())) {
-                throw new IllegalArgumentException(prefix + " references unknown profile " + step.getProfile());
+            if (step.getOperation() == null || isBlank(step.getOperation().getMethod())) {
+                throw new IllegalArgumentException(prefix + " is missing operation.method");
+            }
+            if (isBlank(step.getOperation().getPath())) {
+                throw new IllegalArgumentException(prefix + " is missing operation.path");
             }
             if (step.getRequest() == null) {
-                throw new IllegalArgumentException(prefix + " is missing request section");
+                throw new IllegalArgumentException(prefix + " is missing request");
             }
-            if (step.getExpect() == null) {
-                throw new IllegalArgumentException(prefix + " is missing expect section");
+            if (step.getResponse() == null) {
+                throw new IllegalArgumentException(prefix + " is missing response");
             }
-            if (isBlank(step.getRequest().getMethod())) {
-                throw new IllegalArgumentException(prefix + " is missing request.method");
+            validateActions(step.getActions().getBeforeSend(), "beforeSend", prefix);
+            validateActions(step.getActions().getAfterReceive(), "afterReceive", prefix);
+            validateAssertions(step.getResponse().getAssertions(), prefix);
+            validateExtract(step.getResponse().getExtract(), prefix);
+
+            if (hasCryptoAction(step)) {
+                String profileName = resolveProfileName(testCase, step);
+                if (isBlank(profileName)) {
+                    throw new IllegalArgumentException(prefix + " has a crypto action but no Step or Scenario profile");
+                }
+                if (!testCase.getProfiles().containsKey(profileName)) {
+                    throw new IllegalArgumentException(prefix + " references unknown profile " + profileName);
+                }
             }
-            if (isBlank(step.getRequest().getBaseUrl())) {
-                throw new IllegalArgumentException(prefix + " is missing request.baseUrl");
-            }
-            validateTransform(step.getRequest().getTransform(), prefix);
-            validateExpect(step.getExpect(), prefix);
-            validateExtract(step.getExtract(), prefix);
         }
     }
 
-    private void validateTransform(RequestTransformSpec transform, String prefix) {
-        if (transform == null) {
-            return;
-        }
-        if (isBlank(transform.getType())) {
-            throw new IllegalArgumentException(prefix + " has a request transform without type");
-        }
-        if (!"pgp".equalsIgnoreCase(transform.getType())) {
-            throw new IllegalArgumentException(prefix + " has unsupported request transform type " + transform.getType());
-        }
-        if ("jsonField".equalsIgnoreCase(transform.getOutput().getMode()) && isBlank(transform.getOutput().getField())) {
-            throw new IllegalArgumentException(prefix + " request transform jsonField mode is missing output.field");
+    private void validateActions(List<CaseActionSpec> actions, String stage, String prefix) {
+        List<String> allowed = "beforeSend".equals(stage)
+                ? CaseActionExecutor.BEFORE_SEND_TYPES
+                : CaseActionExecutor.AFTER_RECEIVE_TYPES;
+        for (int i = 0; i < actions.size(); i++) {
+            CaseActionSpec action = actions.get(i);
+            String actionPrefix = prefix + " actions." + stage + "[" + i + "]";
+            if (isBlank(action.getType())) {
+                throw new IllegalArgumentException(actionPrefix + " is missing type");
+            }
+            if (!allowed.contains(action.getType())) {
+                throw new IllegalArgumentException(actionPrefix + " does not support " + action.getType());
+            }
+            if (CaseActionExecutor.BUILD_JSON.equals(action.getType())) {
+                if (action.getTemplate() == null) {
+                    throw new IllegalArgumentException(actionPrefix + " is missing template");
+                }
+                if (!"request.body".equals(action.getOutput().getTarget())) {
+                    throw new IllegalArgumentException(actionPrefix + " must output to request.body");
+                }
+                continue;
+            }
+            if (isBlank(action.getInput().getSource())) {
+                throw new IllegalArgumentException(actionPrefix + " is missing input.source");
+            }
+            if (isBlank(action.getOutput().getTarget())) {
+                throw new IllegalArgumentException(actionPrefix + " is missing output.target");
+            }
+            if ("beforeSend".equals(stage)) {
+                String source = action.getInput().getSource();
+                if (!("request.body".equals(source)
+                        || source.startsWith("variables.")
+                        || source.startsWith("artifacts."))) {
+                    throw new IllegalArgumentException(actionPrefix + " has unsupported Before input source " + source);
+                }
+                String target = action.getOutput().getTarget();
+                if (!("request.body".equals(target) || target.startsWith("artifacts."))) {
+                    throw new IllegalArgumentException(actionPrefix + " has unsupported Before output target " + target);
+                }
+            }
+            if (CaseActionExecutor.DECRYPT_AND_VERIFY.equals(action.getType())
+                    && (!"response.body".equals(action.getInput().getSource())
+                    || !action.getOutput().getTarget().startsWith("decrypted."))) {
+                throw new IllegalArgumentException(
+                        actionPrefix + " must read response.body and output to decrypted.<name>");
+            }
+            if (CaseActionExecutor.SIGN_AND_ENCRYPT.equals(action.getType())
+                    && !isBlank(action.getOutput().getFormat())
+                    && !"text".equalsIgnoreCase(action.getOutput().getFormat())) {
+                throw new IllegalArgumentException(actionPrefix + " only supports text output");
+            }
         }
     }
 
-    private void validateExpect(ExpectSpec expect, String prefix) {
-        for (DecryptSpec decryptSpec : expect.getDecrypt()) {
-            if (isBlank(decryptSpec.getName())) {
-                throw new IllegalArgumentException(prefix + " has a decrypt entry without name");
+    private void validateAssertions(List<ValidationSpec> assertions, String prefix) {
+        for (ValidationSpec assertion : assertions) {
+            if (isBlank(assertion.getSource())) {
+                throw new IllegalArgumentException(prefix + " has an assertion without source");
             }
-            if (isBlank(resolveDecryptPath(decryptSpec.getInput()))) {
-                throw new IllegalArgumentException(prefix + " decrypt entry " + decryptSpec.getName() + " is missing input field/path");
-            }
-        }
-        for (ValidationSpec validation : resolveValidations(expect)) {
-            if (isBlank(validation.getSource())) {
-                throw new IllegalArgumentException(prefix + " has a validation without source");
-            }
-            if (isBlank(validation.getPath())) {
-                throw new IllegalArgumentException(prefix + " has a validation without path");
+            if (isBlank(assertion.getPath())) {
+                throw new IllegalArgumentException(prefix + " has an assertion without path");
             }
         }
     }
@@ -212,70 +274,103 @@ public class ApiCaseRunner {
     private void validateExtract(Map<String, Object> extract, String prefix) {
         for (Map.Entry<String, Object> entry : extract.entrySet()) {
             ExtractValueSpec spec = toExtractSpec(entry.getValue());
-            if (isBlank(spec.getPath())) {
-                throw new IllegalArgumentException(prefix + " extract " + entry.getKey() + " is missing path");
+            if (isBlank(spec.getSource()) || isBlank(spec.getPath())) {
+                throw new IllegalArgumentException(prefix + " extract " + entry.getKey() + " requires source and path");
             }
         }
     }
 
-    private List<ApiStep> resolveSteps(ApiTestCase testCase) {
-        if (!testCase.getSteps().isEmpty()) {
-            return testCase.getSteps();
-        }
-        if (testCase.getRequest() == null && testCase.getExpect() == null) {
-            return List.of();
-        }
-        ApiStep step = new ApiStep();
-        step.setName(testCase.getName());
-        step.setProfile("default");
-        step.setRequest(testCase.getRequest());
-        step.setExpect(testCase.getExpect());
-        step.setExtract(testCase.getExtract());
-        return List.of(step);
+    private PreparedRequest prepareRequest(ApiStep step, TestContext context) {
+        String method = variableResolver.resolveString(step.getOperation().getMethod(), context).toUpperCase();
+        URI uri = buildUri(step, context);
+        Map<String, String> headers = new LinkedHashMap<>();
+        step.getRequest().getHeaders().forEach(
+                (name, value) -> headers.put(name, variableResolver.resolveString(value, context)));
+        Object body = variableResolver.resolveObject(step.getRequest().getBody(), context);
+        return new PreparedRequest(method, uri, headers, body);
     }
 
-    private HttpExchange execute(
-            RequestSpec requestSpec,
-            TestContext context,
-            ApiStepExecutionReport stepReport,
-            CryptoProfile profile) throws IOException, InterruptedException {
-        String method = variableResolver.resolveString(requestSpec.getMethod(), context).toUpperCase();
-        URI uri = buildUri(requestSpec, context);
-        HttpRequest.Builder builder = HttpRequest.newBuilder(uri);
-
-        ReportRequest reportRequest = new ReportRequest();
-        reportRequest.setMethod(method);
-        reportRequest.setUrl(uri.toString());
-
-        requestSpec.getHeaders().forEach((name, value) -> {
-            String resolvedValue = variableResolver.resolveString(value, context);
-            builder.header(name, resolvedValue);
-            reportRequest.getHeaders().put(name, resolvedValue);
-        });
-
-        if (requestSpec.getBody() == null || "GET".equals(method) || "DELETE".equals(method)) {
-            builder.method(method, HttpRequest.BodyPublishers.noBody());
-        } else {
-            Object resolvedBody = variableResolver.resolveObject(requestSpec.getBody(), context);
-            Object wireBody = transformRequestBody(requestSpec, resolvedBody, profile);
-            reportRequest.setBody(wireBody);
-            builder.method(method, HttpRequest.BodyPublishers.ofString(serializeWireBody(wireBody)));
-        }
-
-        stepReport.setRequest(reportRequest);
-        HttpResponse<String> response = httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
-        return new HttpExchange(reportRequest, response);
-    }
-
-    private URI buildUri(RequestSpec requestSpec, TestContext context) {
-        String baseUrl = trimTrailingSlash(variableResolver.resolveString(requestSpec.getBaseUrl(), context));
-        String path = Objects.toString(variableResolver.resolveString(nullToEmpty(requestSpec.getPath()), context), "");
+    private URI buildUri(ApiStep step, TestContext context) {
+        String baseUrl = resolveBaseUrl(step.getOperation(), context);
+        String path = variableResolver.resolveString(step.getOperation().getPath(), context);
         String normalizedPath = path.startsWith("/") ? path : "/" + path;
-        String query = requestSpec.getQuery().entrySet().stream()
-                .map(entry -> encode(entry.getKey()) + "=" + encode(String.valueOf(variableResolver.resolveObject(entry.getValue(), context))))
+        String query = step.getRequest().getQuery().entrySet().stream()
+                .map(entry -> encode(entry.getKey()) + "="
+                        + encode(String.valueOf(variableResolver.resolveObject(entry.getValue(), context))))
                 .collect(Collectors.joining("&"));
-        String uri = baseUrl + normalizedPath + (query.isBlank() ? "" : "?" + query);
-        return URI.create(uri);
+        return URI.create(trimTrailingSlash(baseUrl) + normalizedPath + (query.isBlank() ? "" : "?" + query));
+    }
+
+    private String resolveBaseUrl(OperationSpec operation, TestContext context) {
+        if (!isBlank(operation.getService())) {
+            Object serviceBaseUrl = context.get(operation.getService() + ".baseUrl").orElse(null);
+            if (serviceBaseUrl != null) {
+                return String.valueOf(serviceBaseUrl);
+            }
+        }
+        return context.get("baseUrl")
+                .map(String::valueOf)
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "No baseUrl is available for operation " + operation.getOperationId()));
+    }
+
+    private HttpResponse<String> send(
+            PreparedRequest prepared,
+            Object wireBody,
+            ApiStepExecutionReport stepReport) throws IOException, InterruptedException {
+        HttpRequest.Builder builder = HttpRequest.newBuilder(prepared.uri());
+        ReportRequest reportRequest = new ReportRequest();
+        reportRequest.setMethod(prepared.method());
+        reportRequest.setUrl(prepared.uri().toString());
+        prepared.headers().forEach((name, value) -> {
+            builder.header(name, value);
+            reportRequest.getHeaders().put(name, value);
+        });
+        if (wireBody == null) {
+            builder.method(prepared.method(), HttpRequest.BodyPublishers.noBody());
+        } else {
+            reportRequest.setBody(wireBody);
+            builder.method(prepared.method(), HttpRequest.BodyPublishers.ofString(serializeWireBody(wireBody)));
+        }
+        stepReport.setRequest(reportRequest);
+        return httpClient.send(builder.build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private void executeActions(
+            String stage,
+            List<CaseActionSpec> actions,
+            ActionExecutionState state,
+            TestContext context,
+            CryptoProfile profile,
+            ApiStepExecutionReport stepReport) {
+        for (int i = 0; i < actions.size(); i++) {
+            CaseActionSpec action = actions.get(i);
+            ActionExecutionReport actionReport = new ActionExecutionReport();
+            actionReport.setStage(stage);
+            actionReport.setIndex(i + 1);
+            actionReport.setType(action.getType());
+            actionReport.setName(isBlank(action.getName()) ? action.getType() : action.getName());
+            stepReport.getActions().add(actionReport);
+
+            if (!action.isEnabled()) {
+                actionReport.setStatus("SKIPPED");
+                continue;
+            }
+
+            long startedAt = System.nanoTime();
+            try {
+                Object input = actionExecutor.inspectInput(action, state, context);
+                actionReport.setInput(input);
+                actionReport.setOutput(actionExecutor.execute(action, state, profile, input));
+                actionReport.setStatus("PASSED");
+            } catch (RuntimeException error) {
+                actionReport.setStatus("FAILED");
+                actionReport.setErrorMessage(error.getMessage());
+                throw error;
+            } finally {
+                actionReport.setDurationMs(Duration.ofNanos(System.nanoTime() - startedAt).toMillis());
+            }
+        }
     }
 
     private void assertResponse(
@@ -286,10 +381,11 @@ public class ApiCaseRunner {
             ApiStepExecutionReport stepReport,
             Map<String, Object> decryptedPayloads) {
         boolean hasFailure = false;
-        int expectedStatus = step.getExpect().getStatus();
+        int expectedStatus = step.getResponse().getStatus();
         int actualStatus = response.statusCode();
         if (actualStatus == expectedStatus) {
-            stepReport.getValidations().add(ValidationReport.passed("status", "response.status", expectedStatus, actualStatus));
+            stepReport.getValidations().add(
+                    ValidationReport.passed("status", "response.status", expectedStatus, actualStatus));
         } else {
             hasFailure = true;
             stepReport.getValidations().add(ValidationReport.failed(
@@ -300,33 +396,27 @@ public class ApiCaseRunner {
                     "Expected HTTP status " + expectedStatus + " but got " + actualStatus));
         }
 
-        for (ValidationSpec validation : resolveValidations(step.getExpect())) {
-            Object expected = variableResolver.resolveObject(validation.getExpected(), context);
+        for (ValidationSpec assertion : step.getResponse().getAssertions()) {
+            Object expected = variableResolver.resolveObject(assertion.getExpected(), context);
             try {
-                Object actual = readFromSource(validation.getSource(), validation.getPath(), response.body(), decryptedPayloads);
-                if (matches(validation.getOperator(), actual, expected)) {
+                Object actual = readFromSource(
+                        assertion.getSource(), assertion.getPath(), response.body(), decryptedPayloads);
+                if (matches(assertion.getOperator(), actual, expected)) {
                     stepReport.getValidations().add(ValidationReport.passed(
-                            validation.getOperator(),
-                            validationTarget(validation),
-                            expected,
-                            actual));
+                            assertion.getOperator(), validationTarget(assertion), expected, actual));
                 } else {
                     hasFailure = true;
                     stepReport.getValidations().add(ValidationReport.failed(
-                            validation.getOperator(),
-                            validationTarget(validation),
+                            assertion.getOperator(),
+                            validationTarget(assertion),
                             expected,
                             actual,
-                            "Expected validation did not match actual value"));
+                            "Expected assertion did not match actual value"));
                 }
             } catch (RuntimeException e) {
                 hasFailure = true;
                 stepReport.getValidations().add(ValidationReport.failed(
-                        validation.getOperator(),
-                        validationTarget(validation),
-                        expected,
-                        null,
-                        e.getMessage()));
+                        assertion.getOperator(), validationTarget(assertion), expected, null, e.getMessage()));
             }
         }
 
@@ -341,7 +431,7 @@ public class ApiCaseRunner {
             TestContext context,
             ApiStepExecutionReport stepReport,
             Map<String, Object> decryptedPayloads) {
-        step.getExtract().forEach((name, rawSpec) -> {
+        step.getResponse().getExtract().forEach((name, rawSpec) -> {
             ExtractValueSpec spec = toExtractSpec(rawSpec);
             Object value = readFromSource(spec.getSource(), spec.getPath(), responseBody, decryptedPayloads);
             context.put(name, value);
@@ -349,128 +439,158 @@ public class ApiCaseRunner {
         });
     }
 
-    private Map<String, Object> decryptPayloads(
-            ApiStep step,
-            String responseBody,
-            ApiStepExecutionReport stepReport,
-            CryptoProfile profile) {
-        Map<String, Object> decryptedPayloads = new LinkedHashMap<>();
-        for (DecryptSpec decryptSpec : step.getExpect().getDecrypt()) {
-            Object encryptedValue = JsonPath.read(responseBody, resolveDecryptPath(decryptSpec.getInput()));
-            String cipherText = Objects.toString(encryptedValue, null);
-            Object decrypted = decrypt(cipherText, decryptSpec, profile);
-            decryptedPayloads.put(decryptSpec.getName(), decrypted);
-            stepReport.getDecryptedPayloads().put(decryptSpec.getName(), decrypted);
-        }
-        return decryptedPayloads;
-    }
-
-    private Object decrypt(String cipherText, DecryptSpec decryptSpec, CryptoProfile profile) {
-        if ("fake".equalsIgnoreCase(decryptSpec.getAlgorithm())) {
-            return fakeDecryptor.decrypt(cipherText, decryptSpec.getPlaintextFormat(), profile);
-        }
-        if ("pgp".equalsIgnoreCase(decryptSpec.getAlgorithm())) {
-            String plaintext = pgpCryptoService.decryptAndVerify(cipherText, toPgpProfile(profile));
-            return deserializePlaintext(plaintext, decryptSpec.getPlaintextFormat());
-        }
-        throw new IllegalArgumentException("Unsupported decrypt algorithm: " + decryptSpec.getAlgorithm());
-    }
-
-    private List<ValidationSpec> resolveValidations(ExpectSpec expect) {
-        List<ValidationSpec> validations = new ArrayList<>();
-        expect.getJsonPath().forEach((path, expected) -> {
-            ValidationSpec validation = new ValidationSpec();
-            validation.setSource("raw");
-            validation.setPath(path);
-            validation.setOperator("equals");
-            validation.setExpected(expected);
-            validations.add(validation);
-        });
-        validations.addAll(expect.getValidations());
-        return validations;
-    }
-
-    private ExtractValueSpec toExtractSpec(Object rawSpec) {
-        if (rawSpec instanceof String path) {
-            ExtractValueSpec spec = new ExtractValueSpec();
-            spec.setSource("raw");
-            spec.setPath(path);
-            return spec;
-        }
-        return jsonMapper.convertValue(rawSpec, ExtractValueSpec.class);
-    }
-
     private Object readFromSource(
             String source,
             String path,
-            String rawResponseBody,
+            String responseBody,
             Map<String, Object> decryptedPayloads) {
-        if ("raw".equals(source)) {
-            return JsonPath.read(rawResponseBody, path);
-        }
-        String prefix = "decrypted.";
-        if (source != null && source.startsWith(prefix)) {
-            String payloadName = source.substring(prefix.length());
-            Object payload = decryptedPayloads.get(payloadName);
-            if (payload == null) {
+        Object value;
+        if ("response.body".equals(source)) {
+            value = responseBody;
+        } else if (source != null && source.startsWith("decrypted.")) {
+            String payloadName = source.substring("decrypted.".length());
+            if (!decryptedPayloads.containsKey(payloadName)) {
                 throw new IllegalArgumentException("Unknown decrypted payload source: " + source);
             }
-            return JsonPath.read(payload, path);
+            value = decryptedPayloads.get(payloadName);
+        } else {
+            throw new IllegalArgumentException("Unsupported assertion/extract source: " + source);
         }
-        throw new IllegalArgumentException("Unsupported validation/extract source: " + source);
+        if (isBlank(path)) {
+            return value;
+        }
+        return value instanceof String text
+                ? JsonPath.read(text, path)
+                : JsonPath.read(value, path);
     }
 
-    private String resolveDecryptPath(DecryptInputSpec input) {
-        if (input == null) {
+    private ExtractValueSpec toExtractSpec(Object rawSpec) {
+        return jsonMapper.convertValue(rawSpec, ExtractValueSpec.class);
+    }
+
+    private CryptoProfile resolveProfile(ApiTestCase testCase, ApiStep step, TestContext context) {
+        String profileName = resolveProfileName(testCase, step);
+        if (isBlank(profileName)) {
             return null;
         }
-        if (!isBlank(input.getPath())) {
-            return input.getPath();
+        CryptoProfile source = testCase.getProfiles().get(profileName);
+        if (source == null) {
+            throw new IllegalArgumentException("Unknown profile: " + profileName);
         }
-        if ("jsonField".equalsIgnoreCase(input.getMode()) && !isBlank(input.getField())) {
-            return "$." + input.getField();
+        CryptoProfile resolved = new CryptoProfile();
+        resolved.setSenderPublicKey(resolveProfileValue(source.getSenderPublicKey(), context));
+        resolved.setSenderPrivateKey(resolveProfileValue(source.getSenderPrivateKey(), context));
+        resolved.setSenderPrivateKeyPassphrase(resolveProfileValue(source.getSenderPrivateKeyPassphrase(), context));
+        resolved.setRecipientPublicKey(resolveProfileValue(source.getRecipientPublicKey(), context));
+        resolved.setRecipientPrivateKey(resolveProfileValue(source.getRecipientPrivateKey(), context));
+        resolved.setRecipientPrivateKeyPassphrase(resolveProfileValue(source.getRecipientPrivateKeyPassphrase(), context));
+        return resolved;
+    }
+
+    private String resolveProfileName(ApiTestCase testCase, ApiStep step) {
+        if (step.getRuntime() != null && !isBlank(step.getRuntime().getProfile())) {
+            return step.getRuntime().getProfile();
         }
-        return null;
+        return testCase.getRuntime() == null ? null : testCase.getRuntime().getProfile();
+    }
+
+    private boolean hasCryptoAction(ApiStep step) {
+        return step.getActions().getBeforeSend().stream().anyMatch(this::isCryptoAction)
+                || step.getActions().getAfterReceive().stream().anyMatch(this::isCryptoAction);
+    }
+
+    private boolean isCryptoAction(CaseActionSpec action) {
+        return CaseActionExecutor.SIGN_AND_ENCRYPT.equals(action.getType())
+                || CaseActionExecutor.DECRYPT_AND_VERIFY.equals(action.getType());
+    }
+
+    private boolean matches(String operator, Object actual, Object expected) {
+        String resolvedOperator = isBlank(operator) ? "equals" : operator;
+        if ("equals".equalsIgnoreCase(resolvedOperator)) {
+            return Objects.equals(normalizeNumber(actual), normalizeNumber(expected));
+        }
+        if ("notEquals".equalsIgnoreCase(resolvedOperator)) {
+            return !Objects.equals(normalizeNumber(actual), normalizeNumber(expected));
+        }
+        if ("exists".equalsIgnoreCase(resolvedOperator)) {
+            return actual != null;
+        }
+        if ("notExists".equalsIgnoreCase(resolvedOperator)) {
+            return actual == null;
+        }
+        if ("contains".equalsIgnoreCase(resolvedOperator)) {
+            if (actual instanceof String text) {
+                return text.contains(String.valueOf(expected));
+            }
+            if (actual instanceof List<?> list) {
+                return list.contains(expected);
+            }
+            return false;
+        }
+        if ("greaterThan".equalsIgnoreCase(resolvedOperator)) {
+            return toDouble(actual) > toDouble(expected);
+        }
+        if ("lessThan".equalsIgnoreCase(resolvedOperator)) {
+            return toDouble(actual) < toDouble(expected);
+        }
+        throw new IllegalArgumentException("Unsupported assertion operator: " + operator);
+    }
+
+    private Object normalizeNumber(Object value) {
+        return value instanceof Number number ? number.doubleValue() : value;
+    }
+
+    private double toDouble(Object value) {
+        if (value instanceof Number number) {
+            return number.doubleValue();
+        }
+        return Double.parseDouble(String.valueOf(value));
+    }
+
+    private ReportResponse toReportResponse(HttpResponse<String> response) {
+        ReportResponse reportResponse = new ReportResponse();
+        reportResponse.setStatusCode(response.statusCode());
+        reportResponse.setHeaders(response.headers().map());
+        reportResponse.setBody(response.body());
+        return reportResponse;
+    }
+
+    private String serializeWireBody(Object wireBody) {
+        try {
+            return wireBody instanceof String text ? text : jsonMapper.writeValueAsString(wireBody);
+        } catch (IOException e) {
+            throw new IllegalArgumentException("Failed to serialize wire request body", e);
+        }
+    }
+
+    private String resolveProfileValue(String value, TestContext context) {
+        return value == null ? null : variableResolver.resolveString(value, context);
     }
 
     private String validationTarget(ValidationSpec validation) {
         return validation.getSource() + " " + validation.getPath();
     }
 
-    private CryptoProfile resolveProfile(ApiTestCase testCase, ApiStep step, TestContext context) {
-        CryptoProfile originalProfile = testCase.getProfiles().get(step.getProfile());
-        if (originalProfile == null) {
-            throw new IllegalArgumentException("Unknown profile: " + step.getProfile());
-        }
-        CryptoProfile profile = new CryptoProfile();
-        profile.setSenderPublicKey(resolveProfileValue(originalProfile.getSenderPublicKey(), context));
-        profile.setSenderPrivateKey(resolveProfileValue(originalProfile.getSenderPrivateKey(), context));
-        profile.setSenderPrivateKeyPassphrase(resolveProfileValue(originalProfile.getSenderPrivateKeyPassphrase(), context));
-        profile.setRecipientPublicKey(resolveProfileValue(originalProfile.getRecipientPublicKey(), context));
-        profile.setRecipientPrivateKey(resolveProfileValue(originalProfile.getRecipientPrivateKey(), context));
-        profile.setRecipientPrivateKeyPassphrase(resolveProfileValue(originalProfile.getRecipientPrivateKeyPassphrase(), context));
-        return profile;
-    }
-
-    private boolean matches(String operator, Object actual, Object expected) {
-        String resolvedOperator = operator == null ? "equals" : operator;
-        if ("equals".equalsIgnoreCase(resolvedOperator)) {
-            return String.valueOf(actual).equals(String.valueOf(expected));
-        }
-        if ("exists".equalsIgnoreCase(resolvedOperator)) {
-            return actual != null;
-        }
-        throw new IllegalArgumentException("Unsupported validation operator: " + operator);
-    }
-
     private String stepName(ApiStep step, int index) {
-        if (step.getName() == null || step.getName().isBlank()) {
-            return "Step " + (index + 1);
-        }
-        return step.getName();
+        return isBlank(step.getName()) ? "Step " + (index + 1) : step.getName();
+    }
+
+    private String trimTrailingSlash(String value) {
+        return value.endsWith("/") ? value.substring(0, value.length() - 1) : value;
+    }
+
+    private String encode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     private void rethrow(Throwable throwable) {
+        if (throwable == null) {
+            return;
+        }
         if (throwable instanceof InterruptedException) {
             Thread.currentThread().interrupt();
             throw new RuntimeException("API step execution was interrupted", throwable);
@@ -484,112 +604,10 @@ public class ApiCaseRunner {
         throw new RuntimeException("API step execution failed", throwable);
     }
 
-    private ReportResponse toReportResponse(HttpResponse<String> response) {
-        ReportResponse reportResponse = new ReportResponse();
-        reportResponse.setStatusCode(response.statusCode());
-        reportResponse.setHeaders(response.headers().map());
-        reportResponse.setBody(response.body());
-        return reportResponse;
-    }
-
-    private String trimTrailingSlash(String value) {
-        if (value.endsWith("/")) {
-            return value.substring(0, value.length() - 1);
-        }
-        return value;
-    }
-
-    private String nullToEmpty(String value) {
-        return value == null ? "" : value;
-    }
-
-    private String encode(String value) {
-        return URLEncoder.encode(value, StandardCharsets.UTF_8);
-    }
-
-    private boolean isBlank(String value) {
-        return value == null || value.isBlank();
-    }
-
-    private String resolveProfileValue(String value, TestContext context) {
-        if (value == null) {
-            return null;
-        }
-        return variableResolver.resolveString(value, context);
-    }
-
-    private Object transformRequestBody(RequestSpec requestSpec, Object resolvedBody, CryptoProfile profile) {
-        RequestTransformSpec transform = requestSpec.getTransform();
-        if (transform == null) {
-            return resolvedBody;
-        }
-        if (!"pgp".equalsIgnoreCase(transform.getType())) {
-            throw new IllegalArgumentException("Unsupported request transform type: " + transform.getType());
-        }
-        String plaintext = serializePlaintext(resolvedBody, transform.getPlaintextFormat());
-        String cipherText;
-        if ("pgp".equalsIgnoreCase(transform.getAlgorithm())) {
-            cipherText = pgpCryptoService.signAndEncrypt(plaintext, toPgpProfile(profile));
-        } else if ("fake".equalsIgnoreCase(transform.getAlgorithm())) {
-            cipherText = "ENCRYPTED(" + plaintext + ")";
-        } else {
-            throw new IllegalArgumentException("Unsupported request transform algorithm: " + transform.getAlgorithm());
-        }
-        if ("raw".equalsIgnoreCase(transform.getOutput().getMode())) {
-            return cipherText;
-        }
-        if ("jsonField".equalsIgnoreCase(transform.getOutput().getMode())) {
-            Map<String, Object> wrapper = new LinkedHashMap<>();
-            wrapper.put(transform.getOutput().getField(), cipherText);
-            return wrapper;
-        }
-        throw new IllegalArgumentException("Unsupported request transform output mode: " + transform.getOutput().getMode());
-    }
-
-    private String serializePlaintext(Object resolvedBody, String plaintextFormat) {
-        try {
-            if ("text".equalsIgnoreCase(plaintextFormat)) {
-                return String.valueOf(resolvedBody);
-            }
-            return jsonMapper.writeValueAsString(resolvedBody);
-        } catch (IOException e) {
-            throw new IllegalArgumentException("Failed to serialize plaintext body", e);
-        }
-    }
-
-    private Object deserializePlaintext(String plaintext, String plaintextFormat) {
-        try {
-            if ("text".equalsIgnoreCase(plaintextFormat)) {
-                return plaintext;
-            }
-            return jsonMapper.readValue(plaintext, Object.class);
-        } catch (IOException e) {
-            throw new IllegalArgumentException("Failed to parse decrypted plaintext payload", e);
-        }
-    }
-
-    private String serializeWireBody(Object wireBody) {
-        try {
-            if (wireBody instanceof String textBody) {
-                return textBody;
-            }
-            return jsonMapper.writeValueAsString(wireBody);
-        } catch (IOException e) {
-            throw new IllegalArgumentException("Failed to serialize wire body", e);
-        }
-    }
-
-    private PgpProfileMaterial toPgpProfile(CryptoProfile profile) {
-        PgpProfileMaterial material = new PgpProfileMaterial();
-        material.setSenderPublicKey(profile.getSenderPublicKey());
-        material.setSenderPrivateKey(profile.getSenderPrivateKey());
-        material.setSenderPrivateKeyPassphrase(profile.getSenderPrivateKeyPassphrase());
-        material.setRecipientPublicKey(profile.getRecipientPublicKey());
-        material.setRecipientPrivateKey(profile.getRecipientPrivateKey());
-        material.setRecipientPrivateKeyPassphrase(profile.getRecipientPrivateKeyPassphrase());
-        return material;
-    }
-
-    private record HttpExchange(ReportRequest reportRequest, HttpResponse<String> response) {
+    private record PreparedRequest(
+            String method,
+            URI uri,
+            Map<String, String> headers,
+            Object body) {
     }
 }

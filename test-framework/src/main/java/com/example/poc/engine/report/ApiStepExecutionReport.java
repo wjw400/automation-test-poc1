@@ -13,6 +13,7 @@ public class ApiStepExecutionReport {
     private String errorMessage;
     private ReportRequest request;
     private ReportResponse response;
+    private List<ActionExecutionReport> actions = new ArrayList<>();
     private Map<String, Object> decryptedPayloads = new LinkedHashMap<>();
     private List<ValidationReport> validations = new ArrayList<>();
     private Map<String, Object> extractedValues = new LinkedHashMap<>();
@@ -71,6 +72,14 @@ public class ApiStepExecutionReport {
 
     public void setResponse(ReportResponse response) {
         this.response = response;
+    }
+
+    public List<ActionExecutionReport> getActions() {
+        return actions;
+    }
+
+    public void setActions(List<ActionExecutionReport> actions) {
+        this.actions = actions == null ? new ArrayList<>() : actions;
     }
 
     public Map<String, Object> getDecryptedPayloads() {

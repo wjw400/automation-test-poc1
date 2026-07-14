@@ -294,6 +294,9 @@ public class PgpCryptoService {
         if (isBlank(location)) {
             throw new IllegalArgumentException("Key location is blank");
         }
+        if (location.stripLeading().startsWith("-----BEGIN PGP ")) {
+            return new ByteArrayInputStream(location.getBytes(StandardCharsets.UTF_8));
+        }
         if (location.startsWith("classpath:")) {
             String resourcePath = location.substring("classpath:".length());
             InputStream inputStream = Thread.currentThread().getContextClassLoader().getResourceAsStream(resourcePath);

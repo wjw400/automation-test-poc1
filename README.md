@@ -1,283 +1,171 @@
-# API Automation Test POC
+# API Automation Platform POC
 
-This POC keeps Cucumber as the test entry point while moving repetitive API scenario details into structured YAML files.
-The repository is now split into two Maven modules so the test framework and the mock secure backend can evolve independently.
+This repository is a proof of concept for an API automation testing platform. Test Scenarios are authored as structured Case DSL v1 YAML, executed by a Java runner, and managed through a React UI and Spring Boot API.
 
-## Why This Shape
-
-Existing Cucumber scenarios can continue to run as-is. New or migrated scenarios can use one generic step:
-
-```gherkin
-Given execute api test case "echo/create-user.yaml"
-```
-
-The YAML file becomes the source of truth for request data, assertions, and extracted values. This structure is easier for humans to review and easier for AI tools to generate because the allowed fields are explicit.
-
-## Project Layout
+## Modules
 
 ```text
-pgp-support/src/main/java/com/example/poc/pgp                   Shared OpenPGP utilities for both modules
-mock-service/src/main/java/com/example/poc/mockservice      Spring Boot mock secure backend
-mock-service/src/main/resources                             Backend config and test PGP key files
-test-framework/src/test/java/com/example/poc/engine         YAML loader, HTTP executor, assertion engine
-test-framework/src/test/java/com/example/poc/steps          Generic Cucumber step
-test-framework/src/test/java/com/example/poc/runner         Cucumber JUnit Platform suite
-test-framework/src/test/resources/features                  Cucumber feature files
-test-framework/src/test/resources/api-cases                 Structured API test cases
-docs/api-case-schema.json               Draft schema for AI generation and validation
+pgp-support     Shared OpenPGP sign/encrypt and decrypt/verify implementation
+mock-service    Real Spring Boot backend used to exercise secure API protocols
+test-framework  Case DSL parser, Action pipeline, HTTP runner, assertions, and reports
+platform-api    Platform catalog, execution service, PostgreSQL persistence, and Flyway migrations
+platform-ui     React, TypeScript, and Ant Design engineering workbench
+design          Product, architecture, UI, and Case DSL design documents
 ```
 
-## YAML Case Shape
+## Case DSL
 
-Single-request cases can use the shortcut shape:
+Each Scenario contains one or more business-level HTTP Steps. Technical request and response processing stays inside ordered Action pipelines.
 
-```yaml
-name: Create user
-description: Optional human-readable context.
-tags:
-  - smoke
+DSL v1 supports four Actions:
 
-variables:
-  baseUrl: https://postman-echo.com
-  userName: Alice
-  email: poc_${random.uuid}@example.com
+- `crypto.pgp.signAndEncrypt` in Before Send
+- `data.encodeBase64` in Before Send
+- `body.buildJson` in Before Send
+- `crypto.pgp.decryptAndVerify` in After Receive
 
-profiles:
-  default:
-    senderPrivateKey: classpath:keys/client-private.asc
-    recipientPublicKey: classpath:keys/server-public.asc
-
-request:
-  method: POST
-  baseUrl: ${baseUrl}
-  path: /post
-  headers:
-    Content-Type: application/json
-  query:
-    source: cucumber
-  body:
-    name: ${userName}
-    email: ${email}
-
-expect:
-  status: 200
-  jsonPath:
-    $.json.name: ${userName}
-
-extract:
-  echoedName: $.json.name
-```
-
-Multi-request cases use `steps`. Each step has its own request, validations, and extracted values. Extracted values are stored in the shared case context and can be referenced by later steps.
+Actions use the Step Profile, falling back to the Scenario Profile. Action-level Profiles are not supported.
 
 ```yaml
-name: Create user and lookup by extracted value
-
+dslVersion: v1
+name: Secure XML envelope
+runtime:
+  profile: secureProfile
 variables:
-  baseUrl: https://postman-echo.com
-  userName: Alice
-  email: poc_${random.uuid}@example.com
-
-profiles:
-  clientToServer:
-    senderPrivateKey: classpath:keys/client-private.asc
-    recipientPublicKey: classpath:keys/server-public.asc
-
+  baseUrl: http://localhost:8081
 steps:
-  - name: Create user through echo API
-    profile: clientToServer
-    request:
+  - name: Submit encrypted XML
+    type: http
+    operation:
+      operationId: submitSecureXmlEnvelope
       method: POST
-      baseUrl: ${baseUrl}
-      path: /post
+      path: /secure/xml-envelope
+    runtime: {}
+    request:
       headers:
         Content-Type: application/json
-      body:
-        name: ${userName}
-        email: ${email}
-    expect:
+      query: {}
+      body: <Payment><Amount>100</Amount></Payment>
+    actions:
+      beforeSend:
+        - type: crypto.pgp.signAndEncrypt
+          input:
+            source: request.body
+            format: xml
+          output:
+            target: artifacts.encryptedPayload
+            format: text
+        - type: data.encodeBase64
+          input:
+            source: artifacts.encryptedPayload
+          output:
+            target: artifacts.encryptedPayloadBase64
+        - type: body.buildJson
+          template:
+            meta:
+              a: xxx
+            encryptBase64: ${artifacts.encryptedPayloadBase64}
+          output:
+            target: request.body
+      afterReceive:
+        - type: crypto.pgp.decryptAndVerify
+          input:
+            source: response.body
+            path: $.payload
+          output:
+            target: decrypted.securePayload
+            format: json
+    response:
       status: 200
-      jsonPath:
-        $.json.email: ${email}
-    extract:
-      createdEmail: $.json.email
-
-  - name: Lookup user by extracted email
-    profile: clientToServer
-    request:
-      method: GET
-      baseUrl: ${baseUrl}
-      path: /get
-      query:
-        email: ${createdEmail}
-    expect:
-      status: 200
-      jsonPath:
-        $.args.email: ${createdEmail}
+      assertions:
+        - source: response.body
+          path: $.code
+          operator: equals
+          expected: SUCCESS
+        - source: decrypted.securePayload
+          path: $.result
+          operator: equals
+          expected: ACCEPTED
+      extract: {}
 ```
 
-By default, a failed step stops the remaining steps. Use `continueOnFailure: true` on a step only when later steps are still meaningful after that failure.
+See [Case DSL v1](design/case-dsl-v1.md) for the complete execution contract.
 
-Each step must declare a `profile`. Profiles are defined once at case level and hold the key material or key references used for encryption and decryption.
-The single-request shortcut shape implicitly uses the `default` profile.
+## Start The Platform
 
-```yaml
-profiles:
-  secureEcho:
-    senderPublicKey: classpath:keys/server-public.asc
-    senderPrivateKey: classpath:keys/client-private.asc
-    senderPrivateKeyPassphrase: demo-client-passphrase
-    recipientPublicKey: classpath:keys/server-public.asc
-    recipientPrivateKey: classpath:keys/client-private.asc
-    recipientPrivateKeyPassphrase: demo-client-passphrase
+Prerequisites: JDK 17, Maven, Node.js, npm, and Docker.
 
-steps:
-  - name: Validate plaintext and decrypted payload
-    profile: secureEcho
-```
-
-Responses can now be validated from multiple sources:
-
-- `raw`: the original HTTP response body
-- `decrypted.<name>`: a named payload decrypted from one response field
-
-Example:
-
-```yaml
-expect:
-  status: 200
-  decrypt:
-    - name: securePayload
-      input:
-        path: $.json.payload
-      algorithm: fake
-      plaintextFormat: json
-  validations:
-    - source: raw
-      path: $.json.code
-      operator: equals
-      expected: SUCCESS
-    - source: decrypted.securePayload
-      path: $.amount
-      operator: equals
-      expected: 100
-
-extract:
-  orderId:
-    source: decrypted.securePayload
-    path: $.orderId
-```
-
-For legacy `echo/*` examples, the framework still supports a fake decryptor with the format:
-
-```text
-ENCRYPTED({"amount":100})
-```
-
-The mock secure backend path is now designed for real PGP sign/encrypt and decrypt/verify.
-
-Request-side PGP transform example:
-
-```yaml
-request:
-  method: POST
-  baseUrl: http://localhost:8080
-  path: /secure/json-field
-  body:
-    customerId: C1
-    amount: 88
-  transform:
-    type: pgp
-    algorithm: pgp
-    plaintextFormat: json
-    output:
-      mode: jsonField
-      field: bizData
-```
-
-## Supported Variables
-
-- `${random.uuid}`
-- `${random.email}`
-- `${time.now}`
-- `${env.NAME}`
-- `${customVariable}` from the case `variables` section
-
-## Run
-
-Install JDK 17 and Maven, then run:
+Start PostgreSQL:
 
 ```bash
-mvn -pl test-framework test
+docker compose up -d postgres
 ```
 
-To start the local mock backend:
+Start the secure mock backend:
 
 ```bash
 mvn -pl mock-service spring-boot:run
 ```
 
-The service listens on `http://localhost:8080` by default.
+The mock service listens on `http://localhost:8081`. Its OpenAPI document is stored at `mock-service/src/main/resources/openapi/mock-service-openapi.yaml` and includes the XML/Base64 envelope endpoint.
 
-Available secure mock endpoints:
+Start the platform API:
 
-- `POST /secure/raw`
-- `POST /secure/json-field?field=bizData`
-- `POST /secure/multi-step/create`
-- `POST /secure/multi-step/query`
-- `POST /secure/error-case?mode=bad-payload`
-
-The mock secure backend uses real armored PGP messages and shared test key material from each module's resources.
-The old fake `ENCRYPTED(...)` format is still supported only by the legacy `echo/*` examples.
-
-```text
-ENCRYPTED({"customerId":"C1","amount":88})
+```bash
+mvn -pl platform-api spring-boot:run
 ```
 
-The local service is meant to exercise:
+The API listens on `http://localhost:8090`. Flyway applies PostgreSQL schema migrations during startup.
 
-- raw encrypted request bodies
-- encrypted payloads nested in arbitrary JSON fields
-- mixed plaintext and encrypted response fields
-- multi-step resource creation and lookup
-- deterministic error injection for report debugging
+Start the platform UI:
+
+```bash
+cd platform-ui
+npm install
+npm run dev
+```
+
+Open `http://localhost:5173`. The Vite development server proxies `/api` requests to the platform API.
+
+## Verification
+
+Compile all backend modules:
+
+```bash
+mvn clean package -DskipTests
+```
+
+Run the self-contained real-PGP Action pipeline test:
+
+```bash
+mvn -pl test-framework -am test -Dtest=ApiCaseRunnerActionTest -Dsurefire.failIfNoSpecifiedTests=false
+```
+
+Build the UI:
+
+```bash
+cd platform-ui
+npm run build
+```
+
+The Cucumber feature under `test-framework/src/test/resources/features` is an integration entry point. Its Postman Echo scenarios require internet access, and its mock-service scenarios require the local mock backend.
 
 ## Reports
 
-Cucumber is only the migration-friendly shell in this design. The useful execution evidence is generated by the API case runner itself.
-
-Each YAML case writes two files under:
+The runner writes machine-readable JSON and human-readable HTML under:
 
 ```text
 target/api-case-reports/
 ```
 
-Report files include:
+Each Step report includes:
 
-- Case name, case file, status, start time, and duration
-- Step-by-step execution details
-- Resolved request method, URL, headers, and body for each step
-- Response status, headers, and body for each step
-- Decrypted payloads for each step
-- Every validation with type, target, expected value, actual value, and pass/fail status
-- Extracted values for each step
-- Error message when execution or validation fails
+- resolved Profile
+- final Wire Request
+- raw HTTP response
+- ordered Action inputs, outputs, statuses, durations, and errors
+- decrypted payloads
+- assertion results
+- extracted values
 
-The runner currently writes both human-readable HTML and machine-readable JSON:
-
-```text
-target/api-case-reports/20260626-120000-000-create-user-through-echo-api-passed.html
-target/api-case-reports/20260626-120000-000-create-user-through-echo-api-passed.json
-```
-
-## Migration Strategy
-
-Start with existing feature files and replace only the most repetitive scenarios with the generic YAML execution step. Old Cucumber steps and new YAML-backed scenarios can live in the same suite during migration.
-
-Suggested first migration target:
-
-- One happy path create/update API
-- One validation failure case
-- One authorization or permission case
-
-That is enough to compare line count, readability, and maintenance cost against the current step-heavy approach.
+Platform runs persist the same Action evidence in PostgreSQL and expose it in the Run Detail UI.

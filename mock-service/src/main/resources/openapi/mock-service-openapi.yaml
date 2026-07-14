@@ -82,6 +82,34 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalError'
+  /secure/xml-envelope:
+    post:
+      tags:
+        - secure
+      summary: Submit encrypted XML in a Base64 JSON envelope
+      description: |
+        Accepts plaintext metadata together with an `encryptBase64` field. The field must
+        contain Base64-encoded ASCII-armored PGP text whose decrypted business payload is XML.
+      operationId: submitSecureXmlEnvelope
+      parameters:
+        - $ref: '#/components/parameters/ProfileParam'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncryptedXmlEnvelopeRequest'
+      responses:
+        '200':
+          description: XML payload accepted and response payload returned as encrypted JSON
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SecureEnvelopeResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/InternalError'
   /secure/multi-step/create:
     post:
       tags:
@@ -283,6 +311,23 @@ components:
           hQGMA0mockExampleAQvAQwCreateOrQueryCipherTextForDemoOnly
           =1234
           -----END PGP MESSAGE-----
+    EncryptedXmlEnvelopeRequest:
+      type: object
+      required:
+        - encryptBase64
+      properties:
+        meta:
+          type: object
+          additionalProperties: true
+          description: Plaintext request metadata
+        encryptBase64:
+          type: string
+          format: byte
+          description: Base64-encoded ASCII-armored PGP text containing an XML document
+      example:
+        meta:
+          a: xxx
+        encryptBase64: LS0tLS1CRUdJTiBQR1AgTUVTU0FHRS0tLS0t
     SecureEnvelopeResponse:
       allOf:
         - $ref: '#/components/schemas/ResponseEnvelope'

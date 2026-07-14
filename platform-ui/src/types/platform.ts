@@ -92,6 +92,18 @@ export type ValidationReport = {
   message: string
 }
 
+export type ActionExecutionReport = {
+  stage: 'beforeSend' | 'afterReceive'
+  index: number
+  type: string
+  name: string
+  status: string
+  durationMs: number
+  input: unknown
+  output: unknown
+  errorMessage?: string | null
+}
+
 export type StepRun = {
   index: number
   name: string
@@ -100,6 +112,7 @@ export type StepRun = {
   errorMessage?: string | null
   request: ReportRequest | null
   response: ReportResponse | null
+  actions: ActionExecutionReport[]
   decryptedPayloads: Record<string, unknown>
   validations: ValidationReport[]
   extractedValues: Record<string, unknown>

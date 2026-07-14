@@ -1,12 +1,13 @@
+dslVersion: v1
 name: Secure mock service mixed response
-description: Example case against the local mock secure backend.
+description: Validate plaintext response fields and a decrypted PGP response payload.
 tags:
   - mock-service
   - mixed-response
-
+runtime:
+  profile: secureEcho
 variables:
   baseUrl: http://localhost:8081
-
 profiles:
   secureEcho:
     senderPublicKey: classpath:keys/server-public.asc
@@ -15,14 +16,15 @@ profiles:
     recipientPublicKey: classpath:keys/server-public.asc
     recipientPrivateKey: classpath:keys/client-private.asc
     recipientPrivateKeyPassphrase: demo-client-passphrase
-
 steps:
   - name: Validate local secure mock response
-    profile: secureEcho
-    request:
+    type: http
+    operation:
+      operationId: submitSecureJsonField
       method: POST
-      baseUrl: ${baseUrl}
       path: /secure/json-field
+    runtime: {}
+    request:
       query:
         field: bizData
       headers:
@@ -30,27 +32,39 @@ steps:
       body:
         customerId: C1
         amount: 88
-      transform:
-        type: pgp
-        algorithm: pgp
-        plaintextFormat: json
-        output:
-          mode: jsonField
-          field: bizData
-    expect:
-      status: 200
-      decrypt:
-        - name: securePayload
+    actions:
+      beforeSend:
+        - type: crypto.pgp.signAndEncrypt
+          name: Protect business payload
           input:
+            source: request.body
+            format: json
+          output:
+            target: artifacts.encryptedPayload
+            format: text
+        - type: body.buildJson
+          name: Build encrypted request envelope
+          template:
+            bizData: ${artifacts.encryptedPayload}
+          output:
+            target: request.body
+      afterReceive:
+        - type: crypto.pgp.decryptAndVerify
+          name: Read secure response payload
+          input:
+            source: response.body
             path: $.payload
-          algorithm: pgp
-          plaintextFormat: json
-      validations:
-        - source: raw
+          output:
+            target: decrypted.securePayload
+            format: json
+    response:
+      status: 200
+      assertions:
+        - source: response.body
           path: $.code
           operator: equals
           expected: SUCCESS
-        - source: raw
+        - source: response.body
           path: $.fieldUsed
           operator: equals
           expected: bizData
@@ -62,3 +76,4 @@ steps:
           path: $.customerId
           operator: equals
           expected: C1
+      extract: {}

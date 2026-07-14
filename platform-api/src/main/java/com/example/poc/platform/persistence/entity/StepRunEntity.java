@@ -38,6 +38,9 @@ public class StepRunEntity {
     private String responseJson;
 
     @Column(columnDefinition = "text")
+    private String actionsJson;
+
+    @Column(columnDefinition = "text")
     private String decryptedPayloadsJson;
 
     @Column(columnDefinition = "text")
@@ -71,6 +74,8 @@ public class StepRunEntity {
     public void setRequestJson(String requestJson) { this.requestJson = requestJson; }
     public String getResponseJson() { return responseJson; }
     public void setResponseJson(String responseJson) { this.responseJson = responseJson; }
+    public String getActionsJson() { return actionsJson; }
+    public void setActionsJson(String actionsJson) { this.actionsJson = actionsJson; }
     public String getDecryptedPayloadsJson() { return decryptedPayloadsJson; }
     public void setDecryptedPayloadsJson(String decryptedPayloadsJson) { this.decryptedPayloadsJson = decryptedPayloadsJson; }
     public String getValidationsJson() { return validationsJson; }

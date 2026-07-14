@@ -4,37 +4,9 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class RequestSpec {
-    private String method;
-    private String baseUrl;
-    private String path;
     private Map<String, String> headers = new LinkedHashMap<>();
     private Map<String, Object> query = new LinkedHashMap<>();
     private Object body;
-    private RequestTransformSpec transform;
-
-    public String getMethod() {
-        return method;
-    }
-
-    public void setMethod(String method) {
-        this.method = method;
-    }
-
-    public String getBaseUrl() {
-        return baseUrl;
-    }
-
-    public void setBaseUrl(String baseUrl) {
-        this.baseUrl = baseUrl;
-    }
-
-    public String getPath() {
-        return path;
-    }
-
-    public void setPath(String path) {
-        this.path = path;
-    }
 
     public Map<String, String> getHeaders() {
         return headers;
@@ -60,11 +32,4 @@ public class RequestSpec {
         this.body = body;
     }
 
-    public RequestTransformSpec getTransform() {
-        return transform;
-    }
-
-    public void setTransform(RequestTransformSpec transform) {
-        this.transform = transform;
-    }
 }

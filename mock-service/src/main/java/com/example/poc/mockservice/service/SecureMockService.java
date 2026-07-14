@@ -3,6 +3,8 @@ package com.example.poc.mockservice.service;
 import com.example.poc.mockservice.config.CryptoProfileProperties;
 import com.example.poc.mockservice.config.CryptoProfilesProperties;
 import com.example.poc.pgp.PgpCryptoService;
+import java.nio.charset.StandardCharsets;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -53,6 +55,30 @@ public class SecureMockService {
                 "payload", encryptObject(securePayload, profile)));
         response.put("traceId", request.getOrDefault("traceId", response.get("traceId")));
         return response;
+    }
+
+    public Map<String, Object> handleXmlEnvelope(String profileName, Map<String, Object> request) {
+        CryptoProfileProperties profile = resolveProfile(profileName);
+        Object encodedField = request.get("encryptBase64");
+        if (!(encodedField instanceof String encodedPayload)) {
+            throw new IllegalArgumentException("encryptBase64 must contain Base64-encoded armored PGP text");
+        }
+
+        String armoredPayload;
+        try {
+            armoredPayload = new String(Base64.getDecoder().decode(encodedPayload), StandardCharsets.UTF_8);
+        } catch (IllegalArgumentException error) {
+            throw new IllegalArgumentException("encryptBase64 is not valid Base64", error);
+        }
+        String xml = pgpCryptoService.decryptAndVerify(armoredPayload, profile.toPgpProfileMaterial());
+
+        Map<String, Object> securePayload = Map.of(
+                "result", "ACCEPTED",
+                "format", "xml",
+                "length", xml.length());
+        return baseResponse(profileName, Map.of(
+                "meta", request.getOrDefault("meta", Map.of()),
+                "payload", encryptObject(securePayload, profile)));
     }
 
     public Map<String, Object> createEntity(String profileName, Map<String, Object> request) {

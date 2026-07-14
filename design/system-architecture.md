@@ -126,15 +126,15 @@ graph TD
 
 对于 secure protocol case，step 内部建议遵循固定流程：
 
-1. 解析 step profile
+1. 按 Step -> Scenario 的顺序解析 profile
 2. 解析 request body 明文
-3. 按 `request.transform` 做 sign/encrypt
+3. 按顺序执行 `actions.beforeSend`
 4. 发送 wire body
 5. 获取 raw response
-6. 按 `expect.decrypt` 解密 named payload
-7. 按 source 做 validations
-8. 按 source 做 extract
-9. 写入 step report
+6. 按顺序执行 `actions.afterReceive`
+7. 按 source 做 `response.assertions`
+8. 按 source 做 `response.extract`
+9. 写入包含 Action 证据的 step report
 
 这个固定流程是平台报告能力和协议能力稳定的基础。
 

@@ -1,0 +1,88 @@
+dslVersion: v1
+name: Secure mock XML Base64 envelope
+description: Exercise all three Before Actions and PGP response processing.
+tags:
+  - mock-service
+  - xml
+  - pgp
+runtime:
+  profile: secureEcho
+variables:
+  baseUrl: http://localhost:8081
+  paymentId: P1001
+profiles:
+  secureEcho:
+    senderPublicKey: classpath:keys/server-public.asc
+    senderPrivateKey: classpath:keys/client-private.asc
+    senderPrivateKeyPassphrase: demo-client-passphrase
+    recipientPublicKey: classpath:keys/server-public.asc
+    recipientPrivateKey: classpath:keys/client-private.asc
+    recipientPrivateKeyPassphrase: demo-client-passphrase
+steps:
+  - name: Submit encrypted XML envelope
+    type: http
+    operation:
+      operationId: submitSecureXmlEnvelope
+      method: POST
+      path: /secure/xml-envelope
+    runtime: {}
+    request:
+      query: {}
+      headers:
+        Content-Type: application/json
+      body: |
+        <Payment><Id>${paymentId}</Id><Amount>100</Amount></Payment>
+    actions:
+      beforeSend:
+        - type: crypto.pgp.signAndEncrypt
+          name: Protect XML payload
+          input:
+            source: request.body
+            format: xml
+          output:
+            target: artifacts.encryptedPayload
+            format: text
+        - type: data.encodeBase64
+          name: Encode protected payload
+          input:
+            source: artifacts.encryptedPayload
+          output:
+            target: artifacts.encryptedPayloadBase64
+        - type: body.buildJson
+          name: Build JSON envelope
+          template:
+            meta:
+              a: xxx
+              paymentId: ${paymentId}
+            encryptBase64: ${artifacts.encryptedPayloadBase64}
+          output:
+            target: request.body
+      afterReceive:
+        - type: crypto.pgp.decryptAndVerify
+          name: Read secure response
+          input:
+            source: response.body
+            path: $.payload
+          output:
+            target: decrypted.securePayload
+            format: json
+    response:
+      status: 200
+      assertions:
+        - source: response.body
+          path: $.code
+          operator: equals
+          expected: SUCCESS
+        - source: response.body
+          path: $.meta.paymentId
+          operator: equals
+          expected: ${paymentId}
+        - source: decrypted.securePayload
+          path: $.result
+          operator: equals
+          expected: ACCEPTED
+        - source: decrypted.securePayload
+          path: $.format
+          operator: equals
+          expected: xml
+      extract: {}

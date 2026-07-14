@@ -7,7 +7,7 @@ Feature: Structured API test case runner
     Given execute api test case "echo/create-user-and-lookup.yaml"
 
   Scenario: Execute a mixed raw and encrypted response case from Cucumber
-    Given execute api test case "echo/mixed-raw-and-encrypted-response.yaml"
-
-  Scenario: Execute a mixed raw and encrypted response case from Cucumber
     Given execute api test case "mock/secure-mock-mixed-response.yaml"
+
+  Scenario: Execute an XML Base64 envelope case from Cucumber
+    Given execute api test case "mock/secure-mock-xml-envelope.yaml"

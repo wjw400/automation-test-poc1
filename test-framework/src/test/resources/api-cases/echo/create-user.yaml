@@ -1,35 +1,48 @@
+dslVersion: v1
 name: Create user through echo API
 description: Minimal structured API case executed from a single Cucumber step.
 tags:
   - poc
   - ai-ready
-
+runtime: {}
 variables:
   baseUrl: https://postman-echo.com
   userName: Alice
   email: poc_${random.uuid}@example.com
-
-profiles:
-  default:
-    senderPrivateKey: classpath:keys/client-private.asc
-    recipientPublicKey: classpath:keys/server-public.asc
-
-request:
-  method: POST
-  baseUrl: ${baseUrl}
-  path: /post
-  headers:
-    Content-Type: application/json
-  body:
-    name: ${userName}
-    email: ${email}
-
-expect:
-  status: 200
-  jsonPath:
-    $.json.name: ${userName}
-    $.json.email: ${email}
-    $.url: https://postman-echo.com/post
-
-extract:
-  echoedName: $.json.name
+steps:
+  - name: Create user through echo API
+    type: http
+    operation:
+      operationId: echoCreateUser
+      method: POST
+      path: /post
+    runtime: {}
+    request:
+      headers:
+        Content-Type: application/json
+      query: {}
+      body:
+        name: ${userName}
+        email: ${email}
+    actions:
+      beforeSend: []
+      afterReceive: []
+    response:
+      status: 200
+      assertions:
+        - source: response.body
+          path: $.json.name
+          operator: equals
+          expected: ${userName}
+        - source: response.body
+          path: $.json.email
+          operator: equals
+          expected: ${email}
+        - source: response.body
+          path: $.url
+          operator: equals
+          expected: https://postman-echo.com/post
+      extract:
+        echoedName:
+          source: response.body
+          path: $.json.name

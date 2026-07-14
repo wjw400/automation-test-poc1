@@ -615,6 +615,19 @@ body {
   background: #f8fafc;
 }
 
+.rule-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.action-evidence {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
 .tab-stack {
   display: flex;
   flex-direction: column;

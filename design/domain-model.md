@@ -191,10 +191,10 @@ erDiagram
 - `profiles`
 - `steps`
 - `request`
-- `request.transform`
-- `expect.decrypt`
-- `expect.validations`
-- `extract`
+- `actions.beforeSend`
+- `actions.afterReceive`
+- `response.assertions`
+- `response.extract`
 
 也就是说，平台领域模型不是替代 DSL，而是为 DSL 提供管理、执行和可视化上下文。
 
@@ -206,6 +206,7 @@ erDiagram
 
 - `Request`
 - `Response`
+- `Actions`
 - `Decrypted Payloads`
 - `Validations`
 - `Extracted Values`

@@ -1,14 +1,13 @@
 package com.example.poc.engine;
 
-import java.util.Map;
-
 public class ApiStep {
     private String name;
-    private String profile;
-    private boolean continueOnFailure;
+    private String type = "http";
+    private OperationSpec operation = new OperationSpec();
+    private RuntimeSpec runtime = new RuntimeSpec();
     private RequestSpec request;
-    private ExpectSpec expect;
-    private Map<String, Object> extract = new java.util.LinkedHashMap<>();
+    private ActionPipelineSpec actions = new ActionPipelineSpec();
+    private ResponseSpec response;
 
     public String getName() {
         return name;
@@ -18,20 +17,28 @@ public class ApiStep {
         this.name = name;
     }
 
-    public String getProfile() {
-        return profile;
+    public String getType() {
+        return type;
     }
 
-    public void setProfile(String profile) {
-        this.profile = profile;
+    public void setType(String type) {
+        this.type = type;
     }
 
-    public boolean isContinueOnFailure() {
-        return continueOnFailure;
+    public OperationSpec getOperation() {
+        return operation;
     }
 
-    public void setContinueOnFailure(boolean continueOnFailure) {
-        this.continueOnFailure = continueOnFailure;
+    public void setOperation(OperationSpec operation) {
+        this.operation = operation == null ? new OperationSpec() : operation;
+    }
+
+    public RuntimeSpec getRuntime() {
+        return runtime;
+    }
+
+    public void setRuntime(RuntimeSpec runtime) {
+        this.runtime = runtime == null ? new RuntimeSpec() : runtime;
     }
 
     public RequestSpec getRequest() {
@@ -42,19 +49,19 @@ public class ApiStep {
         this.request = request;
     }
 
-    public ExpectSpec getExpect() {
-        return expect;
+    public ActionPipelineSpec getActions() {
+        return actions;
     }
 
-    public void setExpect(ExpectSpec expect) {
-        this.expect = expect;
+    public void setActions(ActionPipelineSpec actions) {
+        this.actions = actions == null ? new ActionPipelineSpec() : actions;
     }
 
-    public Map<String, Object> getExtract() {
-        return extract;
+    public ResponseSpec getResponse() {
+        return response;
     }
 
-    public void setExtract(Map<String, Object> extract) {
-        this.extract = extract == null ? new java.util.LinkedHashMap<>() : extract;
+    public void setResponse(ResponseSpec response) {
+        this.response = response;
     }
 }

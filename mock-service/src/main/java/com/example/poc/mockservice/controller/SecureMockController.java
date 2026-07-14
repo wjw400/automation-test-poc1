@@ -33,6 +33,13 @@ public class SecureMockController {
         return secureMockService.handleJsonField(profile, field, request);
     }
 
+    @PostMapping(path = "/xml-envelope", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
+    public Map<String, Object> xmlEnvelope(
+            @RequestParam(name = "profile", required = false) String profile,
+            @RequestBody Map<String, Object> request) {
+        return secureMockService.handleXmlEnvelope(profile, request);
+    }
+
     @PostMapping(path = "/multi-step/create", consumes = MediaType.APPLICATION_JSON_VALUE, produces = MediaType.APPLICATION_JSON_VALUE)
     public Map<String, Object> create(
             @RequestParam(name = "profile", required = false) String profile,
