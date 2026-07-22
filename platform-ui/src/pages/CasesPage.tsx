@@ -1,8 +1,8 @@
 import {
   Alert,
   App,
-  AutoComplete,
   Button,
+  Dropdown,
   Input,
   Modal,
   Popover,
@@ -15,9 +15,11 @@ import {
   ControlOutlined,
   DeleteOutlined,
   DownOutlined,
+  EditOutlined,
   FileTextOutlined,
   FolderOutlined,
   FolderOpenOutlined,
+  MoreOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   RightOutlined,
@@ -33,8 +35,8 @@ import { platformApi } from '../api/platformApi'
 import { StatusPill } from '../components/StatusPill'
 import { parseDsl, stringifyDsl } from '../utils/caseDsl'
 import type {
-  ApiOperationRecord,
   CaseRecord,
+  FolderRecord,
   RunRecord,
   SaveCaseInput,
 } from '../types/platform'
@@ -45,7 +47,7 @@ const emptyDraft: SaveCaseInput = {
   name: '',
   code: '',
   description: '',
-  folderPath: '',
+  folderId: undefined,
   tags: [],
   dslVersion: 'v1',
   content: stringifyDsl({
@@ -70,9 +72,19 @@ export function CasesPage() {
   const [profileId, setProfileId] = useState<string>()
   const [isCreating, setIsCreating] = useState(false)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
-  const [createOperationId, setCreateOperationId] = useState<string>()
+  const [createCaseName, setCreateCaseName] = useState('')
+  const [createCaseFolderId, setCreateCaseFolderId] = useState<string>()
   const [caseToMove, setCaseToMove] = useState<CaseRecord>()
-  const [moveFolderPath, setMoveFolderPath] = useState('')
+  const [moveFolderId, setMoveFolderId] = useState<string>()
+  const [folderDialog, setFolderDialog] = useState<{
+    mode: 'create' | 'rename' | 'move'
+    folder?: FolderRecord
+    parentFolderId?: string
+  }>()
+  const [folderName, setFolderName] = useState('')
+  const [folderParentId, setFolderParentId] = useState<string>()
+  const [scenarioToRename, setScenarioToRename] = useState<CaseRecord>()
+  const [scenarioName, setScenarioName] = useState('')
   const [selectedEvidenceStepIndex, setSelectedEvidenceStepIndex] = useState(1)
   const [caseFilter, setCaseFilter] = useState('')
   const [expandedFolderKeys, setExpandedFolderKeys] = useState<Set<string>>(() => new Set())
@@ -109,6 +121,12 @@ export function CasesPage() {
     enabled: Boolean(selectedProjectId),
   })
 
+  const foldersQuery = useQuery({
+    queryKey: ['folders', selectedProjectId],
+    queryFn: () => platformApi.listFolders(selectedProjectId!),
+    enabled: Boolean(selectedProjectId),
+  })
+
   const operationsQuery = useQuery({
     queryKey: ['operations', selectedProjectId],
     queryFn: () => platformApi.listOperations(selectedProjectId!),
@@ -126,18 +144,23 @@ export function CasesPage() {
     [casesQuery.data, selectedCaseId],
   )
 
+  const folderNamesById = useMemo(
+    () => new Map((foldersQuery.data ?? []).map((folder) => [folder.id, formatFolderBreadcrumb(folder.id, foldersQuery.data ?? [])])),
+    [foldersQuery.data],
+  )
+
   const filteredCases = useMemo(() => {
     const keyword = caseFilter.trim().toLowerCase()
     if (!keyword) {
       return casesQuery.data ?? []
     }
     return (casesQuery.data ?? []).filter((record) => {
-      const haystack = [record.name, record.code, record.description, record.folderPath, ...(record.tags ?? [])]
+      const haystack = [record.name, record.code, record.description, folderNamesById.get(record.folderId ?? ''), ...(record.tags ?? [])]
         .join(' ')
         .toLowerCase()
       return haystack.includes(keyword)
     })
-  }, [caseFilter, casesQuery.data])
+  }, [caseFilter, casesQuery.data, folderNamesById])
 
   const selectedEnvironment = useMemo(
     () => (environmentsQuery.data ?? []).find((environment) => environment.id === environmentId),
@@ -147,6 +170,11 @@ export function CasesPage() {
   const selectedProfile = useMemo(
     () => (profilesQuery.data ?? []).find((profile) => profile.id === profileId),
     [profileId, profilesQuery.data],
+  )
+
+  const selectedProject = useMemo(
+    () => (projectsQuery.data ?? []).find((project) => project.id === selectedProjectId),
+    [projectsQuery.data, selectedProjectId],
   )
 
   useEffect(() => {
@@ -211,20 +239,25 @@ export function CasesPage() {
       return {
         ...record,
         content: draft.content,
-        folderPath: draft.folderPath,
+        folderId: draft.folderId,
       }
     })
-    return buildCaseExplorerTree(records)
-  }, [draft.content, draft.folderPath, filteredCases, isCreating, selectedCase?.id])
+    return buildCaseExplorerTree(foldersQuery.data ?? [], records)
+  }, [draft.content, draft.folderId, filteredCases, foldersQuery.data, isCreating, selectedCase?.id])
 
   const selectedFolderKeys = useMemo(
-    () => folderKeysForPath(selectedCase?.id && !isCreating ? draft.folderPath : undefined),
-    [draft.folderPath, isCreating, selectedCase?.id],
+    () => folderKeysForFolderId(selectedCase?.id && !isCreating ? draft.folderId : undefined, foldersQuery.data ?? []),
+    [draft.folderId, foldersQuery.data, isCreating, selectedCase?.id],
   )
 
-  const folderPaths = useMemo(
-    () => collectFolderPaths(casesQuery.data ?? []),
-    [casesQuery.data],
+  const folderOptions = useMemo(
+    () => buildFolderOptions(foldersQuery.data ?? []),
+    [foldersQuery.data],
+  )
+
+  const currentFolderBreadcrumb = useMemo(
+    () => formatFolderBreadcrumb(draft.folderId, foldersQuery.data ?? []),
+    [draft.folderId, foldersQuery.data],
   )
 
   useEffect(() => {
@@ -313,7 +346,7 @@ export function CasesPage() {
         caseToMove.id,
         normalizeDraftForSave({
           ...draftFromCase(caseToMove),
-          folderPath: moveFolderPath,
+          folderId: moveFolderId,
         }),
       )
     },
@@ -339,28 +372,87 @@ export function CasesPage() {
         normalizeDraftForSave({
           ...draftFromCase(record),
           name,
+          content: renameScenarioInDsl(record.content, name),
         }),
       )
     },
     onSuccess: async (savedCase) => {
       await queryClient.invalidateQueries({ queryKey: ['cases', selectedProjectId] })
       if (savedCase.id === selectedCase?.id) {
-        setDraft((current) => ({ ...current, name: savedCase.name }))
+        setDraft(draftFromCase(savedCase))
+        setDraftCaseId(savedCase.id)
       }
+      setScenarioToRename(undefined)
     },
     onError: () => {
       void message.error('Unable to save scenario name')
     },
   })
 
-  const runMutation = useMutation({
+  const saveFolderMutation = useMutation({
     mutationFn: async () => {
-      const caseId = selectedCase?.id
-      if (!caseId) {
+      if (!selectedProjectId || !folderDialog) {
+        throw new Error('Select a folder first.')
+      }
+      const name = folderName.trim()
+      if (!name) {
+        throw new Error('Folder name is required.')
+      }
+      const payload = {
+        name,
+        parentFolderId: folderDialog.mode === 'move' ? folderParentId : folderDialog.parentFolderId ?? folderDialog.folder?.parentFolderId ?? undefined,
+      }
+      return folderDialog.folder
+        ? platformApi.updateFolder(selectedProjectId, folderDialog.folder.id, payload)
+        : platformApi.createFolder(selectedProjectId, payload)
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['folders', selectedProjectId] })
+      setFolderDialog(undefined)
+      void message.success('Folder saved')
+    },
+    onError: (error) => {
+      void message.error(error instanceof Error ? error.message : 'Unable to save folder')
+    },
+  })
+
+  const deleteFolderMutation = useMutation({
+    mutationFn: platformApi.deleteFolder,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['folders', selectedProjectId] })
+      void message.success('Folder deleted')
+    },
+    onError: (error) => {
+      void message.error(error instanceof Error ? error.message : 'Folder is not empty')
+    },
+  })
+
+  const duplicateCaseMutation = useMutation({
+    mutationFn: async (record: CaseRecord) => {
+      if (!selectedProjectId) {
+        throw new Error('Select a project first.')
+      }
+      return platformApi.createCase(selectedProjectId, normalizeDraftForSave({
+        ...draftFromCase(record),
+        name: `${record.name} copy`,
+        code: `${record.code.slice(0, 75)}-copy-${Date.now()}`,
+      }))
+    },
+    onSuccess: async (savedCase) => {
+      await queryClient.invalidateQueries({ queryKey: ['cases', selectedProjectId] })
+      setSearchParams({ projectId: selectedProjectId!, caseId: savedCase.id })
+      void message.success('Scenario duplicated')
+    },
+  })
+
+  const runMutation = useMutation({
+    mutationFn: async ({ caseId }: { caseId?: string } = {}) => {
+      const targetCaseId = caseId ?? selectedCase?.id
+      if (!targetCaseId) {
         throw new Error('Save the case before running it.')
       }
       return platformApi.startRun({
-        caseId,
+        caseId: targetCaseId,
         environmentId,
         profileId,
         triggeredBy: 'platform-ui',
@@ -406,18 +498,22 @@ export function CasesPage() {
     })
   }
 
-  const openCreateCaseModal = () => {
+  const openCreateCaseModal = (folderId?: string) => {
     if (!selectedProjectId) {
       return
     }
-    setCreateOperationId(undefined)
+    setCreateCaseName('')
+    setCreateCaseFolderId(folderId)
     setIsCreateModalOpen(true)
   }
 
   const handleCreateCase = () => {
-    const operation = (operationsQuery.data ?? []).find((item) => item.id === createOperationId)
-    const nextDraft = operation ? createDraftFromOperation(operation) : emptyDraft
-    setDraft(nextDraft)
+    const name = createCaseName.trim()
+    if (!name) {
+      void message.warning('Scenario name is required')
+      return
+    }
+    setDraft(createEmptyDraft(name, createCaseFolderId))
     setDraftCaseId(undefined)
     setIsCreating(true)
     setSearchParams({ projectId: selectedProjectId! })
@@ -442,7 +538,45 @@ export function CasesPage() {
       return
     }
     setCaseToMove(record)
-    setMoveFolderPath(record.folderPath ?? '')
+    setMoveFolderId(record.folderId ?? undefined)
+  }
+
+  const openFolderDialog = (mode: 'create' | 'rename' | 'move', folder?: FolderRecord, parentFolderId?: string) => {
+    setFolderDialog({ mode, folder, parentFolderId })
+    setFolderName(mode === 'create' ? '' : folder?.name ?? '')
+    setFolderParentId(mode === 'move' ? folder?.parentFolderId ?? undefined : parentFolderId ?? folder?.parentFolderId ?? undefined)
+  }
+
+  const confirmDeleteFolder = (folder: FolderRecord) => {
+    modal.confirm({
+      title: 'Delete folder?',
+      content: `Delete "${folder.name}"? Folders containing scenarios or subfolders cannot be deleted.`,
+      okText: 'Delete',
+      okButtonProps: { danger: true },
+      cancelText: 'Cancel',
+      onOk: () => deleteFolderMutation.mutateAsync(folder.id),
+    })
+  }
+
+  const openRenameScenario = (record: CaseRecord) => {
+    if (record.id === selectedCase?.id && isDraftDirty) {
+      void message.warning('Save changes before renaming this scenario.')
+      return
+    }
+    setScenarioToRename(record)
+    setScenarioName(record.name)
+  }
+
+  const handleRenameScenario = () => {
+    if (!scenarioToRename) {
+      return
+    }
+    const name = scenarioName.trim()
+    if (!name) {
+      void message.warning('Scenario name is required')
+      return
+    }
+    void saveTitleMutation.mutateAsync({ record: scenarioToRename, name })
   }
 
   const autoSaveTitle = (name: string) => {
@@ -487,19 +621,53 @@ export function CasesPage() {
   const renderExplorerNode = (node: ExplorerNode, depth = 0) => {
     if (node.type === 'folder') {
       const isExpanded = Boolean(caseFilter.trim()) || selectedFolderKeys.includes(node.key) || expandedFolderKeys.has(node.key)
+      const folder = node.folder
       return (
         <div key={node.key} className="scenario-folder-group">
-          <button
-            type="button"
-            className="scenario-folder-row"
-            style={{ paddingLeft: 8 + depth * 14 }}
-            aria-expanded={isExpanded}
-            onClick={() => toggleFolder(node.key)}
-          >
-            {isExpanded ? <DownOutlined className="scenario-folder-toggle" /> : <RightOutlined className="scenario-folder-toggle" />}
-            <FolderOpenOutlined className="scenario-tree-icon" />
-            <span className="scenario-folder-name">{node.name}</span>
-          </button>
+          <div className="scenario-folder-row" style={{ paddingLeft: 8 + depth * 14 }}>
+            <button
+              type="button"
+              className="scenario-tree-primary"
+              aria-expanded={isExpanded}
+              onClick={() => toggleFolder(node.key)}
+            >
+              {isExpanded ? <DownOutlined className="scenario-folder-toggle" /> : <RightOutlined className="scenario-folder-toggle" />}
+              <FolderOpenOutlined className="scenario-tree-icon" />
+              <span className="scenario-folder-name">{folder.name}</span>
+            </button>
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  { key: 'scenario', label: 'Add Test Scenario', icon: <FileTextOutlined /> },
+                  { key: 'folder', label: 'Add Folder', icon: <FolderOutlined /> },
+                ],
+                onClick: ({ key }) => key === 'scenario'
+                  ? openCreateCaseModal(folder.id)
+                  : openFolderDialog('create', undefined, folder.id),
+              }}
+            >
+              <Button className="scenario-tree-action" icon={<PlusOutlined />} size="small" type="text" title={`Add to ${folder.name}`} />
+            </Dropdown>
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  { key: 'rename', label: 'Rename', icon: <EditOutlined /> },
+                  { key: 'move', label: 'Move', icon: <FolderOutlined /> },
+                  { type: 'divider' },
+                  { key: 'delete', label: 'Delete', icon: <DeleteOutlined />, danger: true },
+                ],
+                onClick: ({ key }) => {
+                  if (key === 'rename') openFolderDialog('rename', folder)
+                  if (key === 'move') openFolderDialog('move', folder)
+                  if (key === 'delete') confirmDeleteFolder(folder)
+                },
+              }}
+            >
+              <Button className="scenario-tree-action" icon={<MoreOutlined />} size="small" type="text" title={`Manage ${folder.name}`} />
+            </Dropdown>
+          </div>
           {isExpanded ? (
             <div className="scenario-folder-children">
               {node.children.map((child) => renderExplorerNode(child, depth + 1))}
@@ -535,34 +703,38 @@ export function CasesPage() {
             <span className="scenario-case-path">{stepCount} step{stepCount === 1 ? '' : 's'}</span>
           </span>
           {latestRun ? <span className={`scenario-run-indicator ${latestRun.status.toLowerCase()}`} title={`Last run: ${latestRun.status}`} /> : null}
-          <Button
-            aria-label={`Move ${record.name}`}
-            className="scenario-case-move"
-            icon={<FolderOutlined />}
-            size="small"
-            title="Move scenario"
-            type="text"
-            onClick={(event) => {
-              event.stopPropagation()
-              openMoveScenario(record)
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: [
+                { key: 'run', label: 'Run', icon: <PlayCircleOutlined /> },
+                { key: 'rename', label: 'Rename', icon: <EditOutlined /> },
+                { key: 'duplicate', label: 'Duplicate', icon: <FileTextOutlined /> },
+                { key: 'move', label: 'Move', icon: <FolderOutlined /> },
+                { type: 'divider' },
+                { key: 'delete', label: 'Delete', icon: <DeleteOutlined />, danger: true },
+              ],
+              onClick: ({ key }) => {
+                if (key === 'run') void runMutation.mutateAsync({ caseId: record.id })
+                if (key === 'rename') openRenameScenario(record)
+                if (key === 'duplicate') void duplicateCaseMutation.mutateAsync(record)
+                if (key === 'move') openMoveScenario(record)
+                if (key === 'delete') confirmDeleteCase(record)
+              },
             }}
-            onKeyDown={(event) => event.stopPropagation()}
-          />
-          <Button
-            aria-label={`Delete ${record.name}`}
-            className="scenario-case-delete"
-            danger
-            icon={<DeleteOutlined />}
-            loading={deleteCaseMutation.isPending && deleteCaseMutation.variables === record.id}
-            size="small"
-            title="Delete case"
-            type="text"
-            onClick={(event) => {
-              event.stopPropagation()
-              confirmDeleteCase(record)
-            }}
-            onKeyDown={(event) => event.stopPropagation()}
-          />
+          >
+            <Button
+              aria-label={`Manage ${record.name}`}
+              className="scenario-tree-action"
+              icon={<MoreOutlined />}
+              loading={deleteCaseMutation.isPending && deleteCaseMutation.variables === record.id}
+              size="small"
+              title={`Manage ${record.name}`}
+              type="text"
+              onClick={(event) => event.stopPropagation()}
+              onKeyDown={(event) => event.stopPropagation()}
+            />
+          </Dropdown>
         </div>
       </div>
     )
@@ -603,9 +775,40 @@ export function CasesPage() {
     <div className="scenario-page">
       <div className="scenario-shell">
         <aside className="scenario-sidebar">
-          <div className="scenario-sidebar-head">
-            <Text className="scenario-nav-label">Scenario Explorer</Text>
-            <Button type="text" size="small" icon={<PlusOutlined />} onClick={openCreateCaseModal} disabled={!selectedProjectId} />
+          <div className="scenario-root-row">
+            <button type="button" className="scenario-tree-primary scenario-root-primary">
+              <DownOutlined className="scenario-folder-toggle" />
+              <FolderOpenOutlined className="scenario-tree-icon" />
+              <span className="scenario-folder-name">{selectedProject?.name ?? 'Project'}</span>
+            </button>
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  { key: 'scenario', label: 'Add Test Scenario', icon: <FileTextOutlined /> },
+                  { key: 'folder', label: 'Add Folder', icon: <FolderOutlined /> },
+                ],
+                onClick: ({ key }) => key === 'scenario'
+                  ? openCreateCaseModal()
+                  : openFolderDialog('create'),
+              }}
+            >
+              <Button type="text" size="small" className="scenario-tree-action" icon={<PlusOutlined />} disabled={!selectedProjectId} title="Add" />
+            </Dropdown>
+            <Dropdown
+              trigger={['click']}
+              menu={{
+                items: [
+                  { key: 'scenario', label: 'Add Test Scenario', icon: <FileTextOutlined /> },
+                  { key: 'folder', label: 'Add Folder', icon: <FolderOutlined /> },
+                ],
+                onClick: ({ key }) => key === 'scenario'
+                  ? openCreateCaseModal()
+                  : openFolderDialog('create'),
+              }}
+            >
+              <Button type="text" size="small" className="scenario-tree-action" icon={<MoreOutlined />} disabled={!selectedProjectId} title="Project actions" />
+            </Dropdown>
           </div>
 
           <Input
@@ -622,7 +825,7 @@ export function CasesPage() {
 
           <div className="scenario-case-list scenario-tree">
             {casesQuery.isLoading ? <div className="scenario-muted-row">Loading cases...</div> : null}
-            {!casesQuery.isLoading && filteredCases.length === 0 ? <div className="scenario-muted-row">No cases yet.</div> : null}
+            {!casesQuery.isLoading && !foldersQuery.isLoading && explorerNodes.length === 0 ? <div className="scenario-muted-row">No scenarios or folders yet.</div> : null}
             {explorerNodes.map((node) => renderExplorerNode(node))}
           </div>
         </aside>
@@ -631,7 +834,7 @@ export function CasesPage() {
           <section className="scenario-topbar">
             <div className="scenario-titlebar">
               <div className="scenario-title-copy">
-                {draft.folderPath ? <Text type="secondary" className="scenario-breadcrumb">{formatFolderBreadcrumb(draft.folderPath)}</Text> : null}
+                {currentFolderBreadcrumb ? <Text type="secondary" className="scenario-breadcrumb">{currentFolderBreadcrumb}</Text> : null}
                 <Input
                   className="scenario-title-input"
                   htmlSize={Math.max(8, Math.min(draft.name.length + 1, 36))}
@@ -690,7 +893,7 @@ export function CasesPage() {
                 loading={runMutation.isPending}
                 disabled={!selectedCase || isCreating || isDraftDirty}
                 title={isDraftDirty ? 'Save changes before running this scenario' : 'Run scenario'}
-                onClick={() => void runMutation.mutateAsync()}
+                onClick={() => void runMutation.mutateAsync({})}
               >
                 Run
               </Button>
@@ -768,39 +971,79 @@ export function CasesPage() {
       >
         <div className="api-import-stack">
           <Text type="secondary">{caseToMove?.name}</Text>
-          <AutoComplete
+          <Select
             allowClear
-            value={moveFolderPath}
-            options={folderPaths.map((folderPath) => ({
-              value: folderPath,
-              label: formatFolderBreadcrumb(folderPath),
-            }))}
-            placeholder="Folder path, or leave empty for root"
-            onChange={setMoveFolderPath}
+            value={moveFolderId}
+            options={folderOptions}
+            placeholder="Root"
+            onChange={setMoveFolderId}
           />
         </div>
       </Modal>
 
       <Modal
-        title="Create Case"
+        title={folderDialog?.mode === 'create' ? 'Add Folder' : folderDialog?.mode === 'move' ? 'Move Folder' : 'Rename Folder'}
+        open={Boolean(folderDialog)}
+        okText={folderDialog?.mode === 'move' ? 'Move' : 'Save'}
+        okButtonProps={{ loading: saveFolderMutation.isPending }}
+        onCancel={() => setFolderDialog(undefined)}
+        onOk={() => void saveFolderMutation.mutateAsync()}
+      >
+        <div className="api-import-stack">
+          {folderDialog?.mode !== 'move' ? (
+            <Input
+              autoFocus
+              placeholder="Folder name"
+              value={folderName}
+              onChange={(event) => setFolderName(event.target.value)}
+              onPressEnter={() => void saveFolderMutation.mutateAsync()}
+            />
+          ) : (
+            <>
+              <Text type="secondary">{folderDialog.folder?.name}</Text>
+              <Select
+                allowClear
+                value={folderParentId}
+                options={folderOptions.filter((option) => !isFolderBlockedTarget(option.value, folderDialog.folder?.id, foldersQuery.data ?? []))}
+                placeholder="Root"
+                onChange={setFolderParentId}
+              />
+            </>
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        title="Rename Test Scenario"
+        open={Boolean(scenarioToRename)}
+        okText="Save"
+        okButtonProps={{ loading: saveTitleMutation.isPending }}
+        onCancel={() => setScenarioToRename(undefined)}
+        onOk={handleRenameScenario}
+      >
+        <Input
+          autoFocus
+          placeholder="Scenario name"
+          value={scenarioName}
+          onChange={(event) => setScenarioName(event.target.value)}
+          onPressEnter={handleRenameScenario}
+        />
+      </Modal>
+
+      <Modal
+        title="Add Test Scenario"
         open={isCreateModalOpen}
         onCancel={() => setIsCreateModalOpen(false)}
         onOk={handleCreateCase}
         okText="Create"
       >
         <div className="api-import-stack">
-          <Text type="secondary">Choose an imported operation to create the first step of the case.</Text>
-          <Select
-            showSearch
-            allowClear
-            placeholder="Select operation"
-            optionFilterProp="label"
-            value={createOperationId}
-            options={(operationsQuery.data ?? []).map((operation) => ({
-              label: `${operation.method} ${operation.path} - ${operation.summary || operation.operationId || 'Operation'}`,
-              value: operation.id,
-            }))}
-            onChange={setCreateOperationId}
+          <Input
+            autoFocus
+            placeholder="Scenario name"
+            value={createCaseName}
+            onChange={(event) => setCreateCaseName(event.target.value)}
+            onPressEnter={handleCreateCase}
           />
         </div>
       </Modal>
@@ -808,62 +1051,23 @@ export function CasesPage() {
   )
 }
 
-function createDraftFromOperation(operation: ApiOperationRecord): SaveCaseInput {
+function createEmptyDraft(name: string, folderId?: string): SaveCaseInput {
   const content = stringifyDsl({
     dslVersion: 'v1',
-    name: operation.summary || operation.operationId || 'New API case',
+    name,
     description: '',
-    tags: operation.tagName ? [operation.tagName] : [],
+    tags: [],
     runtime: {},
     variables: {},
-    steps: [
-      {
-        name: operation.path,
-        type: 'http',
-        operation: {
-          id: operation.id,
-          apiSpecId: operation.apiSpecId,
-          apiSpecName: operation.apiSpecName,
-          operationId: operation.operationId,
-          summary: operation.summary,
-          service: operation.tagName || operation.apiSpecName || 'defaultService',
-          method: operation.method,
-          path: operation.path,
-        },
-        runtime: {},
-        request: {
-          query: {},
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: {},
-        },
-        actions: {
-          beforeSend: [],
-          afterReceive: [],
-        },
-        response: {
-          status: 200,
-          assertions: [
-            {
-              source: 'response.body',
-              path: '$.code',
-              operator: 'equals',
-              expected: 'SUCCESS',
-            },
-          ],
-          extract: {},
-        },
-      },
-    ],
+    steps: [],
   })
 
   return {
-    name: operation.summary || operation.operationId || 'New API case',
-    code: slugify(operation.operationId || `${operation.method}-${operation.path}`),
+    name,
+    code: scenarioCode(name),
     description: '',
-    folderPath: operation.tagName || operation.apiSpecName || '',
-    tags: operation.tagName ? [operation.tagName] : [],
+    folderId,
+    tags: [],
     dslVersion: 'v1',
     content,
     status: 'ACTIVE',
@@ -874,9 +1078,9 @@ function normalizeDraftForSave(draft: SaveCaseInput): SaveCaseInput {
   return {
     ...draft,
     name: draft.name.trim(),
-    code: draft.code.trim() || slugify(draft.name),
+    code: draft.code.trim() || scenarioCode(draft.name),
     description: draft.description.trim(),
-    folderPath: normalizeFolderPath(draft.folderPath),
+    folderId: draft.folderId || undefined,
     dslVersion: draft.dslVersion || 'v1',
     status: draft.status || 'ACTIVE',
   }
@@ -887,7 +1091,7 @@ function draftFromCase(record: CaseRecord): SaveCaseInput {
     name: record.name,
     code: record.code,
     description: record.description ?? '',
-    folderPath: record.folderPath ?? '',
+    folderId: record.folderId ?? undefined,
     tags: record.tags ?? [],
     dslVersion: record.dslVersion,
     content: record.content,
@@ -899,7 +1103,7 @@ function isCaseDraftDirty(draft: SaveCaseInput, record: CaseRecord) {
   return draft.name !== record.name
     || draft.code !== record.code
     || draft.description !== (record.description ?? '')
-    || normalizeFolderPath(draft.folderPath) !== normalizeFolderPath(record.folderPath ?? '')
+    || (draft.folderId ?? undefined) !== (record.folderId ?? undefined)
     || draft.dslVersion !== record.dslVersion
     || draft.content !== record.content
     || draft.status !== record.status
@@ -910,35 +1114,10 @@ function sameStringList(left: string[], right: string[]) {
   return left.length === right.length && left.every((value, index) => value === right[index])
 }
 
-function formatFolderBreadcrumb(folderPath: string) {
-  const segments = splitFolderPath(folderPath)
-  return segments.join(' / ')
-}
-
-function folderKeysForPath(folderPath?: string | null) {
-  let currentPath = ''
-  return splitFolderPath(folderPath).map((segment) => {
-    currentPath = currentPath ? `${currentPath}/${segment}` : segment
-    return `folder:${currentPath}`
-  })
-}
-
-function collectFolderPaths(records: CaseRecord[]) {
-  const paths = new Set<string>()
-  records.forEach((record) => {
-    let currentPath = ''
-    splitFolderPath(record.folderPath).forEach((segment) => {
-      currentPath = currentPath ? `${currentPath}/${segment}` : segment
-      paths.add(currentPath)
-    })
-  })
-  return [...paths].sort((left, right) => left.localeCompare(right))
-}
-
 type ExplorerFolderNode = {
   type: 'folder'
   key: string
-  name: string
+  folder: FolderRecord
   children: ExplorerNode[]
 }
 
@@ -950,37 +1129,28 @@ type ExplorerCaseNode = {
 
 type ExplorerNode = ExplorerFolderNode | ExplorerCaseNode
 
-function buildCaseExplorerTree(records: CaseRecord[]) {
-  const root: ExplorerFolderNode = {
-    type: 'folder',
-    key: 'root',
-    name: 'root',
-    children: [],
-  }
-  const folders = new Map<string, ExplorerFolderNode>([['', root]])
+function buildCaseExplorerTree(folders: FolderRecord[], records: CaseRecord[]) {
+  const root: { children: ExplorerNode[] } = { children: [] }
+  const nodesById = new Map<string, ExplorerFolderNode>()
+
+  folders.forEach((folder) => {
+    nodesById.set(folder.id, {
+      type: 'folder',
+      key: `folder:${folder.id}`,
+      folder,
+      children: [],
+    })
+  })
+
+  folders.forEach((folder) => {
+    const node = nodesById.get(folder.id)!
+    const parent = folder.parentFolderId ? nodesById.get(folder.parentFolderId) : undefined
+    ;(parent?.children ?? root.children).push(node)
+  })
 
   records.forEach((record) => {
-    const segments = splitFolderPath(record.folderPath)
-    let parent = root
-    let currentPath = ''
-
-    segments.forEach((segment) => {
-      currentPath = currentPath ? `${currentPath}/${segment}` : segment
-      let folder = folders.get(currentPath)
-      if (!folder) {
-        folder = {
-          type: 'folder',
-          key: `folder:${currentPath}`,
-          name: segment,
-          children: [],
-        }
-        folders.set(currentPath, folder)
-        parent.children.push(folder)
-      }
-      parent = folder
-    })
-
-    parent.children.push({
+    const parent = record.folderId ? nodesById.get(record.folderId) : undefined
+    ;(parent?.children ?? root.children).push({
       type: 'case',
       record,
       stepCount: getCaseStepCount(record),
@@ -996,8 +1166,11 @@ function sortExplorerNodes(nodes: ExplorerNode[]) {
     if (left.type !== right.type) {
       return left.type === 'folder' ? -1 : 1
     }
-    const leftName = left.type === 'folder' ? left.name : left.record.name
-    const rightName = right.type === 'folder' ? right.name : right.record.name
+    if (left.type === 'folder' && right.type === 'folder' && left.folder.sortOrder !== right.folder.sortOrder) {
+      return left.folder.sortOrder - right.folder.sortOrder
+    }
+    const leftName = left.type === 'folder' ? left.folder.name : left.record.name
+    const rightName = right.type === 'folder' ? right.folder.name : right.record.name
     return leftName.localeCompare(rightName)
   })
 
@@ -1008,19 +1181,65 @@ function sortExplorerNodes(nodes: ExplorerNode[]) {
   })
 }
 
-function splitFolderPath(folderPath?: string | null) {
-  return normalizeFolderPath(folderPath ?? '')
-    .split('/')
-    .filter(Boolean)
+function formatFolderBreadcrumb(folderId: string | undefined, folders: FolderRecord[]) {
+  if (!folderId) {
+    return ''
+  }
+  const foldersById = new Map(folders.map((folder) => [folder.id, folder]))
+  const segments: string[] = []
+  let current = foldersById.get(folderId)
+  while (current) {
+    segments.unshift(current.name)
+    current = current.parentFolderId ? foldersById.get(current.parentFolderId) : undefined
+  }
+  return segments.join(' / ')
 }
 
-function normalizeFolderPath(value: string) {
-  return value
-    .replace(/\\/g, '/')
-    .split('/')
-    .map((segment) => segment.trim())
-    .filter(Boolean)
-    .join('/')
+function folderKeysForFolderId(folderId: string | undefined, folders: FolderRecord[]) {
+  const foldersById = new Map(folders.map((folder) => [folder.id, folder]))
+  const keys: string[] = []
+  let current = folderId ? foldersById.get(folderId) : undefined
+  while (current) {
+    keys.unshift(`folder:${current.id}`)
+    current = current.parentFolderId ? foldersById.get(current.parentFolderId) : undefined
+  }
+  return keys
+}
+
+function buildFolderOptions(folders: FolderRecord[]) {
+  const foldersByParentId = new Map<string | undefined, FolderRecord[]>()
+  folders.forEach((folder) => {
+    const parentId = folder.parentFolderId ?? undefined
+    const siblings = foldersByParentId.get(parentId) ?? []
+    siblings.push(folder)
+    foldersByParentId.set(parentId, siblings)
+  })
+  foldersByParentId.forEach((siblings) => siblings.sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name)))
+
+  const options: Array<{ value: string; label: string }> = []
+  const visit = (parentId: string | undefined, prefix: string) => {
+    ;(foldersByParentId.get(parentId) ?? []).forEach((folder) => {
+      options.push({ value: folder.id, label: `${prefix}${folder.name}` })
+      visit(folder.id, `${prefix}  `)
+    })
+  }
+  visit(undefined, '')
+  return options
+}
+
+function isFolderBlockedTarget(targetFolderId: string, movingFolderId: string | undefined, folders: FolderRecord[]) {
+  if (!movingFolderId || targetFolderId === movingFolderId) {
+    return targetFolderId === movingFolderId
+  }
+  const foldersById = new Map(folders.map((folder) => [folder.id, folder]))
+  let current = foldersById.get(targetFolderId)
+  while (current) {
+    if (current.id === movingFolderId) {
+      return true
+    }
+    current = current.parentFolderId ? foldersById.get(current.parentFolderId) : undefined
+  }
+  return false
 }
 
 function getCaseStepCount(record: CaseRecord) {
@@ -1029,10 +1248,22 @@ function getCaseStepCount(record: CaseRecord) {
   return steps.length
 }
 
+function renameScenarioInDsl(content: string, name: string) {
+  const parsed = parseDsl(content)
+  if (!parsed.data) {
+    return content
+  }
+  return stringifyDsl({ ...parsed.data, name })
+}
+
 function slugify(value: string) {
   return value
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '')
-    .slice(0, 60) || 'api-case'
+    .slice(0, 60)
+}
+
+function scenarioCode(name: string) {
+  return slugify(name) || `scenario-${Date.now()}`
 }

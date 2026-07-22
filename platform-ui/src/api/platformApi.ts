@@ -4,11 +4,13 @@ import type {
   ApiSpecRecord,
   CaseRecord,
   Environment,
+  FolderRecord,
   Profile,
   Project,
   RunRecord,
   SaveCaseInput,
   SaveEnvironmentInput,
+  SaveFolderInput,
   SaveProfileInput,
   SaveSuiteInput,
   StartRunInput,
@@ -29,6 +31,25 @@ export const platformApi = {
   async getCase(caseId: string) {
     const { data } = await apiClient.get<CaseRecord>(`/cases/${caseId}`)
     return data
+  },
+
+  async listFolders(projectId: string) {
+    const { data } = await apiClient.get<FolderRecord[]>(`/projects/${projectId}/folders`)
+    return data
+  },
+
+  async createFolder(projectId: string, payload: SaveFolderInput) {
+    const { data } = await apiClient.post<FolderRecord>(`/projects/${projectId}/folders`, payload)
+    return data
+  },
+
+  async updateFolder(projectId: string, folderId: string, payload: SaveFolderInput) {
+    const { data } = await apiClient.put<FolderRecord>(`/projects/${projectId}/folders/${folderId}`, payload)
+    return data
+  },
+
+  async deleteFolder(folderId: string) {
+    await apiClient.delete(`/folders/${folderId}`)
   },
 
   async createCase(projectId: string, payload: SaveCaseInput) {

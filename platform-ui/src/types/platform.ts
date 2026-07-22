@@ -37,11 +37,21 @@ export type CaseRecord = {
   name: string
   code: string
   description: string
-  folderPath?: string | null
+  folderId?: string | null
   tags: string[]
   dslVersion: string
   content: string
   status: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type FolderRecord = {
+  id: string
+  projectId: string
+  parentFolderId?: string | null
+  name: string
+  sortOrder: number
   createdAt: string
   updatedAt: string
 }
@@ -137,11 +147,16 @@ export type SaveCaseInput = {
   name: string
   code: string
   description: string
-  folderPath: string
+  folderId?: string
   tags: string[]
   dslVersion: string
   content: string
   status: string
+}
+
+export type SaveFolderInput = {
+  name: string
+  parentFolderId?: string
 }
 
 export type SaveSuiteCaseInput = {

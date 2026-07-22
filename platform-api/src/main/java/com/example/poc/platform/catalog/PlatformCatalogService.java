@@ -3,12 +3,14 @@ package com.example.poc.platform.catalog;
 import com.example.poc.platform.persistence.JsonCodec;
 import com.example.poc.platform.persistence.entity.CaseEntity;
 import com.example.poc.platform.persistence.entity.EnvironmentEntity;
+import com.example.poc.platform.persistence.entity.FolderEntity;
 import com.example.poc.platform.persistence.entity.ProfileEntity;
 import com.example.poc.platform.persistence.entity.ProjectEntity;
 import com.example.poc.platform.persistence.entity.SuiteCaseEntity;
 import com.example.poc.platform.persistence.entity.SuiteEntity;
 import com.example.poc.platform.persistence.repo.CaseRepository;
 import com.example.poc.platform.persistence.repo.EnvironmentRepository;
+import com.example.poc.platform.persistence.repo.FolderRepository;
 import com.example.poc.platform.persistence.repo.ProfileRepository;
 import com.example.poc.platform.persistence.repo.ProjectRepository;
 import com.example.poc.platform.persistence.repo.SuiteCaseRepository;
@@ -23,9 +25,11 @@ import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
+import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -34,6 +38,7 @@ public class PlatformCatalogService {
     private final ProjectRepository projectRepository;
     private final EnvironmentRepository environmentRepository;
     private final ProfileRepository profileRepository;
+    private final FolderRepository folderRepository;
     private final CaseRepository caseRepository;
     private final SuiteRepository suiteRepository;
     private final SuiteCaseRepository suiteCaseRepository;
@@ -43,6 +48,7 @@ public class PlatformCatalogService {
             ProjectRepository projectRepository,
             EnvironmentRepository environmentRepository,
             ProfileRepository profileRepository,
+            FolderRepository folderRepository,
             CaseRepository caseRepository,
             SuiteRepository suiteRepository,
             SuiteCaseRepository suiteCaseRepository,
@@ -50,6 +56,7 @@ public class PlatformCatalogService {
         this.projectRepository = projectRepository;
         this.environmentRepository = environmentRepository;
         this.profileRepository = profileRepository;
+        this.folderRepository = folderRepository;
         this.caseRepository = caseRepository;
         this.suiteRepository = suiteRepository;
         this.suiteCaseRepository = suiteCaseRepository;
@@ -74,6 +81,7 @@ public class PlatformCatalogService {
 
         seedCase(project.getId(), "echo-create-user", "Echo Create User", "echo/create-user.yaml", "Echo");
         seedCase(project.getId(), "secure-mixed-response", "Secure Mixed Response", "mock/secure-mock-mixed-response.yaml", "Mock/Secure");
+        migrateLegacyFolderPaths();
         ensureDemoSuite(project.getId());
     }
 
@@ -126,6 +134,63 @@ public class PlatformCatalogService {
     }
 
     @Transactional(readOnly = true)
+    public List<FolderRecord> listFolders(String projectId) {
+        requireProject(projectId);
+        return folderRepository.findByProjectIdOrderByParentFolderIdAscSortOrderAscNameAsc(projectId).stream()
+                .map(this::toFolderRecord)
+                .toList();
+    }
+
+    @Transactional
+    public FolderRecord saveFolder(String projectId, @Valid UpsertFolderRequest request) {
+        requireProject(projectId);
+        FolderEntity entity = request.id() == null || request.id().isBlank()
+                ? new FolderEntity()
+                : requireFolder(request.id());
+        if (entity.getId() != null && !projectId.equals(entity.getProjectId())) {
+            throw new IllegalArgumentException("Folder does not belong to the selected project");
+        }
+
+        String parentFolderId = blankToNull(request.parentFolderId());
+        if (parentFolderId != null) {
+            FolderEntity parent = requireFolder(parentFolderId);
+            if (!projectId.equals(parent.getProjectId())) {
+                throw new IllegalArgumentException("Parent folder does not belong to the selected project");
+            }
+            if (parentFolderId.equals(entity.getId()) || isDescendant(parentFolderId, entity.getId())) {
+                throw new IllegalArgumentException("A folder cannot be moved inside itself or one of its descendants");
+            }
+        }
+
+        String name = request.name().trim();
+        boolean duplicate = folderRepository.findByProjectIdAndParentFolderIdOrderBySortOrderAscNameAsc(projectId, parentFolderId).stream()
+                .anyMatch(folder -> !folder.getId().equals(entity.getId()) && folder.getName().equalsIgnoreCase(name));
+        if (duplicate) {
+            throw new IllegalArgumentException("A folder with this name already exists in the selected location");
+        }
+
+        entity.setProjectId(projectId);
+        entity.setParentFolderId(parentFolderId);
+        entity.setName(name);
+        if (entity.getId() == null || entity.getId().isBlank()) {
+            entity.setSortOrder(folderRepository.findByProjectIdAndParentFolderIdOrderBySortOrderAscNameAsc(projectId, parentFolderId).size() + 1);
+        }
+        return toFolderRecord(folderRepository.save(entity));
+    }
+
+    @Transactional
+    public void deleteFolder(String folderId) {
+        FolderEntity folder = requireFolder(folderId);
+        if (!folderRepository.findByProjectIdAndParentFolderIdOrderBySortOrderAscNameAsc(folder.getProjectId(), folderId).isEmpty()) {
+            throw new IllegalArgumentException("Folder is not empty. Move or delete its subfolders first");
+        }
+        if (caseRepository.existsByFolderIdAndStatusNot(folderId, "DELETED")) {
+            throw new IllegalArgumentException("Folder is not empty. Move or delete its scenarios first");
+        }
+        folderRepository.delete(folder);
+    }
+
+    @Transactional(readOnly = true)
     public ProfileRecord getProfile(String profileId) {
         return toProfileRecord(requireProfile(profileId));
     }
@@ -168,11 +233,18 @@ public class PlatformCatalogService {
         CaseEntity entity = request.id() == null || request.id().isBlank()
                 ? new CaseEntity()
                 : requireCase(request.id());
+        if (entity.getId() != null && !projectId.equals(entity.getProjectId())) {
+            throw new IllegalArgumentException("Case does not belong to the selected project");
+        }
+        String folderId = blankToNull(request.folderId());
+        if (folderId != null && !projectId.equals(requireFolder(folderId).getProjectId())) {
+            throw new IllegalArgumentException("Folder does not belong to the selected project");
+        }
         entity.setProjectId(projectId);
         entity.setName(request.name());
         entity.setCode(request.code());
         entity.setDescription(request.description());
-        entity.setFolderPath(normalizeFolderPath(request.folderPath()));
+        entity.setFolderId(folderId);
         entity.setTagsJson(jsonCodec.write(request.tags() == null ? List.of() : request.tags()));
         entity.setDslVersion(request.dslVersion() == null || request.dslVersion().isBlank() ? "v1" : request.dslVersion());
         entity.setContent(request.content());
@@ -261,7 +333,7 @@ public class PlatformCatalogService {
         entity.setName(name);
         entity.setCode(code);
         entity.setDescription("Seeded from existing test-framework resources");
-        entity.setFolderPath(normalizeFolderPath(folderPath));
+        entity.setFolderId(resolveFolderPath(projectId, folderPath));
         entity.setTagsJson(jsonCodec.write(List.of("seed")));
         entity.setDslVersion("v1");
         entity.setContent(content);
@@ -353,6 +425,11 @@ public class PlatformCatalogService {
                 .orElseThrow(() -> new NoSuchElementException("Profile not found: " + profileId));
     }
 
+    private FolderEntity requireFolder(String folderId) {
+        return folderRepository.findById(folderId)
+                .orElseThrow(() -> new NoSuchElementException("Folder not found: " + folderId));
+    }
+
     private CaseEntity requireCase(String caseId) {
         return caseRepository.findById(caseId)
                 .orElseThrow(() -> new NoSuchElementException("Case not found: " + caseId));
@@ -399,6 +476,17 @@ public class PlatformCatalogService {
                 entity.isEnabled());
     }
 
+    private FolderRecord toFolderRecord(FolderEntity entity) {
+        return new FolderRecord(
+                entity.getId(),
+                entity.getProjectId(),
+                entity.getParentFolderId(),
+                entity.getName(),
+                entity.getSortOrder(),
+                entity.getCreatedAt(),
+                entity.getUpdatedAt());
+    }
+
     private CaseRecord toCaseRecord(CaseEntity entity) {
         return new CaseRecord(
                 entity.getId(),
@@ -406,7 +494,7 @@ public class PlatformCatalogService {
                 entity.getName(),
                 entity.getCode(),
                 entity.getDescription(),
-                entity.getFolderPath(),
+                entity.getFolderId(),
                 jsonCodec.readStringList(entity.getTagsJson()),
                 entity.getDslVersion(),
                 entity.getContent(),
@@ -453,15 +541,55 @@ public class PlatformCatalogService {
         return value == null || value.isBlank() ? null : value;
     }
 
-    private String normalizeFolderPath(String folderPath) {
+    private void migrateLegacyFolderPaths() {
+        caseRepository.findAll().forEach(testCase -> {
+            if (testCase.getFolderId() == null && testCase.getFolderPath() != null && !testCase.getFolderPath().isBlank()) {
+                testCase.setFolderId(resolveFolderPath(testCase.getProjectId(), testCase.getFolderPath()));
+                caseRepository.save(testCase);
+            }
+        });
+    }
+
+    private String resolveFolderPath(String projectId, String folderPath) {
         if (folderPath == null || folderPath.isBlank()) {
             return null;
         }
-        List<String> segments = Arrays.stream(folderPath.replace('\\', '/').split("/"))
+        String parentFolderId = null;
+        for (String segment : Arrays.stream(folderPath.replace('\\', '/').split("/"))
                 .map(String::trim)
-                .filter(segment -> !segment.isBlank())
-                .toList();
-        return segments.isEmpty() ? null : String.join("/", segments);
+                .filter(value -> !value.isBlank())
+                .toList()) {
+            final String currentParentId = parentFolderId;
+            FolderEntity folder = folderRepository.findByProjectIdAndParentFolderIdOrderBySortOrderAscNameAsc(projectId, currentParentId)
+                    .stream()
+                    .filter(candidate -> candidate.getName().equalsIgnoreCase(segment))
+                    .findFirst()
+                    .orElseGet(() -> {
+                        FolderEntity created = new FolderEntity();
+                        created.setProjectId(projectId);
+                        created.setParentFolderId(currentParentId);
+                        created.setName(segment);
+                        created.setSortOrder(folderRepository.findByProjectIdAndParentFolderIdOrderBySortOrderAscNameAsc(projectId, currentParentId).size() + 1);
+                        return folderRepository.save(created);
+                    });
+            parentFolderId = folder.getId();
+        }
+        return parentFolderId;
+    }
+
+    private boolean isDescendant(String folderId, String possibleAncestorId) {
+        if (possibleAncestorId == null) {
+            return false;
+        }
+        Set<String> visited = new HashSet<>();
+        String currentId = folderId;
+        while (currentId != null && visited.add(currentId)) {
+            if (currentId.equals(possibleAncestorId)) {
+                return true;
+            }
+            currentId = requireFolder(currentId).getParentFolderId();
+        }
+        return false;
     }
 
     private String readOptionalFile(String relativePath) {
@@ -516,13 +644,23 @@ public class PlatformCatalogService {
             boolean enabled) {
     }
 
+    public record FolderRecord(
+            String id,
+            String projectId,
+            String parentFolderId,
+            String name,
+            Integer sortOrder,
+            Instant createdAt,
+            Instant updatedAt) {
+    }
+
     public record CaseRecord(
             String id,
             String projectId,
             String name,
             String code,
             String description,
-            String folderPath,
+            String folderId,
             List<String> tags,
             String dslVersion,
             String content,
@@ -581,11 +719,17 @@ public class PlatformCatalogService {
             @NotBlank String name,
             @NotBlank String code,
             String description,
-            String folderPath,
+            String folderId,
             List<String> tags,
             String dslVersion,
             @NotBlank String content,
             String status) {
+    }
+
+    public record UpsertFolderRequest(
+            String id,
+            @NotBlank String name,
+            String parentFolderId) {
     }
 
     public record UpsertSuiteRequest(

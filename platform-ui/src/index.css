@@ -700,6 +700,7 @@ body {
 }
 
 .scenario-sidebar-head,
+.scenario-root-row,
 .scenario-topbar,
 .scenario-response-head,
 .scenario-step-strip {
@@ -720,6 +721,14 @@ body {
 .scenario-project-select,
 .scenario-search {
   width: 100%;
+}
+
+.config-tabs > .ant-tabs-nav {
+  margin-bottom: 16px;
+}
+
+.config-tabs .panel-section {
+  min-height: 320px;
 }
 
 .scenario-case-list {
@@ -790,7 +799,6 @@ body {
   font-weight: 700;
   line-height: 1.25;
   text-align: left;
-  cursor: pointer;
   background: transparent;
   border: 0;
   border-radius: 6px;
@@ -803,6 +811,34 @@ body {
 .scenario-folder-row:focus-visible {
   outline: 2px solid #9ec5ff;
   outline-offset: -2px;
+}
+
+.scenario-root-row {
+  min-height: 30px;
+  padding: 4px 6px;
+  color: #1f2937;
+  background: #eef2f7;
+  border-radius: 6px;
+}
+
+.scenario-tree-primary {
+  display: flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  gap: 7px;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  background: transparent;
+  border: 0;
+}
+
+.scenario-root-primary {
+  font-size: 13px;
+  font-weight: 700;
 }
 
 .scenario-folder-toggle {
@@ -832,17 +868,16 @@ body {
   min-width: 0;
 }
 
-.scenario-case-delete {
+.scenario-tree-action {
   flex: 0 0 auto;
-  margin-left: auto;
+  margin-left: 0;
   opacity: 0;
   visibility: hidden;
 }
 
-.scenario-case-move {
-  flex: 0 0 auto;
-  opacity: 0;
-  visibility: hidden;
+.scenario-root-row .scenario-tree-action {
+  opacity: 1;
+  visibility: visible;
 }
 
 .scenario-run-indicator {
@@ -861,12 +896,11 @@ body {
   background: #dc2626;
 }
 
-.scenario-case-row:hover .scenario-case-delete,
-.scenario-case-row:focus-within .scenario-case-delete,
-.scenario-case-row.active .scenario-case-delete,
-.scenario-case-row:hover .scenario-case-move,
-.scenario-case-row:focus-within .scenario-case-move,
-.scenario-case-row.active .scenario-case-move {
+.scenario-case-row:hover .scenario-tree-action,
+.scenario-case-row:focus-within .scenario-tree-action,
+.scenario-case-row.active .scenario-tree-action,
+.scenario-folder-row:hover .scenario-tree-action,
+.scenario-folder-row:focus-within .scenario-tree-action {
   opacity: 1;
   visibility: visible;
 }

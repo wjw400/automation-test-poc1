@@ -1,4 +1,4 @@
-import { Alert, App, Button, Drawer, Form, Input, Select, Switch, Table, Typography } from 'antd'
+import { Alert, App, Button, Drawer, Form, Input, Select, Switch, Table, Tabs, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
@@ -43,6 +43,13 @@ export function ConfigPage() {
   })
 
   const selectedProjectId = searchParams.get('projectId') ?? projectsQuery.data?.[0]?.id
+  const activeTab = searchParams.get('tab') === 'profiles' ? 'profiles' : 'environments'
+
+  const updateSearchParams = (nextValues: Record<string, string>) => {
+    const next = new URLSearchParams(searchParams)
+    Object.entries(nextValues).forEach(([key, value]) => next.set(key, value))
+    setSearchParams(next)
+  }
 
   const environmentsQuery = useQuery({
     queryKey: ['environments', selectedProjectId],
@@ -96,12 +103,20 @@ export function ConfigPage() {
             label: project.name,
             value: project.id,
           }))}
-          onChange={(value) => setSearchParams({ projectId: value })}
+          onChange={(value) => updateSearchParams({ projectId: value })}
         />
       </section>
 
-      <div className="workspace-grid">
-        <section className="panel-section">
+      <Tabs
+        className="config-tabs"
+        activeKey={activeTab}
+        onChange={(tab) => updateSearchParams({ tab })}
+        items={[
+          {
+            key: 'environments',
+            label: 'Environments',
+            children: (
+              <section className="panel-section">
           <div className="panel-title-row compact">
             <div>
               <h2 className="panel-title">Environments</h2>
@@ -142,9 +157,14 @@ export function ConfigPage() {
             ]}
             dataSource={environmentsQuery.data ?? []}
           />
-        </section>
-
-        <section className="panel-section">
+              </section>
+            ),
+          },
+          {
+            key: 'profiles',
+            label: 'Profiles',
+            children: (
+              <section className="panel-section">
           <div className="panel-title-row compact">
             <div>
               <h2 className="panel-title">Profiles</h2>
@@ -178,8 +198,11 @@ export function ConfigPage() {
             ]}
             dataSource={profilesQuery.data ?? []}
           />
-        </section>
-      </div>
+              </section>
+            ),
+          },
+        ]}
+      />
 
       <Drawer
         open={showEnvironmentDrawer}

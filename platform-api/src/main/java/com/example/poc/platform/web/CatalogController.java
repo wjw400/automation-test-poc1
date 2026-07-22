@@ -3,11 +3,13 @@ package com.example.poc.platform.web;
 import com.example.poc.platform.catalog.PlatformCatalogService;
 import com.example.poc.platform.catalog.PlatformCatalogService.CaseRecord;
 import com.example.poc.platform.catalog.PlatformCatalogService.EnvironmentRecord;
+import com.example.poc.platform.catalog.PlatformCatalogService.FolderRecord;
 import com.example.poc.platform.catalog.PlatformCatalogService.ProfileRecord;
 import com.example.poc.platform.catalog.PlatformCatalogService.ProjectRecord;
 import com.example.poc.platform.catalog.PlatformCatalogService.SuiteRecord;
 import com.example.poc.platform.catalog.PlatformCatalogService.UpsertCaseRequest;
 import com.example.poc.platform.catalog.PlatformCatalogService.UpsertEnvironmentRequest;
+import com.example.poc.platform.catalog.PlatformCatalogService.UpsertFolderRequest;
 import com.example.poc.platform.catalog.PlatformCatalogService.UpsertProfileRequest;
 import com.example.poc.platform.catalog.PlatformCatalogService.UpsertSuiteRequest;
 import jakarta.validation.Valid;
@@ -60,6 +62,29 @@ public class CatalogController {
         return catalogService.saveProfile(projectId, request);
     }
 
+    @GetMapping("/projects/{projectId}/folders")
+    public List<FolderRecord> listFolders(@PathVariable("projectId") String projectId) {
+        return catalogService.listFolders(projectId);
+    }
+
+    @PostMapping("/projects/{projectId}/folders")
+    public FolderRecord createFolder(@PathVariable("projectId") String projectId, @Valid @RequestBody UpsertFolderRequest request) {
+        return catalogService.saveFolder(projectId, request);
+    }
+
+    @PutMapping("/projects/{projectId}/folders/{folderId}")
+    public FolderRecord updateFolder(
+            @PathVariable("projectId") String projectId,
+            @PathVariable("folderId") String folderId,
+            @Valid @RequestBody UpsertFolderRequest request) {
+        return catalogService.saveFolder(projectId, new UpsertFolderRequest(folderId, request.name(), request.parentFolderId()));
+    }
+
+    @DeleteMapping("/folders/{folderId}")
+    public void deleteFolder(@PathVariable("folderId") String folderId) {
+        catalogService.deleteFolder(folderId);
+    }
+
     @GetMapping("/projects/{projectId}/cases")
     public List<CaseRecord> listCases(@PathVariable("projectId") String projectId) {
         return catalogService.listCases(projectId);
@@ -85,7 +110,7 @@ public class CatalogController {
                 request.name(),
                 request.code(),
                 request.description(),
-                request.folderPath(),
+                request.folderId(),
                 request.tags(),
                 request.dslVersion(),
                 request.content(),

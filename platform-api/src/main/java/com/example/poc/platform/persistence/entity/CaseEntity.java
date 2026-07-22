@@ -30,6 +30,8 @@ public class CaseEntity {
     @Column(length = 500)
     private String folderPath;
 
+    private String folderId;
+
     @Column(nullable = false, columnDefinition = "text")
     private String tagsJson;
 
@@ -77,6 +79,8 @@ public class CaseEntity {
     public void setDescription(String description) { this.description = description; }
     public String getFolderPath() { return folderPath; }
     public void setFolderPath(String folderPath) { this.folderPath = folderPath; }
+    public String getFolderId() { return folderId; }
+    public void setFolderId(String folderId) { this.folderId = folderId; }
     public String getTagsJson() { return tagsJson; }
     public void setTagsJson(String tagsJson) { this.tagsJson = tagsJson; }
     public String getDslVersion() { return dslVersion; }
