@@ -1,14 +1,26 @@
 server:
   port: 8081
 
+spring:
+  datasource:
+    url: jdbc:h2:mem:fulfillment;MODE=PostgreSQL;DB_CLOSE_DELAY=-1;DB_CLOSE_ON_EXIT=FALSE
+    username: sa
+    password:
+  jpa:
+    hibernate:
+      ddl-auto: create-drop
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: false
+
 mock-service:
   crypto:
     default-profile: secureEcho
-    profiles:
-      secureEcho:
-        senderPublicKey: classpath:keys/client-public.asc
-        senderPrivateKey: classpath:keys/server-private.asc
-        senderPrivateKeyPassphrase: demo-server-passphrase
-        recipientPublicKey: classpath:keys/client-public.asc
-        recipientPrivateKey: classpath:keys/server-private.asc
-        recipientPrivateKeyPassphrase: demo-server-passphrase
+    service:
+      public-key: classpath:keys/server-public.asc
+      private-key: classpath:keys/server-private.asc
+      private-key-passphrase: demo-server-passphrase
+    seeded-partner:
+      display-name: Automation Client
+      public-key: classpath:keys/client-public.asc

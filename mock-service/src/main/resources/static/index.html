@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="OrderFlow secure order fulfillment demonstration system">
+  <title>OrderFlow</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark">OF</span>
+      <div>
+        <strong>OrderFlow</strong>
+        <span>Partner fulfillment</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <span class="service-status"><span></span> Service healthy</span>
+      <button class="icon-button header-icon-button" id="partner-access" type="button"
+              aria-label="Partner access" title="Partner access">&#9881;</button>
+      <button class="button secondary" id="reset-demo" type="button">Reset demo data</button>
+    </div>
+  </header>
+
+  <div class="app-shell">
+    <aside class="sidebar">
+      <nav aria-label="OrderFlow sections">
+        <button class="nav-item active" data-view="orders" type="button">
+          <span>Orders</span>
+          <span class="nav-count" id="orders-count">0</span>
+        </button>
+        <button class="nav-item" data-view="products" type="button">
+          <span>Products</span>
+          <span class="nav-count" id="products-count">0</span>
+        </button>
+        <button class="nav-item" data-view="shipments" type="button">
+          <span>Shipments</span>
+          <span class="nav-count" id="shipments-count">0</span>
+        </button>
+        <button class="nav-item" data-view="activity" type="button">
+          <span>API Activity</span>
+          <span class="nav-count" id="activity-count">0</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-note">
+        <strong>Secure partner API</strong>
+        <code>/secure/fulfillment</code>
+        <p>Requests are signed and encrypted with the selected partner profile.</p>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <section class="view active" id="orders-view">
+        <div class="view-heading">
+          <div>
+            <h1>Orders</h1>
+            <p>Track partner orders from creation through dispatch.</p>
+          </div>
+          <button class="button primary" id="new-order" type="button">Create order</button>
+        </div>
+        <div class="metric-strip" id="order-metrics"></div>
+        <div class="table-frame">
+          <table class="orders-table">
+            <thead>
+              <tr>
+                <th>Order</th>
+                <th>Customer</th>
+                <th>Items</th>
+                <th>Total</th>
+                <th>Status</th>
+                <th>Updated</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="orders-body"></tbody>
+          </table>
+          <div class="empty-state" id="orders-empty" hidden>No orders found.</div>
+        </div>
+      </section>
+
+      <section class="view" id="products-view">
+        <div class="view-heading">
+          <div>
+            <h1>Products</h1>
+            <p>Current catalog availability used by order validation.</p>
+          </div>
+        </div>
+        <div class="product-grid" id="product-grid"></div>
+      </section>
+
+      <section class="view" id="shipments-view">
+        <div class="view-heading">
+          <div>
+            <h1>Shipments</h1>
+            <p>Dispatch records created after successful inventory reservation.</p>
+          </div>
+        </div>
+        <div class="table-frame">
+          <table class="shipments-table">
+            <thead>
+              <tr>
+                <th>Shipment</th>
+                <th>Order</th>
+                <th>Carrier</th>
+                <th>Tracking number</th>
+                <th>Status</th>
+                <th>Created</th>
+              </tr>
+            </thead>
+            <tbody id="shipments-body"></tbody>
+          </table>
+          <div class="empty-state" id="shipments-empty" hidden>No shipments found.</div>
+        </div>
+      </section>
+
+      <section class="view" id="activity-view">
+        <div class="view-heading">
+          <div>
+            <h1>API Activity</h1>
+            <p>Recent business mutations from the Web UI and encrypted partner API.</p>
+          </div>
+          <button class="button secondary" id="clear-activity" type="button">Clear activity</button>
+        </div>
+        <div class="table-frame">
+          <table class="activity-table">
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Operation</th>
+                <th>Channel</th>
+                <th>Profile</th>
+                <th>Result</th>
+                <th>Duration</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="activity-body"></tbody>
+          </table>
+          <div class="empty-state" id="activity-empty" hidden>
+            No activity recorded. Run a secure Test Scenario or create an order here.
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="security-view">
+        <div class="view-heading">
+          <div>
+            <h1>Partner Access</h1>
+            <p>Exchange public keys used by the encrypted fulfillment API.</p>
+          </div>
+        </div>
+
+        <section class="settings-section">
+          <div class="settings-heading">
+            <div>
+              <h2>Service public key</h2>
+              <p>Partners use this key to encrypt requests and verify OrderFlow signatures.</p>
+            </div>
+            <div class="inline-actions">
+              <button class="button secondary" id="copy-service-key" type="button">Copy key</button>
+              <a class="button secondary button-link" href="/web-api/security/service-key/download">Download .asc</a>
+            </div>
+          </div>
+          <div class="key-metadata" id="service-key-metadata"></div>
+          <textarea class="key-viewer" id="service-public-key" readonly aria-label="OrderFlow public key"></textarea>
+        </section>
+
+        <section class="settings-section">
+          <div class="settings-heading">
+            <div>
+              <h2>Trusted partner keys</h2>
+              <p>Inbound signatures are verified and responses are encrypted with the selected profile.</p>
+            </div>
+            <button class="button primary" id="add-partner-key" type="button">Add partner key</button>
+          </div>
+          <div class="table-frame">
+            <table class="partner-table">
+              <thead>
+                <tr>
+                  <th>Profile</th>
+                  <th>Partner</th>
+                  <th>Key ID</th>
+                  <th>Fingerprint</th>
+                  <th>Updated</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="partner-key-body"></tbody>
+            </table>
+            <div class="empty-state" id="partner-key-empty" hidden>No trusted partner keys.</div>
+          </div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <dialog class="app-dialog order-dialog" id="order-dialog">
+    <form method="dialog">
+      <div class="dialog-header">
+        <div>
+          <span class="eyebrow">Order detail</span>
+          <h2 id="order-dialog-title">Order</h2>
+        </div>
+        <button class="icon-button" aria-label="Close order detail" value="cancel">×</button>
+      </div>
+      <div id="order-dialog-content"></div>
+    </form>
+  </dialog>
+
+  <dialog class="app-dialog create-dialog" id="create-order-dialog">
+    <form id="create-order-form">
+      <div class="dialog-header">
+        <div>
+          <span class="eyebrow">New partner order</span>
+          <h2>Create order</h2>
+        </div>
+        <button class="icon-button" aria-label="Close create order" type="button" data-close-dialog="create-order-dialog">×</button>
+      </div>
+      <div class="form-grid">
+        <label>
+          Customer name
+          <input name="customerName" required placeholder="Example Trading Co.">
+        </label>
+        <label>
+          Customer reference
+          <input name="customerReference" required placeholder="PO-2026-001">
+        </label>
+      </div>
+      <div class="line-editor">
+        <div class="section-heading">
+          <strong>Order items</strong>
+          <button class="text-button" id="add-line" type="button">Add item</button>
+        </div>
+        <div id="order-lines"></div>
+      </div>
+      <div class="dialog-footer">
+        <button class="button secondary" type="button" data-close-dialog="create-order-dialog">Cancel</button>
+        <button class="button primary" type="submit">Create order</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog class="app-dialog activity-dialog" id="activity-dialog">
+    <form method="dialog">
+      <div class="dialog-header">
+        <div>
+          <span class="eyebrow">API exchange</span>
+          <h2 id="activity-dialog-title">Activity</h2>
+        </div>
+        <button class="icon-button" aria-label="Close API activity" value="cancel">×</button>
+      </div>
+      <div id="activity-dialog-content"></div>
+    </form>
+  </dialog>
+
+  <dialog class="app-dialog partner-dialog" id="partner-key-dialog">
+    <form id="partner-key-form">
+      <div class="dialog-header">
+        <div>
+          <span class="eyebrow">Trusted partner</span>
+          <h2 id="partner-key-dialog-title">Add partner key</h2>
+        </div>
+        <button class="icon-button" aria-label="Close partner key dialog" type="button"
+                data-close-dialog="partner-key-dialog">&times;</button>
+      </div>
+      <div class="partner-key-form">
+        <div class="form-grid compact-form-grid">
+          <label>
+            Profile name
+            <input name="profileName" required placeholder="partner-us">
+          </label>
+          <label>
+            Display name
+            <input name="displayName" required placeholder="Example Trading Co.">
+          </label>
+        </div>
+        <label class="file-input-label">
+          Import public key
+          <input id="partner-key-file" type="file" accept=".asc,.pgp,.gpg,text/plain">
+        </label>
+        <label class="key-input-label">
+          ASCII-armored public key
+          <textarea name="publicKey" class="key-input" required
+                    placeholder="-----BEGIN PGP PUBLIC KEY BLOCK-----"></textarea>
+        </label>
+      </div>
+      <div class="dialog-footer">
+        <button class="button secondary" type="button" data-close-dialog="partner-key-dialog">Cancel</button>
+        <button class="button primary" type="submit">Save partner key</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

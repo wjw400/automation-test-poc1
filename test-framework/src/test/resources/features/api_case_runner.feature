@@ -11,3 +11,6 @@ Feature: Structured API test case runner
 
   Scenario: Execute an XML Base64 envelope case from Cucumber
     Given execute api test case "mock/secure-mock-xml-envelope.yaml"
+
+  Scenario: Execute an encrypted order fulfillment lifecycle
+    Given execute api test case "mock/secure-order-fulfillment.yaml"

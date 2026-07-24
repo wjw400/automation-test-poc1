@@ -1,0 +1,234 @@
+dslVersion: v1
+name: Secure order fulfillment lifecycle
+description: Create, reserve, dispatch, and query an OrderFlow order through encrypted partner APIs.
+tags:
+  - mock-service
+  - fulfillment
+  - pgp
+runtime:
+  profile: secureEcho
+variables:
+  baseUrl: http://localhost:8081
+  customerReference: AUTO-ORDER-1001
+profiles:
+  secureEcho:
+    senderPublicKey: classpath:keys/server-public.asc
+    senderPrivateKey: classpath:keys/client-private.asc
+    senderPrivateKeyPassphrase: demo-client-passphrase
+    recipientPublicKey: classpath:keys/server-public.asc
+    recipientPrivateKey: classpath:keys/client-private.asc
+    recipientPrivateKeyPassphrase: demo-client-passphrase
+steps:
+  - name: Create partner order
+    type: http
+    operation:
+      operationId: createFulfillmentOrder
+      method: POST
+      path: /secure/fulfillment/orders/create
+    runtime: {}
+    request:
+      headers:
+        Content-Type: application/json
+      query: {}
+      body:
+        customerName: Automation Partner
+        customerReference: ${customerReference}
+        items:
+          - productId: P100
+            quantity: 1
+          - productId: P103
+            quantity: 2
+    actions:
+      beforeSend:
+        - type: crypto.pgp.signAndEncrypt
+          name: Protect order request
+          input:
+            source: request.body
+            format: json
+          output:
+            target: artifacts.encryptedPayload
+            format: text
+        - type: body.buildJson
+          name: Build partner envelope
+          template:
+            payload: ${artifacts.encryptedPayload}
+          output:
+            target: request.body
+      afterReceive:
+        - type: crypto.pgp.decryptAndVerify
+          name: Read created order
+          input:
+            source: response.body
+            path: $.payload
+          output:
+            target: decrypted.createdOrder
+            format: json
+    response:
+      status: 200
+      assertions:
+        - source: response.body
+          path: $.code
+          operator: equals
+          expected: SUCCESS
+        - source: decrypted.createdOrder
+          path: $.status
+          operator: equals
+          expected: CREATED
+      extract:
+        orderId:
+          source: decrypted.createdOrder
+          path: $.id
+
+  - name: Reserve order inventory
+    type: http
+    operation:
+      operationId: reserveFulfillmentOrder
+      method: POST
+      path: /secure/fulfillment/orders/reserve
+    runtime: {}
+    request:
+      headers:
+        Content-Type: application/json
+      query: {}
+      body:
+        orderId: ${orderId}
+    actions:
+      beforeSend:
+        - type: crypto.pgp.signAndEncrypt
+          name: Protect reservation request
+          input:
+            source: request.body
+            format: json
+          output:
+            target: artifacts.encryptedPayload
+            format: text
+        - type: body.buildJson
+          template:
+            payload: ${artifacts.encryptedPayload}
+          output:
+            target: request.body
+      afterReceive:
+        - type: crypto.pgp.decryptAndVerify
+          name: Read reservation result
+          input:
+            source: response.body
+            path: $.payload
+          output:
+            target: decrypted.reservedOrder
+            format: json
+    response:
+      status: 200
+      assertions:
+        - source: decrypted.reservedOrder
+          path: $.id
+          operator: equals
+          expected: ${orderId}
+        - source: decrypted.reservedOrder
+          path: $.status
+          operator: equals
+          expected: RESERVED
+      extract: {}
+
+  - name: Dispatch order shipment
+    type: http
+    operation:
+      operationId: fulfillFulfillmentOrder
+      method: POST
+      path: /secure/fulfillment/orders/fulfill
+    runtime: {}
+    request:
+      headers:
+        Content-Type: application/json
+      query: {}
+      body:
+        orderId: ${orderId}
+        carrier: Northstar Logistics
+    actions:
+      beforeSend:
+        - type: crypto.pgp.signAndEncrypt
+          name: Protect dispatch request
+          input:
+            source: request.body
+            format: json
+          output:
+            target: artifacts.encryptedPayload
+            format: text
+        - type: body.buildJson
+          template:
+            payload: ${artifacts.encryptedPayload}
+          output:
+            target: request.body
+      afterReceive:
+        - type: crypto.pgp.decryptAndVerify
+          name: Read shipment result
+          input:
+            source: response.body
+            path: $.payload
+          output:
+            target: decrypted.dispatchedOrder
+            format: json
+    response:
+      status: 200
+      assertions:
+        - source: decrypted.dispatchedOrder
+          path: $.status
+          operator: equals
+          expected: DISPATCHED
+        - source: decrypted.dispatchedOrder
+          path: $.shipment.status
+          operator: equals
+          expected: DISPATCHED
+      extract:
+        trackingNumber:
+          source: decrypted.dispatchedOrder
+          path: $.shipment.trackingNumber
+
+  - name: Query dispatched order
+    type: http
+    operation:
+      operationId: queryFulfillmentOrder
+      method: POST
+      path: /secure/fulfillment/orders/query
+    runtime: {}
+    request:
+      headers:
+        Content-Type: application/json
+      query: {}
+      body:
+        orderId: ${orderId}
+    actions:
+      beforeSend:
+        - type: crypto.pgp.signAndEncrypt
+          name: Protect query request
+          input:
+            source: request.body
+            format: json
+          output:
+            target: artifacts.encryptedPayload
+            format: text
+        - type: body.buildJson
+          template:
+            payload: ${artifacts.encryptedPayload}
+          output:
+            target: request.body
+      afterReceive:
+        - type: crypto.pgp.decryptAndVerify
+          name: Read queried order
+          input:
+            source: response.body
+            path: $.payload
+          output:
+            target: decrypted.queriedOrder
+            format: json
+    response:
+      status: 200
+      assertions:
+        - source: decrypted.queriedOrder
+          path: $.id
+          operator: equals
+          expected: ${orderId}
+        - source: decrypted.queriedOrder
+          path: $.status
+          operator: equals
+          expected: DISPATCHED
+      extract: {}

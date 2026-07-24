@@ -28,43 +28,41 @@ Actions use the Step Profile, falling back to the Scenario Profile. Action-level
 
 ```yaml
 dslVersion: v1
-name: Secure XML envelope
+name: Create secure partner order
 runtime:
   profile: secureProfile
 variables:
   baseUrl: http://localhost:8081
 steps:
-  - name: Submit encrypted XML
+  - name: Create partner order
     type: http
     operation:
-      operationId: submitSecureXmlEnvelope
+      operationId: createFulfillmentOrder
       method: POST
-      path: /secure/xml-envelope
+      path: /secure/fulfillment/orders/create
     runtime: {}
     request:
       headers:
         Content-Type: application/json
       query: {}
-      body: <Payment><Amount>100</Amount></Payment>
+      body:
+        customerName: Automation Partner
+        customerReference: AUTO-ORDER-1001
+        items:
+          - productId: P100
+            quantity: 2
     actions:
       beforeSend:
         - type: crypto.pgp.signAndEncrypt
           input:
             source: request.body
-            format: xml
+            format: json
           output:
             target: artifacts.encryptedPayload
             format: text
-        - type: data.encodeBase64
-          input:
-            source: artifacts.encryptedPayload
-          output:
-            target: artifacts.encryptedPayloadBase64
         - type: body.buildJson
           template:
-            meta:
-              a: xxx
-            encryptBase64: ${artifacts.encryptedPayloadBase64}
+            payload: ${artifacts.encryptedPayload}
           output:
             target: request.body
       afterReceive:
@@ -73,7 +71,7 @@ steps:
             source: response.body
             path: $.payload
           output:
-            target: decrypted.securePayload
+            target: decrypted.order
             format: json
     response:
       status: 200
@@ -82,10 +80,10 @@ steps:
           path: $.code
           operator: equals
           expected: SUCCESS
-        - source: decrypted.securePayload
-          path: $.result
+        - source: decrypted.order
+          path: $.status
           operator: equals
-          expected: ACCEPTED
+          expected: CREATED
       extract: {}
 ```
 
@@ -107,7 +105,9 @@ Start the secure mock backend:
 mvn -pl mock-service spring-boot:run
 ```
 
-The mock service listens on `http://localhost:8081`. Its OpenAPI document is stored at `mock-service/src/main/resources/openapi/mock-service-openapi.yaml` and includes the XML/Base64 envelope endpoint.
+The mock service listens on `http://localhost:8081`. Open that URL to use the embedded OrderFlow order fulfillment UI. Its OpenAPI document is stored at `mock-service/src/main/resources/openapi/mock-service-openapi.yaml` and contains the encrypted partner fulfillment operations.
+
+OrderFlow uses an H2 in-memory database with seeded Products, Orders, Shipments, and a default `secureEcho` Partner Profile. The UI can restore business data, inspect recent API activity, download the service public key, and manage trusted partner public keys from Partner Access.
 
 Start the platform API:
 
