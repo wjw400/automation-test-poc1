@@ -25,6 +25,7 @@ import {
   SaveOutlined,
 } from '@ant-design/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { CaseDesigner } from '../components/CaseDesigner'
 import { ScenarioRunHistory } from '../components/ScenarioRunHistory'
@@ -80,6 +81,7 @@ export function CasesPage({
   onDeleted,
 }: CasesPageProps = {}) {
   const { message, modal } = App.useApp()
+  const { t } = useTranslation(['common', 'scenario'])
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const [draft, setDraft] = useState<SaveCaseInput>(emptyDraft)
@@ -339,10 +341,10 @@ export function CasesPage({
   const saveCaseMutation = useMutation({
     mutationFn: async () => {
       if (!selectedProjectId) {
-        throw new Error('Select a project first.')
+        throw new Error(t('scenario:messages.selectProjectFirst'))
       }
       if (variablesJsonError) {
-        throw new Error(`Fix Variables JSON before saving: ${variablesJsonError}`)
+        throw new Error(`${t('scenario:messages.fixVariablesBeforeSave')}: ${variablesJsonError}`)
       }
       const payload = normalizeDraftForSave(draft)
       return isCreating || !selectedCase
@@ -361,7 +363,7 @@ export function CasesPage({
           ...(selectedEditorView === 'step' ? { step: String(activeStepIndex) } : {}),
         })
       }
-      void message.success('Case saved')
+      void message.success(t('scenario:messages.caseSaved'))
     },
   })
 
@@ -401,14 +403,14 @@ export function CasesPage({
         setIsCreating(false)
       }
 
-      void message.success('Case deleted')
+      void message.success(t('scenario:messages.caseDeleted'))
     },
   })
 
   const moveCaseMutation = useMutation({
     mutationFn: async () => {
       if (!selectedProjectId || !caseToMove) {
-        throw new Error('Select a scenario to move.')
+        throw new Error(t('scenario:messages.selectScenarioToMove'))
       }
       return platformApi.updateCase(
         selectedProjectId,
@@ -426,14 +428,14 @@ export function CasesPage({
         setDraftCaseId(savedCase.id)
       }
       setCaseToMove(undefined)
-      void message.success('Scenario moved')
+      void message.success(t('scenario:messages.moved'))
     },
   })
 
   const saveTitleMutation = useMutation({
     mutationFn: async ({ record, name }: { record: CaseRecord; name: string }) => {
       if (!selectedProjectId) {
-        throw new Error('Select a project first.')
+        throw new Error(t('scenario:messages.selectProjectFirst'))
       }
       return platformApi.updateCase(
         selectedProjectId,
@@ -454,18 +456,18 @@ export function CasesPage({
       setScenarioToRename(undefined)
     },
     onError: () => {
-      void message.error('Unable to save scenario name')
+      void message.error(t('scenario:messages.renameFailed'))
     },
   })
 
   const saveFolderMutation = useMutation({
     mutationFn: async () => {
       if (!selectedProjectId || !folderDialog) {
-        throw new Error('Select a folder first.')
+        throw new Error(t('scenario:folders.selectFirst'))
       }
       const name = folderName.trim()
       if (!name) {
-        throw new Error('Folder name is required.')
+        throw new Error(t('scenario:folders.nameRequired'))
       }
       const payload = {
         name,
@@ -478,10 +480,10 @@ export function CasesPage({
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['folders', selectedProjectId] })
       setFolderDialog(undefined)
-      void message.success('Folder saved')
+      void message.success(t('scenario:folders.saved'))
     },
     onError: (error) => {
-      void message.error(error instanceof Error ? error.message : 'Unable to save folder')
+      void message.error(error instanceof Error ? error.message : t('scenario:folders.saveFailed'))
     },
   })
 
@@ -489,17 +491,17 @@ export function CasesPage({
     mutationFn: platformApi.deleteFolder,
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['folders', selectedProjectId] })
-      void message.success('Folder deleted')
+      void message.success(t('scenario:folders.deleted'))
     },
     onError: (error) => {
-      void message.error(error instanceof Error ? error.message : 'Folder is not empty')
+      void message.error(error instanceof Error ? error.message : t('scenario:folders.emptyError'))
     },
   })
 
   const duplicateCaseMutation = useMutation({
     mutationFn: async (record: CaseRecord) => {
       if (!selectedProjectId) {
-        throw new Error('Select a project first.')
+        throw new Error(t('scenario:messages.selectProjectFirst'))
       }
       return platformApi.createCase(selectedProjectId, normalizeDraftForSave({
         ...draftFromCase(record),
@@ -510,7 +512,7 @@ export function CasesPage({
     onSuccess: async (savedCase) => {
       await queryClient.invalidateQueries({ queryKey: ['cases', selectedProjectId] })
       setSearchParams({ projectId: selectedProjectId!, caseId: savedCase.id })
-      void message.success('Scenario duplicated')
+      void message.success(t('scenario:messages.duplicated'))
     },
   })
 
@@ -524,7 +526,7 @@ export function CasesPage({
     } = {}) => {
       const targetCaseId = caseId ?? selectedCase?.id
       if (!targetCaseId) {
-        throw new Error('Save the case before running it.')
+        throw new Error(t('scenario:messages.saveCaseBeforeRun'))
       }
       const runs: RunRecord[] = []
       const selectedExecutions = executions?.length ? executions : [undefined]
@@ -553,7 +555,7 @@ export function CasesPage({
       setActiveAssetView('runs')
       void message.success(runs.length === 1
         ? `Run ${run.status.toLowerCase()}`
-        : `${runs.length} environments completed`)
+        : t('scenario:batchRun.completed', { count: runs.length }))
     },
   })
 
@@ -586,11 +588,11 @@ export function CasesPage({
 
   const confirmDeleteCase = (record: CaseRecord) => {
     modal.confirm({
-      title: 'Delete case?',
-      content: `This will remove "${record.name}" from the case library and suites. Execution history is kept.`,
-      okText: 'Delete',
+      title: t('scenario:dialogs.delete'),
+      content: t('scenario:messages.deleteCaseDescription', { name: record.name }),
+      okText: t('common:actions.delete'),
       okButtonProps: { danger: true },
-      cancelText: 'Cancel',
+      cancelText: t('common:actions.cancel'),
       onOk: () => deleteCaseMutation.mutateAsync(record.id),
     })
   }
@@ -607,7 +609,7 @@ export function CasesPage({
   const handleCreateCase = () => {
     const name = createCaseName.trim()
     if (!name) {
-      void message.warning('Scenario name is required')
+      void message.warning(t('scenario:messages.nameRequired'))
       return
     }
     setDraft(createEmptyDraft(name, createCaseFolderId))
@@ -631,7 +633,7 @@ export function CasesPage({
 
   const openMoveScenario = (record: CaseRecord) => {
     if (record.id === selectedCase?.id && isDraftDirty) {
-      void message.warning('Save changes before moving this scenario.')
+      void message.warning(t('scenario:messages.saveBeforeMove'))
       return
     }
     setCaseToMove(record)
@@ -646,18 +648,18 @@ export function CasesPage({
 
   const confirmDeleteFolder = (folder: FolderRecord) => {
     modal.confirm({
-      title: 'Delete folder?',
-      content: `Delete "${folder.name}"? Folders containing scenarios or subfolders cannot be deleted.`,
-      okText: 'Delete',
+      title: t('scenario:folders.deleteConfirm'),
+      content: t('scenario:folders.deleteDescription', { name: folder.name }),
+      okText: t('common:actions.delete'),
       okButtonProps: { danger: true },
-      cancelText: 'Cancel',
+      cancelText: t('common:actions.cancel'),
       onOk: () => deleteFolderMutation.mutateAsync(folder.id),
     })
   }
 
   const openRenameScenario = (record: CaseRecord) => {
     if (record.id === selectedCase?.id && isDraftDirty) {
-      void message.warning('Save changes before renaming this scenario.')
+      void message.warning(t('scenario:messages.saveBeforeRename'))
       return
     }
     setScenarioToRename(record)
@@ -670,7 +672,7 @@ export function CasesPage({
     }
     const name = scenarioName.trim()
     if (!name) {
-      void message.warning('Scenario name is required')
+      void message.warning(t('scenario:messages.nameRequired'))
       return
     }
     void saveTitleMutation.mutateAsync({ record: scenarioToRename, name })
@@ -683,7 +685,7 @@ export function CasesPage({
     const normalizedName = name.trim()
     if (!normalizedName) {
       setDraft((current) => ({ ...current, name: selectedCase.name }))
-      void message.warning('Scenario name is required')
+      void message.warning(t('scenario:messages.nameRequired'))
       return
     }
     if (normalizedName === selectedCase.name) {
@@ -716,24 +718,24 @@ export function CasesPage({
               trigger={['click']}
               menu={{
                 items: [
-                  { key: 'scenario', label: 'Add Test Scenario', icon: <FileTextOutlined /> },
-                  { key: 'folder', label: 'Add Folder', icon: <FolderOutlined /> },
+                  { key: 'scenario', label: t('scenario:addScenario'), icon: <FileTextOutlined /> },
+                  { key: 'folder', label: t('scenario:folders.add'), icon: <FolderOutlined /> },
                 ],
                 onClick: ({ key }) => key === 'scenario'
                   ? openCreateCaseModal(folder.id)
                   : openFolderDialog('create', undefined, folder.id),
               }}
             >
-              <Button className="scenario-tree-action" icon={<PlusOutlined />} size="small" type="text" title={`Add to ${folder.name}`} />
+              <Button className="scenario-tree-action" icon={<PlusOutlined />} size="small" type="text" title={t('scenario:actions.addTo', { name: folder.name })} />
             </Dropdown>
             <Dropdown
               trigger={['click']}
               menu={{
                 items: [
-                  { key: 'rename', label: 'Rename', icon: <EditOutlined /> },
-                  { key: 'move', label: 'Move', icon: <FolderOutlined /> },
+                  { key: 'rename', label: t('common:actions.rename'), icon: <EditOutlined /> },
+                  { key: 'move', label: t('common:actions.move'), icon: <FolderOutlined /> },
                   { type: 'divider' },
-                  { key: 'delete', label: 'Delete', icon: <DeleteOutlined />, danger: true },
+                  { key: 'delete', label: t('common:actions.delete'), icon: <DeleteOutlined />, danger: true },
                 ],
                 onClick: ({ key }) => {
                   if (key === 'rename') openFolderDialog('rename', folder)
@@ -742,7 +744,7 @@ export function CasesPage({
                 },
               }}
             >
-              <Button className="scenario-tree-action" icon={<MoreOutlined />} size="small" type="text" title={`Manage ${folder.name}`} />
+              <Button className="scenario-tree-action" icon={<MoreOutlined />} size="small" type="text" title={t('scenario:actions.manage', { name: folder.name })} />
             </Dropdown>
           </div>
           {isExpanded ? (
@@ -777,24 +779,24 @@ export function CasesPage({
           <FileTextOutlined className="scenario-tree-icon" />
           <span className="scenario-case-copy">
             <span className="scenario-case-name">{record.name}</span>
-            <span className="scenario-case-path">{stepCount} step{stepCount === 1 ? '' : 's'}</span>
+            <span className="scenario-case-path">{t('scenario:list.stepCount', { count: stepCount })}</span>
           </span>
-          {latestRun ? <span className={`scenario-run-indicator ${latestRun.status.toLowerCase()}`} title={`Last run: ${latestRun.status}`} /> : null}
+          {latestRun ? <span className={`scenario-run-indicator ${latestRun.status.toLowerCase()}`} title={t('scenario:list.lastRun', { status: latestRun.status })} /> : null}
           <Dropdown
             trigger={['click']}
             menu={{
               items: [
                 {
                   key: 'run',
-                  label: 'Run',
+                  label: t('common:actions.run'),
                   icon: <PlayCircleOutlined />,
                   disabled: !record.defaultEnvironmentId || !record.defaultProfileId,
                 },
-                { key: 'rename', label: 'Rename', icon: <EditOutlined /> },
-                { key: 'duplicate', label: 'Duplicate', icon: <FileTextOutlined /> },
-                { key: 'move', label: 'Move', icon: <FolderOutlined /> },
+                { key: 'rename', label: t('common:actions.rename'), icon: <EditOutlined /> },
+                { key: 'duplicate', label: t('common:actions.duplicate'), icon: <FileTextOutlined /> },
+                { key: 'move', label: t('common:actions.move'), icon: <FolderOutlined /> },
                 { type: 'divider' },
-                { key: 'delete', label: 'Delete', icon: <DeleteOutlined />, danger: true },
+                { key: 'delete', label: t('common:actions.delete'), icon: <DeleteOutlined />, danger: true },
               ],
               onClick: ({ key }) => {
                 if (key === 'run') void runMutation.mutateAsync({ caseId: record.id })
@@ -806,12 +808,12 @@ export function CasesPage({
             }}
           >
             <Button
-              aria-label={`Manage ${record.name}`}
+              aria-label={t('scenario:actions.manage', { name: record.name })}
               className="scenario-tree-action"
               icon={<MoreOutlined />}
               loading={deleteCaseMutation.isPending && deleteCaseMutation.variables === record.id}
               size="small"
-              title={`Manage ${record.name}`}
+              title={t('scenario:actions.manage', { name: record.name })}
               type="text"
               onClick={(event) => event.stopPropagation()}
               onKeyDown={(event) => event.stopPropagation()}
@@ -861,53 +863,53 @@ export function CasesPage({
             <button type="button" className="scenario-tree-primary scenario-root-primary">
               <DownOutlined className="scenario-folder-toggle" />
               <FolderOpenOutlined className="scenario-tree-icon" />
-              <span className="scenario-folder-name">{selectedProject?.name ?? 'Project'}</span>
+              <span className="scenario-folder-name">{selectedProject?.name ?? t('scenario:list.projectFallback')}</span>
             </button>
             <Dropdown
               trigger={['click']}
               menu={{
                 items: [
-                  { key: 'scenario', label: 'Add Test Scenario', icon: <FileTextOutlined /> },
-                  { key: 'folder', label: 'Add Folder', icon: <FolderOutlined /> },
+                  { key: 'scenario', label: t('scenario:addScenario'), icon: <FileTextOutlined /> },
+                  { key: 'folder', label: t('scenario:folders.add'), icon: <FolderOutlined /> },
                 ],
                 onClick: ({ key }) => key === 'scenario'
                   ? openCreateCaseModal()
                   : openFolderDialog('create'),
               }}
             >
-              <Button type="text" size="small" className="scenario-tree-action" icon={<PlusOutlined />} disabled={!selectedProjectId} title="Add" />
+              <Button type="text" size="small" className="scenario-tree-action" icon={<PlusOutlined />} disabled={!selectedProjectId} title={t('common:actions.add')} />
             </Dropdown>
             <Dropdown
               trigger={['click']}
               menu={{
                 items: [
-                  { key: 'scenario', label: 'Add Test Scenario', icon: <FileTextOutlined /> },
-                  { key: 'folder', label: 'Add Folder', icon: <FolderOutlined /> },
+                  { key: 'scenario', label: t('scenario:addScenario'), icon: <FileTextOutlined /> },
+                  { key: 'folder', label: t('scenario:folders.add'), icon: <FolderOutlined /> },
                 ],
                 onClick: ({ key }) => key === 'scenario'
                   ? openCreateCaseModal()
                   : openFolderDialog('create'),
               }}
             >
-              <Button type="text" size="small" className="scenario-tree-action" icon={<MoreOutlined />} disabled={!selectedProjectId} title="Project actions" />
+              <Button type="text" size="small" className="scenario-tree-action" icon={<MoreOutlined />} disabled={!selectedProjectId} title={t('scenario:actions.projectActions')} />
             </Dropdown>
           </div>
 
           <Input
             className="scenario-search"
             allowClear
-            placeholder="Search"
+            placeholder={t('common:search')}
             value={caseFilter}
             onChange={(event) => setCaseFilter(event.target.value)}
           />
 
           {casesQuery.isError ? (
-            <Alert className="section-alert" type="warning" showIcon message="Unable to load cases from platform-api." />
+            <Alert className="section-alert" type="warning" showIcon message={t('scenario:messages.loadFailed')} />
           ) : null}
 
           <div className="scenario-case-list scenario-tree">
-            {casesQuery.isLoading ? <div className="scenario-muted-row">Loading cases...</div> : null}
-            {!casesQuery.isLoading && !foldersQuery.isLoading && explorerNodes.length === 0 ? <div className="scenario-muted-row">No scenarios or folders yet.</div> : null}
+            {casesQuery.isLoading ? <div className="scenario-muted-row">{t('scenario:list.loading')}</div> : null}
+            {!casesQuery.isLoading && !foldersQuery.isLoading && explorerNodes.length === 0 ? <div className="scenario-muted-row">{t('scenario:list.empty')}</div> : null}
             {explorerNodes.map((node) => renderExplorerNode(node))}
           </div>
         </aside>}
@@ -921,7 +923,7 @@ export function CasesPage({
                   className="scenario-title-input"
                   htmlSize={Math.max(8, Math.min(draft.name.length + 1, 36))}
                   value={draft.name}
-                  placeholder="Scenario name"
+                  placeholder={t('scenario:namePlaceholder')}
                   variant="borderless"
                   onBlur={(event) => {
                     if (isCancellingTitleEditRef.current) {
@@ -947,20 +949,20 @@ export function CasesPage({
                 />
               </div>
               <Text className={variablesJsonError ? 'scenario-draft-state invalid' : isDraftDirty ? 'scenario-draft-state dirty' : 'scenario-draft-state'}>
-                {variablesJsonError ? 'Invalid JSON' : saveTitleMutation.isPending ? 'Saving...' : isDraftDirty ? 'Unsaved' : 'Saved'}
+                {variablesJsonError ? t('scenario:messages.invalidJson') : saveTitleMutation.isPending ? t('scenario:saving') : isDraftDirty ? t('scenario:messages.unsaved') : t('scenario:saved')}
               </Text>
             </div>
 
             <Space wrap size={[8, 8]} className="scenario-toolbar-actions">
               <div
                 className="scenario-execution-picker"
-                title="Scenario default execution context"
+                title={t('scenario:defaultExecutionContext')}
               >
                 <ControlOutlined />
                 <Select
-                  aria-label="Environment"
+                  aria-label={t('common:fields.environment')}
                   value={selectedEnvironment?.id}
-                  placeholder="Environment"
+                  placeholder={t('common:fields.environment')}
                   popupMatchSelectWidth={false}
                   options={activeEnvironments.map((environment) => ({
                     label: environment.name,
@@ -969,9 +971,9 @@ export function CasesPage({
                   onChange={selectEnvironment}
                 />
                 <Select
-                  aria-label="Profile"
+                  aria-label={t('common:fields.profile')}
                   value={selectedProfile?.id}
-                  placeholder={selectedEnvironment ? 'Profile' : 'Select environment first'}
+                  placeholder={selectedEnvironment ? t('common:fields.profile') : t('scenario:messages.selectEnvironmentFirst')}
                   popupMatchSelectWidth={false}
                   disabled={!selectedEnvironment}
                   options={compatibleProfiles.map((profile) => ({
@@ -985,10 +987,10 @@ export function CasesPage({
                 icon={<SaveOutlined />}
                 disabled={!isDraftDirty || Boolean(variablesJsonError)}
                 loading={saveCaseMutation.isPending}
-                title={variablesJsonError ? 'Fix Variables JSON before saving' : 'Save scenario'}
+                title={variablesJsonError ? t('scenario:messages.fixVariablesBeforeSave') : t('common:actions.save')}
                 onClick={() => void saveCaseMutation.mutateAsync()}
               >
-                Save
+                {t('common:actions.save')}
               </Button>
               <Space.Compact>
                 <Button
@@ -996,17 +998,17 @@ export function CasesPage({
                   icon={<PlayCircleOutlined />}
                   loading={runMutation.isPending}
                   disabled={!selectedCase || !selectedEnvironment || !selectedProfile || isCreating || isDraftDirty || Boolean(variablesJsonError)}
-                  title={variablesJsonError ? 'Fix Variables JSON before running this scenario' : isDraftDirty ? 'Save changes before running this scenario' : 'Run selected environment and profile'}
+                  title={variablesJsonError ? t('scenario:messages.fixVariablesBeforeRun') : isDraftDirty ? t('scenario:messages.saveBeforeRun') : t('scenario:messages.runSelectedContext')}
                   onClick={() => void runMutation.mutateAsync({})}
                 >
-                  Run
+                  {t('common:actions.run')}
                 </Button>
                 <Dropdown
                   trigger={['click']}
                   menu={{
                     items: [{
                       key: 'multiple',
-                      label: 'Run in multiple environments...',
+                      label: t('scenario:actions.runMultiple'),
                       disabled: !(profilesQuery.data ?? []).some((profile) => (
                         profile.enabled && profile.environmentIds.length > 0
                       )),
@@ -1020,10 +1022,10 @@ export function CasesPage({
                 >
                   <Button
                     type="primary"
-                    aria-label="More run options"
+                    aria-label={t('scenario:moreRunOptions')}
                     icon={<DownOutlined />}
                     disabled={!selectedCase || isCreating || isDraftDirty || Boolean(variablesJsonError) || runMutation.isPending}
-                    title="More run options"
+                    title={t('scenario:moreRunOptions')}
                   />
                 </Dropdown>
               </Space.Compact>
@@ -1031,29 +1033,29 @@ export function CasesPage({
           </section>
 
           {saveCaseMutation.isError ? (
-            <Alert className="section-alert" type="error" showIcon message="Failed to save case." />
+            <Alert className="section-alert" type="error" showIcon message={t('scenario:messages.saveFailed')} />
           ) : null}
           {runMutation.isError ? (
-            <Alert className="section-alert" type="error" showIcon message="Failed to start run." />
+            <Alert className="section-alert" type="error" showIcon message={t('scenario:messages.runFailed')} />
           ) : null}
           {deleteCaseMutation.isError ? (
-            <Alert className="section-alert" type="error" showIcon message="Failed to delete case." />
+            <Alert className="section-alert" type="error" showIcon message={t('scenario:messages.deleteFailed')} />
           ) : null}
 
-          <nav className="asset-context-tabs" aria-label="Scenario sections">
+          <nav className="asset-context-tabs" aria-label={t('scenario:sectionsLabel')}>
             <button
               type="button"
               className={activeAssetView === 'definition' ? 'active' : ''}
               onClick={() => setActiveAssetView('definition')}
             >
-              Definition
+              {t('scenario:definition')}
             </button>
             <button
               type="button"
               className={activeAssetView === 'runs' ? 'active' : ''}
               onClick={() => setActiveAssetView('runs')}
             >
-              Executions <span>{scenarioRuns.length}</span>
+              {t('scenario:executions')} <span>{scenarioRuns.length}</span>
             </button>
           </nav>
 
@@ -1083,9 +1085,9 @@ export function CasesPage({
 
       </div>
       <Modal
-        title="Run in Multiple Environments"
+        title={t('scenario:batchRun.title')}
         open={isBatchRunModalOpen}
-        okText={`Run ${batchEnvironmentIds.length || ''}`.trim()}
+        okText={`${t('common:actions.run')} ${batchEnvironmentIds.length || ''}`.trim()}
         okButtonProps={{ disabled: !batchProfileId || batchEnvironmentIds.length === 0 }}
         confirmLoading={runMutation.isPending}
         onCancel={() => setIsBatchRunModalOpen(false)}
@@ -1105,11 +1107,11 @@ export function CasesPage({
       >
         <div className="batch-run-fields">
           <Text type="secondary">
-            Run the same scenario and profile against one or more compatible environments.
+            {t('scenario:batchRun.description')}
           </Text>
           <Select
-            aria-label="Batch profile"
-            placeholder="Select profile"
+            aria-label={t('common:fields.profile')}
+            placeholder={t('scenario:batchRun.selectProfile')}
             value={batchProfileId}
             options={(profilesQuery.data ?? [])
               .filter((profile) => profile.enabled)
@@ -1134,8 +1136,8 @@ export function CasesPage({
           />
           <Select
             mode="multiple"
-            aria-label="Batch environments"
-            placeholder="Select environments"
+            aria-label={t('common:fields.environment')}
+            placeholder={t('scenario:batchRun.selectEnvironments')}
             value={batchEnvironmentIds}
             options={batchEnvironments.map((environment) => ({
               label: environment.name,
@@ -1147,9 +1149,9 @@ export function CasesPage({
       </Modal>
 
       <Modal
-        title="Move Scenario"
+        title={t('scenario:dialogs.move')}
         open={Boolean(caseToMove)}
-        okText="Move"
+        okText={t('common:actions.move')}
         okButtonProps={{ loading: moveCaseMutation.isPending }}
         onCancel={() => setCaseToMove(undefined)}
         onOk={() => void moveCaseMutation.mutateAsync()}
@@ -1160,16 +1162,16 @@ export function CasesPage({
             allowClear
             value={moveFolderId}
             options={folderOptions}
-            placeholder="Root"
+            placeholder={t('scenario:folders.root')}
             onChange={setMoveFolderId}
           />
         </div>
       </Modal>
 
       <Modal
-        title={folderDialog?.mode === 'create' ? 'Add Folder' : folderDialog?.mode === 'move' ? 'Move Folder' : 'Rename Folder'}
+        title={folderDialog?.mode === 'create' ? t('scenario:folders.add') : folderDialog?.mode === 'move' ? t('scenario:folders.move') : t('scenario:folders.rename')}
         open={Boolean(folderDialog)}
-        okText={folderDialog?.mode === 'move' ? 'Move' : 'Save'}
+        okText={folderDialog?.mode === 'move' ? t('common:actions.move') : t('common:actions.save')}
         okButtonProps={{ loading: saveFolderMutation.isPending }}
         onCancel={() => setFolderDialog(undefined)}
         onOk={() => void saveFolderMutation.mutateAsync()}
@@ -1178,7 +1180,7 @@ export function CasesPage({
           {folderDialog?.mode !== 'move' ? (
             <Input
               autoFocus
-              placeholder="Folder name"
+              placeholder={t('scenario:folders.namePlaceholder')}
               value={folderName}
               onChange={(event) => setFolderName(event.target.value)}
               onPressEnter={() => void saveFolderMutation.mutateAsync()}
@@ -1190,7 +1192,7 @@ export function CasesPage({
                 allowClear
                 value={folderParentId}
                 options={folderOptions.filter((option) => !isFolderBlockedTarget(option.value, folderDialog.folder?.id, foldersQuery.data ?? []))}
-                placeholder="Root"
+                placeholder={t('scenario:folders.root')}
                 onChange={setFolderParentId}
               />
             </>
@@ -1199,16 +1201,16 @@ export function CasesPage({
       </Modal>
 
       <Modal
-        title="Rename Test Scenario"
+        title={t('scenario:dialogs.rename')}
         open={Boolean(scenarioToRename)}
-        okText="Save"
+        okText={t('common:actions.save')}
         okButtonProps={{ loading: saveTitleMutation.isPending }}
         onCancel={() => setScenarioToRename(undefined)}
         onOk={handleRenameScenario}
       >
         <Input
           autoFocus
-          placeholder="Scenario name"
+          placeholder={t('scenario:namePlaceholder')}
           value={scenarioName}
           onChange={(event) => setScenarioName(event.target.value)}
           onPressEnter={handleRenameScenario}
@@ -1216,16 +1218,16 @@ export function CasesPage({
       </Modal>
 
       <Modal
-        title="Add Test Scenario"
+        title={t('scenario:dialogs.add')}
         open={isCreateModalOpen}
         onCancel={() => setIsCreateModalOpen(false)}
         onOk={handleCreateCase}
-        okText="Create"
+        okText={t('common:actions.create')}
       >
         <div className="api-import-stack">
           <Input
             autoFocus
-            placeholder="Scenario name"
+            placeholder={t('scenario:namePlaceholder')}
             value={createCaseName}
             onChange={(event) => setCreateCaseName(event.target.value)}
             onPressEnter={handleCreateCase}

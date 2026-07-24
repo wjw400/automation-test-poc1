@@ -2,6 +2,7 @@ import { UndoOutlined } from '@ant-design/icons'
 import Editor from '@monaco-editor/react'
 import { Button, Typography } from 'antd'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 
 const { Text } = Typography
 
@@ -19,13 +20,21 @@ export function JsonObjectEditor({
   value,
   onCommit,
   onValidationChange,
-  ariaLabel = 'JSON object editor',
+  ariaLabel,
   height = '180px',
   resetLabel,
   resetValue = {},
 }: JsonObjectEditorProps) {
+  const { t } = useTranslation(['common'])
+  const editorAriaLabel = ariaLabel ?? t('common:jsonEditor.ariaLabel')
+  const validationMessages = useMemo(() => ({
+    invalid: (detail: string) => t('common:jsonEditor.invalid', { detail }),
+    invalidSyntax: t('common:jsonEditor.invalidSyntax'),
+    objectRequired: t('common:jsonEditor.objectRequired'),
+    propertyNameRequired: t('common:jsonEditor.propertyNameRequired'),
+  }), [t])
   const initialText = stringifyJsonObject(value)
-  const initialValidation = validateJsonObject(initialText)
+  const initialValidation = validateJsonObject(initialText, validationMessages)
   const [text, setText] = useState(initialText)
   const [error, setError] = useState<string | null>(initialValidation.error)
   const committedValueRef = useRef(jsonFingerprint(value))
@@ -40,14 +49,14 @@ export function JsonObjectEditor({
     if (incomingFingerprint === committedValueRef.current) {
       return
     }
-    const validation = validateJsonObject(incomingText)
+    const validation = validateJsonObject(incomingText, validationMessages)
     committedValueRef.current = incomingFingerprint
     setText(incomingText)
     setError(validation.error)
-  }, [incomingFingerprint, incomingText])
+  }, [incomingFingerprint, incomingText, validationMessages])
 
   const commitText = (nextText: string) => {
-    const validation = validateJsonObject(nextText)
+    const validation = validateJsonObject(nextText, validationMessages)
     setText(nextText)
     setError(validation.error)
     if (validation.error || !validation.value) {
@@ -86,7 +95,7 @@ export function JsonObjectEditor({
           theme="vs-light"
           value={text}
           options={{
-            ariaLabel,
+            ariaLabel: editorAriaLabel,
             automaticLayout: true,
             folding: false,
             fontSize: 13,
@@ -127,24 +136,32 @@ function jsonFingerprint(value: unknown) {
   }
 }
 
-function validateJsonObject(text: string): {
+function validateJsonObject(
+  text: string,
+  messages: {
+    invalid: (detail: string) => string
+    invalidSyntax: string
+    objectRequired: string
+    propertyNameRequired: string
+  },
+): {
   value?: Record<string, unknown>
   error: string | null
 } {
   if (!text.trim()) {
-    return { error: 'Value must be a JSON object.' }
+    return { error: messages.objectRequired }
   }
   try {
     const value: unknown = JSON.parse(text)
     if (!value || typeof value !== 'object' || Array.isArray(value)) {
-      return { error: 'Value must be a JSON object.' }
+      return { error: messages.objectRequired }
     }
     if (Object.keys(value).some((key) => !key.trim())) {
-      return { error: 'Property names cannot be empty.' }
+      return { error: messages.propertyNameRequired }
     }
     return { value: value as Record<string, unknown>, error: null }
   } catch (parseError) {
-    const detail = parseError instanceof Error ? parseError.message : 'Invalid JSON syntax.'
-    return { error: `Invalid JSON: ${detail}` }
+    const detail = parseError instanceof Error ? parseError.message : messages.invalidSyntax
+    return { error: messages.invalid(detail) }
   }
 }

@@ -4,26 +4,27 @@ import type { ColumnsType } from 'antd/es/table'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { platformApi } from '../api/platformApi'
 import { StoplightApi } from '../components/StoplightApi'
 import type { ApiSpecRecord } from '../types/platform'
 
 const { Text } = Typography
 
-const specColumns: ColumnsType<ApiSpecRecord> = [
-  {
-    title: 'Name',
-    dataIndex: 'name',
-    render: (_value, record) => <Text strong>{record.title || record.name}</Text>,
-  },
-]
-
 export function ApiCatalogPage() {
+  const { t } = useTranslation(['common', 'api'])
   const { message } = App.useApp()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const [selectedSpecId, setSelectedSpecId] = useState<string>()
   const [isImportModalOpen, setIsImportModalOpen] = useState(false)
+  const specColumns: ColumnsType<ApiSpecRecord> = [
+    {
+      title: t('common:fields.name'),
+      dataIndex: 'name',
+      render: (_value, record) => <Text strong>{record.title || record.name}</Text>,
+    },
+  ]
 
   const projectsQuery = useQuery({
     queryKey: ['projects'],
@@ -43,7 +44,7 @@ export function ApiCatalogPage() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['api-specs', selectedProjectId] })
       setIsImportModalOpen(false)
-      void message.success('OpenAPI spec imported')
+      void message.success(t('api:imported'))
     },
   })
 
@@ -71,13 +72,13 @@ export function ApiCatalogPage() {
     <div className="page-shell">
       <section className="hero-band">
         <div>
-          <h1>API Catalog</h1>
-          <p>Manage imported OpenAPI assets and inspect reusable operations.</p>
+          <h1>{t('api:catalog')}</h1>
+          <p>{t('api:heroDescription')}</p>
         </div>
         <Space wrap>
           <Select
             className="project-picker"
-            placeholder="Select project"
+            placeholder={t('api:selectProject')}
             value={selectedProjectId}
             options={(projectsQuery.data ?? []).map((project) => ({
               label: project.name,
@@ -91,7 +92,7 @@ export function ApiCatalogPage() {
               void specsQuery.refetch()
             }}
           >
-            Refresh
+            {t('api:refresh')}
           </Button>
         </Space>
       </section>
@@ -99,22 +100,22 @@ export function ApiCatalogPage() {
       <div className="workspace-grid">
         <section className="panel-section list-panel">
           <div className="panel-title-row compact">
-            <h2 className="panel-title">API Specs</h2>
+            <h2 className="panel-title">{t('api:apiSpecs')}</h2>
             <Button
               type="primary"
               icon={<UploadOutlined />}
               disabled={!selectedProjectId}
               onClick={() => setIsImportModalOpen(true)}
             >
-              Add API Spec
+              {t('api:addSpec')}
             </Button>
           </div>
 
           {specsQuery.isError ? (
-            <Alert className="section-alert" type="warning" showIcon message="Unable to load API specs." />
+            <Alert className="section-alert" type="warning" showIcon message={t('api:loadError')} />
           ) : null}
           {importMutation.isError ? (
-            <Alert className="section-alert" type="error" showIcon message="Failed to import OpenAPI spec." />
+            <Alert className="section-alert" type="error" showIcon message={t('api:importError')} />
           ) : null}
 
           <Table<ApiSpecRecord>
@@ -127,22 +128,22 @@ export function ApiCatalogPage() {
             onRow={(record) => ({
               onClick: () => setSelectedSpecId(record.id),
             })}
-            locale={{ emptyText: 'No API specs imported yet.' }}
+            locale={{ emptyText: t('api:emptyImported') }}
           />
         </section>
 
         <section className="panel-section editor-panel">
           <div className="panel-title-row compact">
             <div>
-              <h2 className="panel-title">API Reference</h2>
+              <h2 className="panel-title">{t('api:reference')}</h2>
               {selectedSpec ? (
                 <Space wrap size={[8, 8]}>
                   <Text type="secondary">{selectedSpec.title || selectedSpec.name}</Text>
                   {selectedSpec.specVersion ? <Tag>{selectedSpec.specVersion}</Tag> : null}
-                  <Tag color="blue">{selectedSpec.operationCount} operations</Tag>
+                  <Tag color="blue">{t('api:operationCount', { count: selectedSpec.operationCount })}</Tag>
                 </Space>
               ) : (
-                <Text type="secondary">Select an API spec to view its imported OpenAPI reference.</Text>
+                <Text type="secondary">{t('api:selectReference')}</Text>
               )}
             </div>
           </div>
@@ -154,13 +155,13 @@ export function ApiCatalogPage() {
               />
             </div>
           ) : (
-            <div className="panel-empty">Select an API spec to inspect its imported operations and schemas.</div>
+            <div className="panel-empty">{t('api:selectInspect')}</div>
           )}
         </section>
       </div>
 
       <Modal
-        title="Add API Spec"
+        title={t('api:addSpec')}
         open={isImportModalOpen}
         footer={null}
         destroyOnHidden
@@ -172,11 +173,11 @@ export function ApiCatalogPage() {
       >
         <div className="api-import-stack">
           <Text type="secondary">
-            Upload an OpenAPI 3.x YAML file. The platform will parse paths, methods, operation IDs, request bodies, and responses.
+            {t('api:importDescription')}
           </Text>
 
           {importMutation.isError ? (
-            <Alert type="error" showIcon message="Failed to import OpenAPI spec." />
+            <Alert type="error" showIcon message={t('api:importError')} />
           ) : null}
 
           <Upload.Dragger
@@ -192,8 +193,8 @@ export function ApiCatalogPage() {
             <p className="ant-upload-drag-icon">
               <InboxOutlined />
             </p>
-            <p className="ant-upload-text">Drop OpenAPI YAML here or click to upload</p>
-            <p className="ant-upload-hint">One spec at a time. Re-importing can refresh the indexed operations.</p>
+            <p className="ant-upload-text">{t('api:dropYaml')}</p>
+            <p className="ant-upload-hint">{t('api:importHint')}</p>
           </Upload.Dragger>
         </div>
       </Modal>

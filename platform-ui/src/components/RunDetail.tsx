@@ -1,5 +1,7 @@
 import { Alert, Descriptions, List, Space, Table, Tabs, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import { useTranslation } from 'react-i18next'
+import { formatDateTime } from '../i18n'
 import type { RunRecord, StepRun, ValidationReport } from '../types/platform'
 import { JsonPane } from './JsonPane'
 import { StatusPill } from './StatusPill'
@@ -14,40 +16,6 @@ type RunDetailProps = {
   showSummary?: boolean
 }
 
-const validationColumns: ColumnsType<ValidationReport> = [
-  {
-    title: 'Status',
-    dataIndex: 'status',
-    width: 96,
-    render: (value: string) => <StatusPill status={value} />,
-  },
-  {
-    title: 'Type',
-    dataIndex: 'type',
-    width: 96,
-  },
-  {
-    title: 'Target',
-    dataIndex: 'target',
-    ellipsis: true,
-  },
-  {
-    title: 'Expected',
-    dataIndex: 'expected',
-    render: (value: unknown) => <JsonPane value={value} emptyLabel="-" />,
-  },
-  {
-    title: 'Actual',
-    dataIndex: 'actual',
-    render: (value: unknown) => <JsonPane value={value} emptyLabel="-" />,
-  },
-  {
-    title: 'Message',
-    dataIndex: 'message',
-    ellipsis: true,
-  },
-]
-
 export function RunDetail({
   run,
   selectedStepIndex,
@@ -55,8 +23,10 @@ export function RunDetail({
   summaryColumns = 3,
   showSummary = true,
 }: RunDetailProps) {
+  const { t } = useTranslation(['common', 'execution'])
+
   if (!run) {
-    return <div className="panel-empty">Select a run to inspect request and response evidence.</div>
+    return <div className="panel-empty">{t('execution:selectRun')}</div>
   }
 
   const selectedStep =
@@ -68,8 +38,8 @@ export function RunDetail({
         <section className="panel-section">
           <div className="panel-title-row">
             <div>
-              <h2 className="panel-title">Execution Detail</h2>
-              <Text type="secondary">Trace every step, payload, and validation.</Text>
+              <h2 className="panel-title">{t('execution:detail')}</h2>
+              <Text type="secondary">{t('execution:detailDescription')}</Text>
             </div>
             <StatusPill status={run.status} />
           </div>
@@ -77,12 +47,24 @@ export function RunDetail({
             size="small"
             column={summaryColumns}
             items={[
-              { key: 'runId', label: 'Run ID', children: run.id },
-              { key: 'caseId', label: 'Case ID', children: run.caseId },
-              { key: 'duration', label: 'Duration', children: `${run.durationMs} ms` },
-              { key: 'environment', label: 'Environment', children: run.environmentName ?? run.environmentId ?? '-' },
-              { key: 'profile', label: 'Profile', children: run.profileName ?? run.profileId ?? '-' },
-              { key: 'startedAt', label: 'Started At', children: run.startedAt },
+              { key: 'runId', label: t('execution:runId'), children: run.id },
+              { key: 'caseId', label: t('execution:caseId'), children: run.caseId },
+              {
+                key: 'duration',
+                label: t('execution:durationLabel'),
+                children: t('execution:duration', { duration: run.durationMs }),
+              },
+              {
+                key: 'environment',
+                label: t('common:fields.environment'),
+                children: run.environmentName ?? run.environmentId ?? '-',
+              },
+              {
+                key: 'profile',
+                label: t('common:fields.profile'),
+                children: run.profileName ?? run.profileId ?? '-',
+              },
+              { key: 'startedAt', label: t('execution:startedAt'), children: formatDateTime(run.startedAt) },
             ]}
           />
           {run.errorMessage ? (
@@ -93,7 +75,7 @@ export function RunDetail({
 
       <div className="detail-grid">
         <section className="panel-section">
-          <h3 className="panel-subtitle">Steps</h3>
+          <h3 className="panel-subtitle">{t('execution:steps')}</h3>
           <List
             dataSource={run.steps}
             renderItem={(step) => (
@@ -107,7 +89,7 @@ export function RunDetail({
                     <StatusPill status={step.status} />
                   </Space>
                   <Text>{step.name}</Text>
-                  <Text type="secondary">{step.profile || 'No profile'}</Text>
+                  <Text type="secondary">{step.profile || t('common:noProfile')}</Text>
                 </Space>
               </List.Item>
             )}
@@ -115,7 +97,9 @@ export function RunDetail({
         </section>
 
         <section className="panel-section">
-          {selectedStep ? <StepEvidence step={selectedStep} /> : <div className="panel-empty">No steps recorded.</div>}
+          {selectedStep
+            ? <StepEvidence step={selectedStep} />
+            : <div className="panel-empty">{t('execution:noSteps')}</div>}
         </section>
       </div>
     </div>
@@ -123,12 +107,47 @@ export function RunDetail({
 }
 
 function StepEvidence({ step }: { step: StepRun }) {
+  const { t } = useTranslation(['common', 'execution'])
+  const validationColumns: ColumnsType<ValidationReport> = [
+    {
+      title: t('common:fields.status'),
+      dataIndex: 'status',
+      width: 96,
+      render: (value: string) => <StatusPill status={value} />,
+    },
+    {
+      title: t('execution:type'),
+      dataIndex: 'type',
+      width: 96,
+    },
+    {
+      title: t('execution:target'),
+      dataIndex: 'target',
+      ellipsis: true,
+    },
+    {
+      title: t('execution:expected'),
+      dataIndex: 'expected',
+      render: (value: unknown) => <JsonPane value={value} emptyLabel="-" />,
+    },
+    {
+      title: t('execution:actual'),
+      dataIndex: 'actual',
+      render: (value: unknown) => <JsonPane value={value} emptyLabel="-" />,
+    },
+    {
+      title: t('execution:message'),
+      dataIndex: 'message',
+      ellipsis: true,
+    },
+  ]
+
   return (
     <>
       <div className="panel-title-row compact">
         <div>
           <h3 className="panel-title">{step.name}</h3>
-          <Text type="secondary">{step.profile || 'No profile selected'}</Text>
+          <Text type="secondary">{step.profile || t('common:noProfile')}</Text>
         </div>
         <StatusPill status={step.status} />
       </div>
@@ -137,46 +156,46 @@ function StepEvidence({ step }: { step: StepRun }) {
         items={[
           {
             key: 'request',
-            label: 'Request',
+            label: t('execution:request'),
             children: (
               <div className="tab-stack">
                 <Descriptions
                   size="small"
                   column={2}
                   items={[
-                    { key: 'method', label: 'Method', children: step.request?.method ?? '-' },
-                    { key: 'url', label: 'URL', children: step.request?.url ?? '-' },
+                    { key: 'method', label: t('execution:method'), children: step.request?.method ?? '-' },
+                    { key: 'url', label: t('execution:url'), children: step.request?.url ?? '-' },
                   ]}
                 />
-                <JsonPane value={step.request?.headers ?? {}} emptyLabel="No headers" />
-                <JsonPane value={step.request?.body} emptyLabel="No request body" />
+                <JsonPane value={step.request?.headers ?? {}} emptyLabel={t('execution:noHeaders')} />
+                <JsonPane value={step.request?.body} emptyLabel={t('execution:noRequestBody')} />
               </div>
             ),
           },
           {
             key: 'response',
-            label: 'Response',
+            label: t('execution:response'),
             children: (
               <div className="tab-stack">
                 <Descriptions
                   size="small"
                   column={1}
                   items={[
-                    { key: 'statusCode', label: 'Status Code', children: step.response?.statusCode ?? '-' },
+                    { key: 'statusCode', label: t('execution:statusCode'), children: step.response?.statusCode ?? '-' },
                   ]}
                 />
-                <JsonPane value={step.response?.headers ?? {}} emptyLabel="No response headers" />
-                <JsonPane value={step.response?.body} emptyLabel="No response body" />
+                <JsonPane value={step.response?.headers ?? {}} emptyLabel={t('execution:noResponseHeaders')} />
+                <JsonPane value={step.response?.body} emptyLabel={t('execution:noResponseBody')} />
               </div>
             ),
           },
           {
             key: 'actions',
-            label: 'Actions',
+            label: t('execution:actions'),
             children: (
               <List
                 dataSource={step.actions ?? []}
-                locale={{ emptyText: 'No actions executed' }}
+                locale={{ emptyText: t('execution:noActions') }}
                 renderItem={(action) => (
                   <List.Item>
                     <div className="action-evidence">
@@ -193,11 +212,11 @@ function StepEvidence({ step }: { step: StepRun }) {
                       </div>
                       <div className="designer-grid">
                         <div>
-                          <Text type="secondary">Input</Text>
+                          <Text type="secondary">{t('execution:input')}</Text>
                           <JsonPane value={action.input} emptyLabel="-" />
                         </div>
                         <div>
-                          <Text type="secondary">Output</Text>
+                          <Text type="secondary">{t('execution:output')}</Text>
                           <JsonPane value={action.output} emptyLabel="-" />
                         </div>
                       </div>
@@ -210,12 +229,12 @@ function StepEvidence({ step }: { step: StepRun }) {
           },
           {
             key: 'decrypted',
-            label: 'Decrypted',
-            children: <JsonPane value={step.decryptedPayloads} emptyLabel="No decrypted payloads" />,
+            label: t('execution:decrypted'),
+            children: <JsonPane value={step.decryptedPayloads} emptyLabel={t('execution:noDecrypted')} />,
           },
           {
             key: 'validations',
-            label: 'Validations',
+            label: t('execution:validations'),
             children: (
               <Table<ValidationReport>
                 rowKey={(record, index) => `${record.target}-${index ?? 0}`}
@@ -228,16 +247,16 @@ function StepEvidence({ step }: { step: StepRun }) {
           },
           {
             key: 'extracted',
-            label: 'Extracted',
-            children: <JsonPane value={step.extractedValues} emptyLabel="No extracted values" />,
+            label: t('execution:extracted'),
+            children: <JsonPane value={step.extractedValues} emptyLabel={t('execution:noExtracted')} />,
           },
           {
             key: 'error',
-            label: 'Error',
+            label: t('execution:error'),
             children: step.errorMessage ? (
               <Alert type="error" showIcon message={step.errorMessage} />
             ) : (
-              <div className="panel-empty">No step error.</div>
+              <div className="panel-empty">{t('execution:noStepError')}</div>
             ),
           },
         ]}

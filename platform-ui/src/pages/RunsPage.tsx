@@ -4,6 +4,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { platformApi } from '../api/platformApi'
 import { RunDetail } from '../components/RunDetail'
 import { StatusPill } from '../components/StatusPill'
@@ -11,34 +12,34 @@ import type { RunRecord } from '../types/platform'
 
 const { Text } = Typography
 
-const columns: ColumnsType<RunRecord> = [
-  {
-    title: 'Run',
-    dataIndex: 'id',
-    ellipsis: true,
-  },
-  {
-    title: 'Case',
-    dataIndex: 'caseId',
-    ellipsis: true,
-  },
-  {
-    title: 'Status',
-    dataIndex: 'status',
-    width: 110,
-    render: (status: string) => <StatusPill status={status} />,
-  },
-  {
-    title: 'Duration',
-    dataIndex: 'durationMs',
-    width: 120,
-    render: (value: number) => `${value} ms`,
-  },
-]
-
 export function RunsPage() {
+  const { t } = useTranslation(['common', 'execution'])
   const [searchParams, setSearchParams] = useSearchParams()
   const [selectedStepIndex, setSelectedStepIndex] = useState(1)
+  const columns: ColumnsType<RunRecord> = [
+    {
+      title: t('execution:run'),
+      dataIndex: 'id',
+      ellipsis: true,
+    },
+    {
+      title: t('execution:case'),
+      dataIndex: 'caseId',
+      ellipsis: true,
+    },
+    {
+      title: t('common:fields.status'),
+      dataIndex: 'status',
+      width: 110,
+      render: (status: string) => <StatusPill status={status} />,
+    },
+    {
+      title: t('execution:durationLabel'),
+      dataIndex: 'durationMs',
+      width: 120,
+      render: (value: number) => t('execution:duration', { duration: value }),
+    },
+  ]
 
   const runsQuery = useQuery({
     queryKey: ['runs'],
@@ -66,14 +67,14 @@ export function RunsPage() {
     <div className="page-shell">
       <section className="hero-band">
         <div>
-          <h1>Runs</h1>
-          <p>Read execution evidence the way an engineer debugs: one step, one payload, one assertion at a time.</p>
+          <h1>{t('execution:runsTitle')}</h1>
+          <p>{t('execution:runsDescription')}</p>
         </div>
         <Space wrap>
           <Select
             allowClear
             className="project-picker"
-            placeholder="Filter by project"
+            placeholder={t('execution:filterProject')}
             value={selectedProjectId ?? undefined}
             options={(projectsQuery.data ?? []).map((project) => ({
               label: project.name,
@@ -91,7 +92,7 @@ export function RunsPage() {
             }}
           />
           <Button icon={<ReloadOutlined />} onClick={() => void runsQuery.refetch()}>
-            Refresh
+            {t('execution:refresh')}
           </Button>
         </Space>
       </section>
@@ -100,8 +101,8 @@ export function RunsPage() {
         <section className="panel-section list-panel">
           <div className="panel-title-row compact">
             <div>
-              <h2 className="panel-title">Run History</h2>
-              <Text type="secondary">Most recent executions, including failures and protocol traces.</Text>
+              <h2 className="panel-title">{t('execution:title')}</h2>
+              <Text type="secondary">{t('execution:historyDescription')}</Text>
             </div>
           </div>
           {runsQuery.isError ? (
@@ -109,7 +110,7 @@ export function RunsPage() {
               className="section-alert"
               type="warning"
               showIcon
-              message="Unable to load run history from platform-api."
+              message={t('execution:loadError')}
             />
           ) : null}
 

@@ -13,8 +13,11 @@ import {
   SearchOutlined,
 } from '@ant-design/icons'
 import { App as AntApp, Button, ConfigProvider, Input, Layout, Modal, Popover, Tooltip } from 'antd'
+import enUS from 'antd/locale/en_US'
+import zhCN from 'antd/locale/zh_CN'
 import { QueryClient, QueryClientProvider, useQuery } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { ConfigPage } from './pages/ConfigPage'
 import { CasesPage } from './pages/CasesPage'
@@ -25,22 +28,16 @@ import { SuitesPage } from './pages/SuitesPage'
 import { WorkbenchPage } from './pages/WorkbenchPage'
 import type { WorkspaceUnsavedGuard } from './pages/WorkbenchPage'
 import { platformApi } from './api/platformApi'
+import { LanguageSwitcher } from './components/LanguageSwitcher'
+import { normalizeLanguage } from './i18n'
 
 const queryClient = new QueryClient()
 const { Header, Sider, Content } = Layout
 
-const navigationItems = [
-  { key: 'scenarios', icon: <ExperimentOutlined />, label: 'Scenarios' },
-  { key: 'suites', icon: <ProfileOutlined />, label: 'Suites' },
-  { key: 'apis', icon: <ApiOutlined />, label: 'APIs' },
-  { key: 'environments', icon: <GlobalOutlined />, label: 'Environments' },
-  { key: 'profiles', icon: <KeyOutlined />, label: 'Profiles' },
-  { key: 'runs', icon: <ClockCircleOutlined />, label: 'Execution History' },
-]
-
 function AppShell() {
   const location = useLocation()
   const navigate = useNavigate()
+  const { t } = useTranslation(['common', 'workspace'])
   const { message } = AntApp.useApp()
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false)
   const [workspaceFilter, setWorkspaceFilter] = useState('')
@@ -51,6 +48,14 @@ function AppShell() {
     queryKey: ['projects'],
     queryFn: platformApi.listProjects,
   })
+  const navigationItems = useMemo(() => [
+    { key: 'scenarios', icon: <ExperimentOutlined />, label: t('workspace:navigation.scenarios') },
+    { key: 'suites', icon: <ProfileOutlined />, label: t('workspace:navigation.suites') },
+    { key: 'apis', icon: <ApiOutlined />, label: t('workspace:navigation.apis') },
+    { key: 'environments', icon: <GlobalOutlined />, label: t('workspace:navigation.environments') },
+    { key: 'profiles', icon: <KeyOutlined />, label: t('workspace:navigation.profiles') },
+    { key: 'runs', icon: <ClockCircleOutlined />, label: t('workspace:navigation.executionHistory') },
+  ], [t])
 
   const searchParams = new URLSearchParams(location.search)
   const requestedView = searchParams.get('view')
@@ -106,7 +111,12 @@ function AppShell() {
     <Layout className="app-layout">
       <Header className="app-workspace-bar">
         <div className="workspace-left">
-          <Button className="workspace-home-button" icon={<HomeOutlined />} title="Home" onClick={() => requestNavigation('/projects')} />
+          <Button
+            className="workspace-home-button"
+            icon={<HomeOutlined />}
+            title={t('actions.home')}
+            onClick={() => requestNavigation('/projects')}
+          />
           <Popover
             arrow={false}
             open={workspaceMenuOpen}
@@ -126,7 +136,7 @@ function AppShell() {
                     allowClear
                     autoFocus
                     prefix={<SearchOutlined />}
-                    placeholder="Search workspaces..."
+                    placeholder={t('workspace:switcher.search')}
                     value={workspaceFilter}
                     onChange={(event) => setWorkspaceFilter(event.target.value)}
                   />
@@ -137,7 +147,7 @@ function AppShell() {
                       requestNavigation('/projects?create=1')
                     }}
                   >
-                    Create
+                    {t('workspace:switcher.create')}
                   </Button>
                 </div>
                 <div className="workspace-switcher-list">
@@ -153,7 +163,7 @@ function AppShell() {
                     </button>
                   ))}
                   {!projectsQuery.isLoading && !filteredProjects.length ? (
-                    <span className="workspace-switcher-empty">No workspaces found.</span>
+                    <span className="workspace-switcher-empty">{t('workspace:switcher.empty')}</span>
                   ) : null}
                 </div>
                 <button
@@ -165,14 +175,17 @@ function AppShell() {
                   }}
                 >
                   <AppstoreOutlined />
-                  <span>View all workspaces</span>
+                  <span>{t('workspace:switcher.viewAll')}</span>
                 </button>
               </div>
             )}
           >
             <Button className="workspace-switcher-trigger" type="text">
               <LockOutlined />
-              <span>{selectedProject?.name ?? (projectsQuery.isLoading ? 'Loading workspaces' : 'Select workspace')}</span>
+              <span>
+                {selectedProject?.name
+                  ?? (projectsQuery.isLoading ? t('workspace:switcher.loading') : t('workspace:switcher.select'))}
+              </span>
               <DownOutlined />
             </Button>
           </Popover>
@@ -180,8 +193,11 @@ function AppShell() {
         <Input
           className="workspace-search"
           prefix={<SearchOutlined />}
-          placeholder="Search"
+          placeholder={t('search')}
         />
+        <div className="workspace-actions">
+          <LanguageSwitcher />
+        </div>
       </Header>
       <Layout>
         <Sider width={56} theme="light" className="app-rail">
@@ -214,13 +230,15 @@ function AppShell() {
         </Layout>
       </Layout>
       <Modal
-        title={pendingNavigation?.workspaceName ? 'Switch workspace?' : 'Leave workspace?'}
+        title={pendingNavigation?.workspaceName
+          ? t('workspace:unsaved.switchTitle')
+          : t('workspace:unsaved.leaveTitle')}
         open={Boolean(pendingNavigation)}
         closable={!savingBeforeNavigation}
         mask={{ closable: !savingBeforeNavigation }}
         footer={[
           <Button key="cancel" disabled={savingBeforeNavigation} onClick={() => setPendingNavigation(undefined)}>
-            Cancel
+            {t('actions.cancel')}
           </Button>,
           <Button
             key="discard"
@@ -232,7 +250,7 @@ function AppShell() {
               }
             }}
           >
-            Discard and continue
+            {t('workspace:unsaved.discardAndContinue')}
           </Button>,
           <Button
             key="save"
@@ -247,14 +265,14 @@ function AppShell() {
                 await unsavedGuard.saveAll()
                 navigateNow(pendingNavigation.to)
               } catch (error) {
-                const detail = error instanceof Error ? error.message : 'Unable to save all tabs.'
+                const detail = error instanceof Error ? error.message : t('workspace:unsaved.saveFailed')
                 void message.error(detail)
               } finally {
                 setSavingBeforeNavigation(false)
               }
             }}
           >
-            Save and continue
+            {t('actions.saveAndContinue')}
           </Button>,
         ]}
         onCancel={() => {
@@ -265,8 +283,8 @@ function AppShell() {
       >
         <p>
           {pendingNavigation?.workspaceName
-            ? `Save changes before switching to "${pendingNavigation.workspaceName}"?`
-            : 'Save changes before leaving this workspace?'}
+            ? t('workspace:unsaved.saveBeforeSwitch', { name: pendingNavigation.workspaceName })
+            : t('workspace:unsaved.saveBeforeLeave')}
         </p>
         <div className="workspace-unsaved-list">
           {(unsavedGuard?.dirtyTabs ?? []).map((tab) => (
@@ -288,9 +306,13 @@ function AppRoutes() {
 }
 
 export default function App() {
+  const { i18n } = useTranslation()
+  const antdLocale = normalizeLanguage(i18n.resolvedLanguage) === 'zh-CN' ? zhCN : enUS
+
   return (
     <QueryClientProvider client={queryClient}>
       <ConfigProvider
+        locale={antdLocale}
         theme={{
           token: {
             borderRadius: 6,

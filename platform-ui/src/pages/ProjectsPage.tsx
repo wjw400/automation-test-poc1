@@ -9,11 +9,14 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Alert, App, Button, Input, Modal, Typography } from 'antd'
 import { useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { platformApi } from '../api/platformApi'
+import { LanguageSwitcher } from '../components/LanguageSwitcher'
 
 const { Text } = Typography
 
 export function ProjectsPage() {
+  const { t } = useTranslation(['common', 'workspace'])
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   const { message } = App.useApp()
@@ -35,7 +38,7 @@ export function ProjectsPage() {
     }),
     onSuccess: async (project) => {
       await queryClient.invalidateQueries({ queryKey: ['projects'] })
-      void message.success('Workspace created')
+      void message.success(t('workspace:home.created'))
       navigate(`/workspace?projectId=${encodeURIComponent(project.id)}&view=scenarios`)
     },
   })
@@ -64,24 +67,27 @@ export function ProjectsPage() {
       <header className="workspace-home-header">
         <div className="workspace-home-brand">
           <ExperimentOutlined />
-          <Text strong>Secure API Automation</Text>
+          <Text strong>{t('workspace:home.brand')}</Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          Create workspace
-        </Button>
+        <div className="workspace-home-actions">
+          <LanguageSwitcher />
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            {t('workspace:home.create')}
+          </Button>
+        </div>
       </header>
 
       <main className="workspace-home-main">
         <div className="workspace-home-title">
           <div>
-            <h1>Workspaces</h1>
-            <Text type="secondary">Select a workspace to continue.</Text>
+            <h1>{t('workspace:home.title')}</h1>
+            <Text type="secondary">{t('workspace:home.description')}</Text>
           </div>
           <Input
             allowClear
             className="workspace-home-search"
             prefix={<SearchOutlined />}
-            placeholder="Search workspaces"
+            placeholder={t('workspace:home.search')}
             value={filter}
             onChange={(event) => setFilter(event.target.value)}
           />
@@ -92,11 +98,11 @@ export function ProjectsPage() {
             className="section-alert"
             type="warning"
             showIcon
-            message="Unable to load workspaces from platform-api."
+            message={t('workspace:home.loadError')}
           />
         ) : null}
 
-        <div className="workspace-home-list" aria-label="Workspaces">
+        <div className="workspace-home-list" aria-label={t('workspace:home.title')}>
           {filteredProjects.map((project) => (
             <button
               key={project.id}
@@ -114,17 +120,17 @@ export function ProjectsPage() {
           ))}
           {!projectsQuery.isLoading && !filteredProjects.length ? (
             <div className="workspace-home-empty">
-              <Text strong>No workspaces found</Text>
-              <Button icon={<PlusOutlined />} onClick={openCreate}>Create workspace</Button>
+              <Text strong>{t('workspace:home.empty')}</Text>
+              <Button icon={<PlusOutlined />} onClick={openCreate}>{t('workspace:home.create')}</Button>
             </div>
           ) : null}
         </div>
       </main>
 
       <Modal
-        title="Create workspace"
+        title={t('workspace:home.create')}
         open={createOpen}
-        okText="Create"
+        okText={t('actions.create')}
         confirmLoading={createMutation.isPending}
         okButtonProps={{ disabled: !name.trim() }}
         onCancel={closeCreate}
@@ -132,10 +138,10 @@ export function ProjectsPage() {
       >
         <div className="workspace-create-form">
           <label>
-            <span>Name</span>
+            <span>{t('fields.name')}</span>
             <Input
               autoFocus
-              placeholder="Workspace name"
+              placeholder={t('workspace:home.namePlaceholder')}
               value={name}
               onChange={(event) => setName(event.target.value)}
               onPressEnter={() => {
@@ -146,16 +152,16 @@ export function ProjectsPage() {
             />
           </label>
           <label>
-            <span>Description</span>
+            <span>{t('fields.description')}</span>
             <Input.TextArea
               autoSize={{ minRows: 3, maxRows: 6 }}
-              placeholder="Optional"
+              placeholder={t('optional')}
               value={description}
               onChange={(event) => setDescription(event.target.value)}
             />
           </label>
           {createMutation.isError ? (
-            <Alert type="error" showIcon message="Unable to create workspace." />
+            <Alert type="error" showIcon message={t('workspace:home.createError')} />
           ) : null}
         </div>
       </Modal>

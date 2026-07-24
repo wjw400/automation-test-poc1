@@ -24,6 +24,7 @@ import type { ColumnsType } from 'antd/es/table'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { platformApi } from '../api/platformApi'
 import { JsonObjectEditor } from '../components/JsonObjectEditor'
 import { StatusPill } from '../components/StatusPill'
@@ -72,6 +73,7 @@ export function SuitesPage({
   onSaveReady,
   onDeleted,
 }: SuitesPageProps = {}) {
+  const { t } = useTranslation(['common', 'suite'])
   const { message, modal } = App.useApp()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -169,13 +171,13 @@ export function SuitesPage({
   const saveSuiteMutation = useMutation({
     mutationFn: async () => {
       if (!selectedProjectId) {
-        throw new Error('Select a project first.')
+        throw new Error(t('suite:selectProject'))
       }
       if (variablesEditorError) {
-        throw new Error(`Fix Variables JSON before saving: ${variablesEditorError}`)
+        throw new Error(t('suite:fixVariables', { error: variablesEditorError }))
       }
       if (!draft.name.trim()) {
-        throw new Error('Suite name is required.')
+        throw new Error(t('suite:nameRequired'))
       }
       const payload = normalizeDraftForSave(draft)
       return isCreating || !selectedSuite
@@ -188,7 +190,7 @@ export function SuitesPage({
       if (!embedded) {
         setSearchParams({ projectId: selectedProjectId!, suiteId: savedSuite.id })
       }
-      void message.success('Suite saved')
+      void message.success(t('suite:saved'))
     },
   })
 
@@ -215,14 +217,14 @@ export function SuitesPage({
       } else {
         setSearchParams(selectedProjectId ? { projectId: selectedProjectId } : {})
       }
-      void message.success('Suite deleted')
+      void message.success(t('suite:deleted'))
     },
   })
 
   const runSuiteMutation = useMutation({
     mutationFn: async () => {
       if (!selectedSuite || isCreating) {
-        throw new Error('Save the suite before running it.')
+        throw new Error(t('suite:saveBeforeRun'))
       }
       return platformApi.startSuiteRun({
         suiteId: selectedSuite.id,
@@ -238,9 +240,9 @@ export function SuitesPage({
       setSelectedChildRunId((run.runs.find((child) => child.status === 'FAILED') ?? run.runs[0])?.id)
       setActiveAssetView('runs')
       if (run.status === 'PASSED') {
-        void message.success('Suite passed')
+        void message.success(t('suite:runPassed'))
       } else {
-        void message.warning('Suite failed')
+        void message.warning(t('suite:runFailed'))
       }
     },
   })
@@ -264,7 +266,7 @@ export function SuitesPage({
     }
     setDraft({
       ...emptyDraft,
-      name: 'New Suite',
+      name: t('suite:newSuite'),
       description: '',
     })
     setIsCreating(true)
@@ -327,9 +329,9 @@ export function SuitesPage({
       return
     }
     modal.confirm({
-      title: 'Delete suite?',
-      content: `This removes "${selectedSuite.name}" from the platform catalog.`,
-      okText: 'Delete',
+      title: t('suite:deleteConfirm'),
+      content: t('suite:deleteDescription', { name: selectedSuite.name }),
+      okText: t('common:actions.delete'),
       okButtonProps: { danger: true },
       onOk: () => deleteSuiteMutation.mutateAsync(),
     })
@@ -353,7 +355,7 @@ export function SuitesPage({
     const catalogCase = caseLookup.get(suiteCase.caseId)
     const suiteCaseRecord = selectedSuite?.cases.find((record) => record.caseId === suiteCase.caseId)
     return {
-      name: catalogCase?.name ?? suiteCaseRecord?.caseName ?? 'Unknown case',
+      name: catalogCase?.name ?? suiteCaseRecord?.caseName ?? t('suite:unknownCase'),
       code: catalogCase?.code ?? suiteCaseRecord?.caseCode ?? suiteCase.caseId,
     }
   }
@@ -383,7 +385,7 @@ export function SuitesPage({
       ),
     },
     {
-      title: 'Case',
+      title: t('suite:case'),
       key: 'case',
       render: (_value, record) => {
         const display = getCaseDisplay(record)
@@ -396,26 +398,26 @@ export function SuitesPage({
       },
     },
     {
-      title: 'Display Name',
+      title: t('suite:displayName'),
       dataIndex: 'displayName',
       width: 210,
       render: (value: string | undefined, _record, index) => (
         <Input
           value={value}
-          placeholder="Optional display name"
+          placeholder={t('suite:displayNamePlaceholder')}
           onChange={(event) => updateSuiteCase(index, { displayName: event.target.value })}
         />
       ),
     },
     {
-      title: 'Environment',
+      title: t('common:fields.environment'),
       dataIndex: 'environmentId',
       width: 180,
       render: (value: string | undefined, record, index) => (
         <Select
           allowClear
           className="suite-case-select"
-          placeholder="Suite default"
+          placeholder={t('suite:suiteDefault')}
           value={value}
           options={(environmentsQuery.data ?? []).map((environment) => ({
             label: environment.name,
@@ -437,14 +439,14 @@ export function SuitesPage({
       ),
     },
     {
-      title: 'Profile',
+      title: t('common:fields.profile'),
       dataIndex: 'profileId',
       width: 180,
       render: (value: string | undefined, record, index) => (
         <Select
           allowClear
           className="suite-case-select"
-          placeholder="Suite default"
+          placeholder={t('suite:suiteDefault')}
           value={value}
           options={(profilesQuery.data ?? [])
             .filter((profile) => (
@@ -460,7 +462,7 @@ export function SuitesPage({
       ),
     },
     {
-      title: 'Enabled',
+      title: t('suite:enabled'),
       dataIndex: 'enabled',
       width: 96,
       render: (value: boolean, _record, index) => (
@@ -526,13 +528,13 @@ export function SuitesPage({
     <div className={embedded ? 'page-shell suite-page embedded' : 'page-shell'}>
       {embedded ? null : <section className="hero-band">
         <div>
-          <h1>Suites</h1>
-          <p>Group reusable cases into ordered suites without changing the cases themselves.</p>
+          <h1>{t('suite:title')}</h1>
+          <p>{t('suite:heroDescription')}</p>
         </div>
         <Space wrap>
           <Select
             className="project-picker"
-            placeholder="Select project"
+            placeholder={t('suite:selectProject')}
             value={selectedProjectId}
             options={(projectsQuery.data ?? []).map((project) => ({
               label: project.name,
@@ -541,7 +543,7 @@ export function SuitesPage({
             onChange={handleProjectChange}
           />
           <Button icon={<PlusOutlined />} onClick={handleCreateSuite} disabled={!selectedProjectId}>
-            New Suite
+            {t('suite:newSuite')}
           </Button>
         </Space>
       </section>}
@@ -550,23 +552,23 @@ export function SuitesPage({
         {embedded ? null : <section className="panel-section suites-library-panel">
           <div className="panel-title-row compact">
             <div>
-              <h2 className="panel-title">Suite Library</h2>
+              <h2 className="panel-title">{t('suite:library')}</h2>
               <Text type="secondary">
-                {selectedProjectId ? 'Reusable execution groups for the current project' : 'Choose a project first'}
+                {selectedProjectId ? t('suite:currentProjectDescription') : t('suite:chooseProjectFirst')}
               </Text>
             </div>
           </div>
 
           {suitesQuery.isError ? (
-            <Alert className="section-alert" type="warning" showIcon message="Unable to load suites from platform-api." />
+            <Alert className="section-alert" type="warning" showIcon message={t('suite:loadError')} />
           ) : null}
 
           <div className="suite-list">
             {suitesQuery.isLoading ? (
-              <div className="panel-empty">Loading suites...</div>
+              <div className="panel-empty">{t('suite:loading')}</div>
             ) : null}
             {!suitesQuery.isLoading && (suitesQuery.data ?? []).length === 0 ? (
-              <div className="panel-empty">No suites yet.</div>
+              <div className="panel-empty">{t('suite:empty')}</div>
             ) : null}
             {(suitesQuery.data ?? []).map((suite) => (
               <button
@@ -581,7 +583,7 @@ export function SuitesPage({
                     <StatusPill status={suite.status} />
                   </Space>
                   <Text type="secondary">
-                    {suite.cases.length} case{suite.cases.length === 1 ? '' : 's'}
+                    {t('suite:caseCount', { count: suite.cases.length })}
                   </Text>
                 </Flex>
               </button>
@@ -595,17 +597,17 @@ export function SuitesPage({
               <section className="panel-section">
                 <div className="suite-editor-head">
                   <div className="suite-title-field">
-                    <Text className="designer-label">Suite Name</Text>
+                    <Text className="designer-label">{t('suite:suiteName')}</Text>
                     <Input
                       size="large"
                       value={draft.name}
-                      placeholder="Name this suite"
+                      placeholder={t('suite:nameEditorPlaceholder')}
                       onChange={(event) => setDraft({ ...draft, name: event.target.value })}
                     />
                   </div>
                   <Space wrap align="end">
                     <div className="suite-status-field">
-                      <Text className="designer-label">Status</Text>
+                      <Text className="designer-label">{t('common:fields.status')}</Text>
                       <Select
                         value={draft.status}
                         options={[
@@ -621,7 +623,7 @@ export function SuitesPage({
                       loading={saveSuiteMutation.isPending}
                       onClick={() => void saveSuiteMutation.mutateAsync()}
                     >
-                      Save
+                      {t('common:actions.save')}
                     </Button>
                     <Button
                       type="primary"
@@ -630,7 +632,7 @@ export function SuitesPage({
                       loading={runSuiteMutation.isPending}
                       onClick={() => void runSuiteMutation.mutateAsync()}
                     >
-                      Run
+                      {t('common:actions.run')}
                     </Button>
                     <Button
                       danger
@@ -639,13 +641,13 @@ export function SuitesPage({
                       loading={deleteSuiteMutation.isPending}
                       onClick={confirmDeleteSuite}
                     >
-                      Delete
+                      {t('common:actions.delete')}
                     </Button>
                   </Space>
                 </div>
 
                 {saveSuiteMutation.isError ? (
-                  <Alert className="section-alert" type="error" showIcon message="Failed to save suite." />
+                  <Alert className="section-alert" type="error" showIcon message={t('suite:saveFailed')} />
                 ) : null}
                 {runSuiteMutation.isError ? (
                   <Alert
@@ -654,44 +656,44 @@ export function SuitesPage({
                     showIcon
                     message={runSuiteMutation.error instanceof Error
                       ? runSuiteMutation.error.message
-                      : 'Failed to run suite.'}
+                      : t('suite:runFailedGeneric')}
                   />
                 ) : null}
               </section>
 
-              <nav className="asset-context-tabs" aria-label="Suite sections">
+              <nav className="asset-context-tabs" aria-label={t('suite:sections')}>
                 <button
                   type="button"
                   className={activeAssetView === 'cases' ? 'active' : ''}
                   onClick={() => setActiveAssetView('cases')}
                 >
-                  Cases
+                  {t('suite:cases')}
                 </button>
                 <button
                   type="button"
                   className={activeAssetView === 'runs' ? 'active' : ''}
                   onClick={() => setActiveAssetView('runs')}
                 >
-                  Executions <span>{selectedSuiteRuns.length}</span>
+                  {t('suite:executions')} <span>{selectedSuiteRuns.length}</span>
                 </button>
               </nav>
 
               {activeAssetView === 'cases' ? (
                 <section className="panel-section">
                   <div className="suite-description-field">
-                    <Text className="designer-label">Description</Text>
+                    <Text className="designer-label">{t('common:fields.description')}</Text>
                     <Input.TextArea
                       rows={3}
                       value={draft.description}
-                      placeholder="Optional note for why these cases belong together"
+                      placeholder={t('suite:descriptionPlaceholder')}
                       onChange={(event) => setDraft({ ...draft, description: event.target.value })}
                     />
                   </div>
 
                   <div className="panel-title-row compact suite-case-order-head">
                     <div>
-                      <h2 className="panel-title">Case Order</h2>
-                      <Text type="secondary">Suites reference existing cases and can override runtime context per entry.</Text>
+                      <h2 className="panel-title">{t('suite:caseOrder')}</h2>
+                      <Text type="secondary">{t('suite:caseOrderDescription')}</Text>
                     </div>
                   </div>
 
@@ -700,7 +702,7 @@ export function SuitesPage({
                       showSearch
                       allowClear
                       className="suite-add-case-select"
-                      placeholder="Add existing case"
+                      placeholder={t('suite:addExistingCase')}
                       optionFilterProp="label"
                       value={caseToAddId}
                       options={(casesQuery.data ?? []).map((record) => ({
@@ -710,7 +712,7 @@ export function SuitesPage({
                       onChange={setCaseToAddId}
                     />
                     <Button icon={<PlusOutlined />} onClick={handleAddCase} disabled={!caseToAddId}>
-                      Add Case
+                      {t('suite:addCase')}
                     </Button>
                   </div>
 
@@ -722,7 +724,7 @@ export function SuitesPage({
                     dataSource={draft.cases}
                     pagination={false}
                     locale={{
-                      emptyText: 'Add cases to define this suite.',
+                      emptyText: t('suite:emptyCases'),
                     }}
                   />
                 </section>
@@ -740,8 +742,8 @@ export function SuitesPage({
                     </main>
                   ) : (
                     <div className="context-runs-empty">
-                      <Text strong>No executions yet</Text>
-                      <Text type="secondary">Run this suite to inspect aggregate and scenario results.</Text>
+                      <Text strong>{t('suite:noExecutions')}</Text>
+                      <Text type="secondary">{t('suite:noExecutionsDescription')}</Text>
                     </div>
                   )}
                 </section>
@@ -750,7 +752,7 @@ export function SuitesPage({
           ) : (
             <section className="panel-section">
               <div className="panel-empty">
-                Select a suite from the library or create a new suite for this project.
+                {t('suite:selectOrCreate')}
               </div>
             </section>
           )}
@@ -758,7 +760,7 @@ export function SuitesPage({
       </div>
 
       <Modal
-        title="Variable Overrides"
+        title={t('suite:variableOverrides')}
         open={Boolean(variablesEditor)}
         destroyOnHidden
         okButtonProps={{ disabled: Boolean(variablesEditorError) }}
@@ -767,14 +769,14 @@ export function SuitesPage({
           setVariablesEditorError(null)
         }}
         onOk={saveVariableOverrides}
-        okText="Apply"
+        okText={t('common:actions.apply')}
       >
         <div className="api-import-stack">
-          <Text type="secondary">Scenario variables with this suite entry's overrides applied.</Text>
+          <Text type="secondary">{t('suite:variableOverridesDescription')}</Text>
           <JsonObjectEditor
-            ariaLabel="Variable overrides JSON editor"
+            ariaLabel={t('suite:variableEditor')}
             height="240px"
-            resetLabel="Restore Default"
+            resetLabel={t('suite:restoreDefault')}
             resetValue={variablesEditor?.defaults ?? {}}
             value={variablesEditor?.value ?? {}}
             onValidationChange={setVariablesEditorError}

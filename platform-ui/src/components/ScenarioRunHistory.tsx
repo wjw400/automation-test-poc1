@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Typography } from 'antd'
+import { useTranslation } from 'react-i18next'
+import { formatDateTime } from '../i18n'
 import type { RunRecord } from '../types/platform'
 import { RunDetail } from './RunDetail'
 import { StatusPill } from './StatusPill'
@@ -19,6 +21,7 @@ export function ScenarioRunHistory({
   suiteNamesById = new Map(),
   onSelect,
 }: ScenarioRunHistoryProps) {
+  const { t, i18n } = useTranslation(['execution', 'scenario'])
   const selectedRun = useMemo(
     () => runs.find((run) => run.id === selectedRunId) ?? runs[0],
     [runs, selectedRunId],
@@ -32,8 +35,8 @@ export function ScenarioRunHistory({
   if (!runs.length) {
     return (
       <div className="context-runs-empty">
-        <Text strong>No executions yet</Text>
-        <Text type="secondary">Run this scenario to inspect requests, responses, and validations.</Text>
+        <Text strong>{t('scenario:noExecutions')}</Text>
+        <Text type="secondary">{t('scenario:noExecutionsDescription')}</Text>
       </div>
     )
   }
@@ -42,7 +45,7 @@ export function ScenarioRunHistory({
     <div className="context-runs-shell">
       <aside className="context-run-list">
         <div className="context-run-list-head">
-          <Text strong>Execution History</Text>
+          <Text strong>{t('execution:title')}</Text>
           <Text type="secondary">{runs.length}</Text>
         </div>
         <div className="context-run-list-scroll">
@@ -56,15 +59,15 @@ export function ScenarioRunHistory({
                 onClick={() => onSelect(run.id)}
               >
                 <span className="context-run-row-top">
-                  <span>{new Date(run.startedAt).toLocaleString()}</span>
+                  <span>{formatDateTime(run.startedAt, i18n.resolvedLanguage)}</span>
                   <StatusPill status={run.status} />
                 </span>
                 <span className="context-run-source">
-                  {suiteName ? `Suite / ${suiteName}` : 'Standalone'}
+                  {suiteName ? t('execution:suiteSource', { name: suiteName }) : t('execution:standalone')}
                 </span>
                 <span className="context-run-meta">
-                  {[run.environmentName, run.profileName].filter(Boolean).join(' / ') || 'No execution context'}
-                  <span>{run.durationMs} ms</span>
+                  {[run.environmentName, run.profileName].filter(Boolean).join(' / ') || t('execution:noContext')}
+                  <span>{t('execution:duration', { duration: run.durationMs })}</span>
                 </span>
               </button>
             )

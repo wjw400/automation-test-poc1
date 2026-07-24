@@ -32,9 +32,9 @@ body {
 }
 
 .app-workspace-bar {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
-  justify-content: space-between;
   gap: 16px;
   height: 48px;
   line-height: 48px;
@@ -58,8 +58,10 @@ body {
 
 .workspace-switcher-trigger {
   display: flex;
+  flex: 0 1 340px;
   align-items: center;
   gap: 7px;
+  min-width: 0;
   max-width: 340px;
   height: 32px;
   padding-inline: 8px;
@@ -158,6 +160,12 @@ body {
   display: flex;
   align-items: center;
   gap: 9px;
+}
+
+.workspace-home-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .workspace-home-main {
@@ -280,6 +288,17 @@ body {
 
 .workspace-search {
   width: min(420px, 36vw);
+}
+
+.workspace-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.language-switcher {
+  width: 112px;
 }
 
 .app-rail {

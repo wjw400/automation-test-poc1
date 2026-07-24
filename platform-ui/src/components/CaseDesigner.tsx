@@ -18,6 +18,7 @@ import {
   RightOutlined,
 } from '@ant-design/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useTranslation } from 'react-i18next'
 import type { ReactNode } from 'react'
 import type { ApiOperationRecord, SaveCaseInput } from '../types/platform'
 import { JsonObjectEditor } from './JsonObjectEditor'
@@ -124,6 +125,7 @@ export function CaseDesigner({
   onVariablesValidationChange,
 }: CaseDesignerProps) {
   const { modal } = App.useApp()
+  const { t } = useTranslation(['common', 'scenario'])
   const parsed = useMemo(() => parseDsl(draft.content), [draft.content])
   const [activeTab, setActiveTab] = useState('params')
 
@@ -144,7 +146,7 @@ export function CaseDesigner({
     return (
       <section className="case-workbench scenario-flow-designer">
         <SchemaErrorPanel
-          title="Case YAML is not valid YAML"
+          title={t('scenario:editor.caseYamlInvalid')}
           errors={[parsed.error ?? 'Case DSL root must be an object.']}
           draft={draft}
           onChange={onChange}
@@ -157,7 +159,7 @@ export function CaseDesigner({
     return (
       <section className="case-workbench scenario-flow-designer">
         <SchemaErrorPanel
-          title="Case YAML does not match Case DSL v1"
+          title={t('scenario:editor.caseYamlSchemaMismatch')}
           errors={schemaErrors}
           draft={draft}
           onChange={onChange}
@@ -227,11 +229,14 @@ export function CaseDesigner({
   const confirmDeleteStep = (stepIndex: number) => {
     const step = steps[stepIndex]
     modal.confirm({
-      title: 'Delete step?',
-      content: `Remove ${stepMethod(step)} ${operationPath(step)} from this scenario?`,
-      okText: 'Delete',
+      title: t('scenario:editor.deleteStepConfirm'),
+      content: t('scenario:editor.deleteStepDescription', {
+        method: stepMethod(step),
+        path: operationPath(step),
+      }),
+      okText: t('common:actions.delete'),
       okButtonProps: { danger: true },
-      cancelText: 'Cancel',
+      cancelText: t('common:actions.cancel'),
       onOk: () => removeStep(stepIndex),
     })
   }
@@ -316,6 +321,7 @@ function CaseOverview({
   onVariablesValidationChange?: (error: string | null) => void
   updateDsl: (recipe: (next: DslObject) => void) => void
 }) {
+  const { t } = useTranslation(['common', 'scenario'])
   const [isAddingTag, setIsAddingTag] = useState(false)
   const [tagInput, setTagInput] = useState('')
   const stepItemRefs = useRef(new Map<number, HTMLDivElement>())
@@ -343,7 +349,7 @@ function CaseOverview({
   return (
     <div className="case-overview-panel">
       <section className="case-overview-section">
-        <ScenarioSectionHeader title="Tags" />
+        <ScenarioSectionHeader title={t('common:fields.tags')} />
         <div className="case-overview-tags">
           <div className="case-overview-tags-list">
             {tags.map((tag) => (
@@ -365,18 +371,18 @@ function CaseOverview({
                 className="case-overview-tag-input"
                 size="small"
                 value={tagInput}
-                placeholder="Add tag"
+                placeholder={t('scenario:actions.addTag')}
                 onBlur={addTag}
                 onChange={(event) => setTagInput(event.target.value)}
                 onPressEnter={(event) => event.currentTarget.blur()}
               />
             ) : (
               <Button
-                aria-label="Add tag"
+                aria-label={t('scenario:actions.addTag')}
                 className="case-overview-add-tag"
                 icon={<PlusOutlined />}
                 size="small"
-                title="Add tag"
+                title={t('scenario:actions.addTag')}
                 type="text"
                 onClick={() => setIsAddingTag(true)}
               />
@@ -387,8 +393,8 @@ function CaseOverview({
 
       <section className="case-overview-section">
         <ScenarioSectionHeader
-          title="Scenario Steps"
-          actions={<Button icon={<PlusOutlined />} onClick={onAddStep}>Add Step</Button>}
+          title={t('scenario:steps')}
+          actions={<Button icon={<PlusOutlined />} onClick={onAddStep}>{t('scenario:addStep')}</Button>}
         />
         {steps.length ? (
           <div className="case-flow-sequence">
@@ -425,40 +431,44 @@ function CaseOverview({
                     </button>
                     <div className="case-flow-step-actions">
                       <Button
-                        aria-label={`Move step ${index + 1} up`}
+                        aria-label={t('scenario:editor.moveStepUp', { number: index + 1 })}
                         disabled={index === 0}
                         icon={<ArrowUpOutlined />}
                         size="small"
-                        title="Move up"
+                        title={t('scenario:editor.moveStepUp', { number: index + 1 })}
                         type="text"
                         onClick={() => onMoveStep(index, index - 1)}
                       />
                       <Button
-                        aria-label={`Move step ${index + 1} down`}
+                        aria-label={t('scenario:editor.moveStepDown', { number: index + 1 })}
                         disabled={index === steps.length - 1}
                         icon={<ArrowDownOutlined />}
                         size="small"
-                        title="Move down"
+                        title={t('scenario:editor.moveStepDown', { number: index + 1 })}
                         type="text"
                         onClick={() => onMoveStep(index, index + 1)}
                       />
                       <Button
-                        aria-label={`Delete step ${index + 1}`}
+                        aria-label={t('scenario:editor.deleteStep')}
                         danger
                         icon={<DeleteOutlined />}
                         size="small"
-                        title="Delete step"
+                        title={t('scenario:editor.deleteStep')}
                         type="text"
                         onClick={() => onDeleteStep(index)}
                       />
                     </div>
                     <button
                       type="button"
-                      aria-label={isExpanded ? `Collapse step ${index + 1}` : `Expand step ${index + 1}`}
+                      aria-label={isExpanded
+                        ? t('scenario:editor.collapseStep', { number: index + 1 })
+                        : t('scenario:editor.expandStep', { number: index + 1 })}
                       aria-expanded={isExpanded}
                       aria-controls={`scenario-step-editor-${index}`}
                       className="case-flow-step-chevron"
-                      title={isExpanded ? 'Collapse step' : 'Expand step'}
+                      title={isExpanded
+                        ? t('scenario:editor.collapseStep', { number: index + 1 })
+                        : t('scenario:editor.expandStep', { number: index + 1 })}
                       onClick={toggleStep}
                     >
                       {isExpanded ? <DownOutlined /> : <RightOutlined />}
@@ -473,14 +483,14 @@ function CaseOverview({
           </div>
         ) : (
           <div className="flow-empty-state">
-            <Text strong>No flow steps yet.</Text>
-            <Text type="secondary">Add a step to start composing this API scenario.</Text>
+            <Text strong>{t('scenario:editor.emptySteps')}</Text>
+            <Text type="secondary">{t('scenario:editor.emptyStepsDescription')}</Text>
           </div>
         )}
       </section>
 
       <section className="case-overview-section">
-        <ScenarioSectionHeader title="Description" />
+        <ScenarioSectionHeader title={t('common:fields.description')} />
         <StructuredEditor
           label=""
           rows={4}
@@ -491,9 +501,9 @@ function CaseOverview({
       </section>
 
       <section className="case-overview-section">
-        <ScenarioSectionHeader title="Variables" />
+        <ScenarioSectionHeader title={t('common:fields.variables')} />
         <JsonObjectEditor
-          ariaLabel="Variables JSON editor"
+          ariaLabel={t('scenario:editor.variablesJsonEditor')}
           value={dsl.variables ?? {}}
           onValidationChange={onVariablesValidationChange}
           onCommit={(value) => updateDsl((next) => {
@@ -546,6 +556,7 @@ function StepEditor({
   setSelectedOperation: (value?: string) => void
   updateSelectedStep: (recipe: (step: any) => void) => void
 }) {
+  const { t } = useTranslation(['common', 'scenario'])
   return (
     <div className="step-editor-panel embedded-step-editor">
       <div className="request-compose-row">
@@ -557,12 +568,12 @@ function StepEditor({
             showSearch
             allowClear
             className="request-operation-select"
-            placeholder="Choose an API operation"
+            placeholder={t('scenario:editor.chooseOperation')}
             optionFilterProp="label"
             variant="borderless"
             value={selectedOperation?.id}
             options={operations.map((operation) => ({
-              label: `${operation.path} - ${operation.summary || operation.operationId || 'Operation'}`,
+              label: `${operation.path} - ${operation.summary || operation.operationId || t('scenario:editor.operation')}`,
               value: operation.id,
             }))}
             onChange={setSelectedOperation}
@@ -577,11 +588,11 @@ function StepEditor({
         items={[
           {
             key: 'params',
-            label: <span className="step-tab-label">Params</span>,
+            label: <span className="step-tab-label">{t('scenario:editor.params')}</span>,
             children: (
               <div className="designer-band">
                 <StructuredEditor
-                  label="Query Params"
+                  label={t('scenario:editor.queryParams')}
                   value={selectedStep.request?.query ?? {}}
                   onCommit={(value) => updateSelectedStep((step) => {
                     step.request = step.request ?? {}
@@ -593,11 +604,11 @@ function StepEditor({
           },
           {
             key: 'headers',
-            label: <span className="step-tab-label">Headers</span>,
+            label: <span className="step-tab-label">{t('scenario:editor.headers')}</span>,
             children: (
               <div className="designer-band">
                 <StructuredEditor
-                  label="Request Headers"
+                  label={t('scenario:editor.requestHeaders')}
                   value={selectedStep.request?.headers ?? {}}
                   onCommit={(value) => updateSelectedStep((step) => {
                     step.request = step.request ?? {}
@@ -609,11 +620,11 @@ function StepEditor({
           },
           {
             key: 'body',
-            label: <span className="step-tab-label">Body</span>,
+            label: <span className="step-tab-label">{t('scenario:editor.body')}</span>,
             children: (
               <div className="designer-band">
                 <StructuredEditor
-                  label="Request Body"
+                  label={t('scenario:editor.requestBody')}
                   value={selectedStep.request?.body ?? {}}
                   onCommit={(value) => updateSelectedStep((step) => {
                     step.request = step.request ?? {}
@@ -625,12 +636,12 @@ function StepEditor({
           },
           {
             key: 'before',
-            label: <span className="step-tab-label group-start">Before</span>,
+            label: <span className="step-tab-label group-start">{t('scenario:editor.before')}</span>,
             children: (
               <div className="designer-band">
                 <ActionSection
-                  title="Before Send"
-                  description="Prepare the request before it is sent."
+                  title={t('scenario:editor.beforeSend')}
+                  description={t('scenario:editor.beforeSendDescription')}
                   actions={beforeSendActions}
                   availableTypes={beforeSendActionTypes}
                   onAdd={(action) => updateActionList(updateSelectedStep, 'beforeSend', (items) => {
@@ -651,12 +662,12 @@ function StepEditor({
           },
           {
             key: 'after',
-            label: <span className="step-tab-label">After</span>,
+            label: <span className="step-tab-label">{t('scenario:editor.after')}</span>,
             children: (
               <div className="designer-band">
                 <ActionSection
-                  title="After Receive"
-                  description="Process response data before assertions and extraction."
+                  title={t('scenario:editor.afterReceive')}
+                  description={t('scenario:editor.afterReceiveDescription')}
                   actions={afterReceiveActions}
                   availableTypes={afterReceiveActionTypes}
                   onAdd={(action) => updateActionList(updateSelectedStep, 'afterReceive', (items) => {
@@ -677,13 +688,13 @@ function StepEditor({
           },
           {
             key: 'assertions',
-            label: <span className="step-tab-label">Tests</span>,
+            label: <span className="step-tab-label">{t('scenario:editor.tests')}</span>,
             children: (
               <div className="designer-band">
                 <div className="panel-title-row compact">
                   <div>
-                    <h4 className="panel-subtitle">Assertions</h4>
-                    <Text type="secondary">Keep test verdicts separate from response processors.</Text>
+                    <h4 className="panel-subtitle">{t('scenario:editor.assertions')}</h4>
+                    <Text type="secondary">{t('scenario:editor.assertionsDescription')}</Text>
                   </div>
                   <Button
                     icon={<PlusOutlined />}
@@ -699,7 +710,7 @@ function StepEditor({
                       step.response.assertions = rules
                     })}
                   >
-                    Add
+                    {t('common:actions.add')}
                   </Button>
                 </div>
 
@@ -707,7 +718,7 @@ function StepEditor({
                   {assertions.map((rule, index) => (
                     <RuleCard
                       key={`assertion-${index}`}
-                      title={`Assertion ${index + 1}`}
+                      title={t('scenario:editor.assertion', { number: index + 1 })}
                       onDelete={() => updateSelectedStep((step) => {
                         const rules = asAssertions(step.response.assertions)
                         rules.splice(index, 1)
@@ -715,7 +726,7 @@ function StepEditor({
                       })}
                     >
                       <div className="designer-grid">
-                        <LabeledField label="Source">
+                        <LabeledField label={t('scenario:editor.source')}>
                           <Input
                             value={rule.source ?? 'response.body'}
                             onChange={(event) => updateAssertionRule(updateSelectedStep, index, 'source', event.target.value)}
@@ -729,14 +740,14 @@ function StepEditor({
                         </LabeledField>
                       </div>
                       <div className="designer-grid">
-                        <LabeledField label="Operator">
+                        <LabeledField label={t('scenario:editor.operator')}>
                           <Select
                             value={rule.operator ?? 'equals'}
                             options={assertionOperators.map((value) => ({ label: value, value }))}
                             onChange={(value) => updateAssertionRule(updateSelectedStep, index, 'operator', value)}
                           />
                         </LabeledField>
-                        <LabeledField label="Expected Value">
+                        <LabeledField label={t('scenario:editor.expectedValue')}>
                           <Input
                             value={stringifyInlineValue(rule.expected)}
                             onChange={(event) => updateAssertionRule(
@@ -756,13 +767,13 @@ function StepEditor({
           },
           {
             key: 'extract',
-            label: <span className="step-tab-label">Extract</span>,
+            label: <span className="step-tab-label">{t('scenario:editor.extract')}</span>,
             children: (
               <div className="designer-band">
                 <div className="panel-title-row compact">
                   <div>
-                    <h4 className="panel-subtitle">Extracted Variables</h4>
-                    <Text type="secondary">Promote response values into scenario context for later steps.</Text>
+                    <h4 className="panel-subtitle">{t('scenario:editor.extractedVariables')}</h4>
+                    <Text type="secondary">{t('scenario:editor.extractedVariablesDescription')}</Text>
                   </div>
                   <Button
                     icon={<PlusOutlined />}
@@ -775,7 +786,7 @@ function StepEditor({
                       }
                     })}
                   >
-                    Add
+                    {t('common:actions.add')}
                   </Button>
                 </div>
 
@@ -788,14 +799,14 @@ function StepEditor({
                         delete step.response.extract[name]
                       })}
                     >
-                      <LabeledField label="Variable Name">
+                      <LabeledField label={t('scenario:editor.variableName')}>
                         <Input
                           value={name}
                           onChange={(event) => renameExtract(updateSelectedStep, name, event.target.value)}
                         />
                       </LabeledField>
                       <div className="designer-grid">
-                        <LabeledField label="Source">
+                        <LabeledField label={t('scenario:editor.source')}>
                           <Input
                             value={rule.source ?? 'response.body'}
                             onChange={(event) => updateExtractRule(updateSelectedStep, name, 'source', event.target.value)}
@@ -880,6 +891,7 @@ function ActionSection({
   onChange: (index: number, action: CaseAction) => void
   onMove: (index: number, direction: -1 | 1) => void
 }) {
+  const { t } = useTranslation(['common', 'scenario'])
   return (
     <section className="action-section">
       <div className="panel-title-row compact">
@@ -894,7 +906,7 @@ function ActionSection({
             onClick: ({ key }) => onAdd(createAction(key)),
           }}
         >
-          <Button icon={<PlusOutlined />}>Add Action <DownOutlined /></Button>
+          <Button icon={<PlusOutlined />}>{t('scenario:editor.addAction')} <DownOutlined /></Button>
         </Dropdown>
       </div>
       <div className="rule-stack">
@@ -909,21 +921,21 @@ function ActionSection({
                   type="text"
                   icon={<ArrowUpOutlined />}
                   disabled={index === 0}
-                  title="Move action up"
+                  title={t('scenario:editor.moveActionUp')}
                   onClick={() => onMove(index, -1)}
                 />
                 <Button
                   type="text"
                   icon={<ArrowDownOutlined />}
                   disabled={index === actions.length - 1}
-                  title="Move action down"
+                  title={t('scenario:editor.moveActionDown')}
                   onClick={() => onMove(index, 1)}
                 />
               </>
             )}
           >
             <div className="designer-grid narrow">
-              <LabeledField label="Type">
+              <LabeledField label={t('scenario:editor.type')}>
                 <Select
                   showSearch
                   value={action.type}
@@ -931,7 +943,7 @@ function ActionSection({
                   onChange={(value) => onChange(index, createAction(value))}
                 />
               </LabeledField>
-              <LabeledField label="Name">
+              <LabeledField label={t('scenario:editor.name')}>
                 <Input
                   value={action.name ?? ''}
                   onChange={(event) => onChange(index, { ...action, name: event.target.value })}
@@ -941,19 +953,19 @@ function ActionSection({
             <div className="designer-grid">
               {action.type === 'body.buildJson' ? (
                 <StructuredEditor
-                  label="JSON Template"
+                  label={t('scenario:editor.jsonTemplate')}
                   value={action.template ?? {}}
                   onCommit={(value) => onChange(index, { ...action, template: value })}
                 />
               ) : (
                 <StructuredEditor
-                  label="Input"
+                  label={t('scenario:editor.input')}
                   value={action.input ?? {}}
                   onCommit={(value) => onChange(index, { ...action, input: value })}
                 />
               )}
               <StructuredEditor
-                label="Output"
+                label={t('scenario:editor.output')}
                 value={action.output ?? {}}
                 onCommit={(value) => onChange(index, { ...action, output: value })}
               />
@@ -1034,13 +1046,14 @@ function RuleCard({
   onDelete: () => void
   headerActions?: ReactNode
 }) {
+  const { t } = useTranslation(['common'])
   return (
     <section className="rule-card">
       <div className="panel-title-row compact">
         <Text strong>{title}</Text>
         <div className="rule-card-actions">
           {headerActions}
-          <Button type="text" danger icon={<DeleteOutlined />} title="Delete" onClick={onDelete} />
+          <Button type="text" danger icon={<DeleteOutlined />} title={t('common:actions.delete')} onClick={onDelete} />
         </div>
       </div>
       {children}

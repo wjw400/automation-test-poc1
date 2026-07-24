@@ -1,5 +1,7 @@
 import { Select, Typography } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import { formatDateTime } from '../i18n'
 import type { SuiteRunRecord } from '../types/platform'
 import { RunDetail } from './RunDetail'
 import { StatusPill } from './StatusPill'
@@ -21,6 +23,7 @@ export function SuiteExecutionWorkspace({
   selectedRunId,
   onSelectRun,
 }: SuiteExecutionWorkspaceProps) {
+  const { t, i18n } = useTranslation(['execution', 'scenario'])
   const selectedRun = useMemo(
     () => run?.runs.find((child) => child.id === selectedRunId),
     [run, selectedRunId],
@@ -34,8 +37,8 @@ export function SuiteExecutionWorkspace({
   if (!run) {
     return (
       <div className="context-runs-empty">
-        <Text strong>Execution not found</Text>
-        <Text type="secondary">Select another execution from the history.</Text>
+        <Text strong>{t('execution:executionNotFound')}</Text>
+        <Text type="secondary">{t('execution:executionNotFoundDescription')}</Text>
       </div>
     )
   }
@@ -48,19 +51,26 @@ export function SuiteExecutionWorkspace({
       <header className="suite-execution-summary">
         <div className="suite-execution-picker">
           <Select
-            aria-label="Select suite execution"
+            aria-label={t('execution:selectExecution')}
             value={run.id}
             options={executions.map((execution) => ({
               value: execution.id,
-              label: formatExecutionOption(execution),
+              label: formatExecutionOption(
+                execution,
+                formatDateTime(execution.startedAt, i18n.resolvedLanguage),
+                t('execution:passedCount', {
+                  passed: execution.runs.filter((child) => child.status === 'PASSED').length,
+                  total: execution.runs.length,
+                }),
+              ),
             }))}
             onChange={onSelectExecution}
           />
         </div>
         <div className="suite-execution-summary-stats">
           <StatusPill status={run.status} />
-          <span>{passedCount}/{run.runs.length} passed</span>
-          <span>{run.durationMs} ms</span>
+          <span>{t('execution:passedCount', { passed: passedCount, total: run.runs.length })}</span>
+          <span>{t('execution:duration', { duration: run.durationMs })}</span>
           <span>{run.triggeredBy}</span>
         </div>
       </header>
@@ -70,9 +80,9 @@ export function SuiteExecutionWorkspace({
       ) : null}
 
       <div className="suite-execution-main">
-        <aside className="suite-scenario-nav" aria-label="Scenario results">
+        <aside className="suite-scenario-nav" aria-label={t('execution:scenarioResults')}>
           <div className="suite-scenario-nav-head">
-            <Text strong>Scenarios</Text>
+            <Text strong>{t('execution:scenarios')}</Text>
             <Text type="secondary">{run.runs.length}</Text>
           </div>
           <div className="suite-scenario-nav-scroll">
@@ -91,11 +101,11 @@ export function SuiteExecutionWorkspace({
                   </span>
                   <span className="suite-scenario-row-copy">
                     <strong>{child.suiteDisplayName || child.caseId}</strong>
-                    <span>{context || 'Runtime context unavailable'}</span>
+                    <span>{context || t('scenario:runtimeContextUnavailable')}</span>
                   </span>
                   <span className="suite-scenario-row-result">
                     <StatusPill status={child.status} />
-                    <span>{child.durationMs} ms</span>
+                    <span>{t('execution:duration', { duration: child.durationMs })}</span>
                   </span>
                 </button>
               )
@@ -120,8 +130,8 @@ export function SuiteExecutionWorkspace({
             </>
           ) : (
             <div className="context-runs-empty">
-              <Text strong>Select a scenario</Text>
-              <Text type="secondary">Inspect its steps, payloads, and validations here.</Text>
+              <Text strong>{t('scenario:selectScenario')}</Text>
+              <Text type="secondary">{t('scenario:selectScenarioDescription')}</Text>
             </div>
           )}
         </section>
@@ -130,7 +140,6 @@ export function SuiteExecutionWorkspace({
   )
 }
 
-function formatExecutionOption(run: SuiteRunRecord) {
-  const passedCount = run.runs.filter((child) => child.status === 'PASSED').length
-  return `${new Date(run.startedAt).toLocaleString()} · ${run.status} · ${passedCount}/${run.runs.length} passed`
+function formatExecutionOption(run: SuiteRunRecord, startedAt: string, passedLabel: string) {
+  return `${startedAt} · ${run.status} · ${passedLabel}`
 }

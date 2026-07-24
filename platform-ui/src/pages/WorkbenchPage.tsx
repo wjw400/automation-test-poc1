@@ -14,6 +14,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App, Button, Dropdown, Input, Modal, Typography } from 'antd'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
+import { useTranslation } from 'react-i18next'
 import { platformApi } from '../api/platformApi'
 import {
   EnvironmentAssetEditor,
@@ -31,6 +32,7 @@ import type {
   SuiteRunRecord,
 } from '../types/platform'
 import { stringifyDsl } from '../utils/caseDsl'
+import { formatDateTime } from '../i18n'
 import { CasesPage } from './CasesPage'
 import { SuitesPage } from './SuitesPage'
 
@@ -57,6 +59,7 @@ type WorkbenchPageProps = {
 }
 
 export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {}) {
+  const { t } = useTranslation(['common', 'workspace', 'scenario', 'suite', 'execution', 'config', 'api'])
   const { modal, message } = App.useApp()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -343,8 +346,8 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
         ) : null}
         {mode === 'suites' ? (
           <ResourceListSidebar
-            title="Suites"
-            searchPlaceholder="Search suites"
+            title={t('suite:title')}
+            searchPlaceholder={t('workspace:workbench.searchSuites')}
             filter={assetFilter}
             onFilterChange={setAssetFilter}
             onCreate={() => {
@@ -359,12 +362,12 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
         ) : null}
         {mode === 'apis' ? (
           <ResourceListSidebar
-            title="API Specs"
-            searchPlaceholder="Search API specs"
+            title={t('api:apiSpecs')}
+            searchPlaceholder={t('workspace:workbench.searchApis')}
             filter={assetFilter}
             onFilterChange={setAssetFilter}
             onCreate={() => navigate(`/apis?projectId=${encodeURIComponent(projectId ?? '')}`)}
-            createTitle="Manage API specs"
+            createTitle={t('api:manageSpecs')}
           >
             {filteredApiSpecs.map((record) => (
               <AssetRow
@@ -378,12 +381,12 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
         ) : null}
         {mode === 'environments' ? (
           <ResourceListSidebar
-            title="Environments"
-            searchPlaceholder="Search environments"
+            title={t('config:environments')}
+            searchPlaceholder={t('workspace:workbench.searchEnvironments')}
             filter={assetFilter}
             onFilterChange={setAssetFilter}
-            onCreate={() => openTab('environment', `new-${Date.now()}`, 'New Environment')}
-            createTitle="New environment"
+            onCreate={() => openTab('environment', `new-${Date.now()}`, t('config:newEnvironment'))}
+            createTitle={t('config:newEnvironment')}
           >
             {filteredEnvironments.map((record) => (
               <AssetRow key={record.id} icon={<GlobalOutlined />} title={record.name} onClick={() => openTab('environment', record.id, record.name)} />
@@ -392,12 +395,12 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
         ) : null}
         {mode === 'profiles' ? (
           <ResourceListSidebar
-            title="Profiles"
-            searchPlaceholder="Search profiles"
+            title={t('config:profiles')}
+            searchPlaceholder={t('workspace:workbench.searchProfiles')}
             filter={assetFilter}
             onFilterChange={setAssetFilter}
-            onCreate={() => openTab('profile', `new-${Date.now()}`, 'New Profile')}
-            createTitle="New profile"
+            onCreate={() => openTab('profile', `new-${Date.now()}`, t('config:newProfile'))}
+            createTitle={t('config:newProfile')}
           >
             {filteredProfiles.map((record) => (
               <AssetRow key={record.id} icon={<KeyOutlined />} title={record.name} onClick={() => openTab('profile', record.id, record.name)} />
@@ -411,14 +414,14 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
             cases={casesQuery.data ?? []}
             filter={runFilter}
             onFilterChange={setRunFilter}
-            onOpen={(record) => openTab('run', record.id, `Run ${shortId(record.id)}`)}
-            onOpenSuite={(record) => openTab('suiteRun', record.id, `${record.suiteName} Execution`)}
+            onOpen={(record) => openTab('run', record.id, `${t('execution:run')} ${shortId(record.id)}`)}
+            onOpenSuite={(record) => openTab('suiteRun', record.id, `${record.suiteName} · ${t('execution:execution')}`)}
           />
         ) : null}
       </aside>
 
       <main className="workbench-main">
-        <div className="workbench-tab-strip" role="tablist" aria-label="Open work items">
+        <div className="workbench-tab-strip" role="tablist" aria-label={t('workspace:workbench.openItems')}>
           {tabs.map((tab) => (
             <div
               key={tab.key}
@@ -433,10 +436,10 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
               >
                 {tabIcon(tab.type)}
                 <span>{tab.title}</span>
-                {tab.dirty ? <span className="workbench-tab-dirty" title="Unsaved changes" /> : null}
+                {tab.dirty ? <span className="workbench-tab-dirty" title={t('workspace:workbench.unsavedChanges')} /> : null}
               </button>
               <Button
-                aria-label={`Close ${tab.title}`}
+                aria-label={t('workspace:workbench.closeItem', { title: tab.title })}
                 className="workbench-tab-close"
                 icon={<CloseOutlined />}
                 size="small"
@@ -449,24 +452,24 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
             trigger={['click']}
             menu={{
               items: [
-                { key: 'scenario', label: 'New Scenario', icon: <ExperimentOutlined /> },
-                { key: 'suite', label: 'New Suite', icon: <ProfileOutlined /> },
-                { key: 'environment', label: 'New Environment', icon: <GlobalOutlined /> },
-                { key: 'profile', label: 'New Profile', icon: <KeyOutlined /> },
+                { key: 'scenario', label: t('scenario:newScenarioShort'), icon: <ExperimentOutlined /> },
+                { key: 'suite', label: t('suite:newSuite'), icon: <ProfileOutlined /> },
+                { key: 'environment', label: t('config:newEnvironment'), icon: <GlobalOutlined /> },
+                { key: 'profile', label: t('config:newProfile'), icon: <KeyOutlined /> },
               ],
               onClick: ({ key }) => {
                 if (key === 'scenario' || key === 'suite') {
                   setCreateName('')
                   setCreateDialog(key)
                 } else if (key === 'environment') {
-                  openTab('environment', `new-${Date.now()}`, 'New Environment')
+                  openTab('environment', `new-${Date.now()}`, t('config:newEnvironment'))
                 } else {
-                  openTab('profile', `new-${Date.now()}`, 'New Profile')
+                  openTab('profile', `new-${Date.now()}`, t('config:newProfile'))
                 }
               },
             }}
           >
-            <Button className="workbench-new-tab" type="text" icon={<PlusOutlined />} title="New tab" />
+            <Button className="workbench-new-tab" type="text" icon={<PlusOutlined />} title={t('workspace:workbench.newTab')} />
           </Dropdown>
         </div>
 
@@ -497,17 +500,17 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
           {!activeTab ? (
             <div className="workbench-empty">
               <FileTextOutlined />
-              <Text strong>Open a work item</Text>
-              <Text type="secondary">Choose an item from the sidebar.</Text>
+              <Text strong>{t('workspace:workbench.openItem')}</Text>
+              <Text type="secondary">{t('workspace:workbench.chooseItem')}</Text>
             </div>
           ) : null}
         </div>
       </main>
 
       <Modal
-        title={createDialog === 'suite' ? 'New Suite' : 'New Scenario'}
+        title={createDialog === 'suite' ? t('suite:newSuite') : t('scenario:newScenarioShort')}
         open={Boolean(createDialog)}
-        okText="Create"
+        okText={t('common:actions.create')}
         confirmLoading={createMutation.isPending}
         okButtonProps={{ disabled: !createName.trim() }}
         onCancel={() => setCreateDialog(undefined)}
@@ -515,8 +518,8 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
       >
         <Input
           autoFocus
-          aria-label="Name"
-          placeholder={createDialog === 'suite' ? 'Suite name' : 'Scenario name'}
+          aria-label={t('common:fields.name')}
+          placeholder={createDialog === 'suite' ? t('suite:namePlaceholder') : t('scenario:namePlaceholder')}
           value={createName}
           onChange={(event) => setCreateName(event.target.value)}
           onPressEnter={() => {
@@ -648,6 +651,7 @@ function RunTabPane({
   onOpenScenario?: () => void
   onOpenSuiteRun?: () => void
 }) {
+  const { t } = useTranslation(['execution', 'scenario'])
   const [selectedStepIndex, setSelectedStepIndex] = useState(1)
   useEffect(() => {
     setSelectedStepIndex(run?.steps[0]?.index ?? 1)
@@ -656,12 +660,16 @@ function RunTabPane({
     <div className="run-tab-pane">
       <header className="run-context-header">
         <div>
-          <Text type="secondary">Scenario Execution</Text>
-          <h1>{scenarioName ?? run?.suiteDisplayName ?? 'Execution Detail'}</h1>
+          <Text type="secondary">{t('execution:scenarioExecution')}</Text>
+          <h1>{scenarioName ?? run?.suiteDisplayName ?? t('execution:detail')}</h1>
         </div>
         <div className="run-context-actions">
-          {onOpenSuiteRun ? <Button size="small" onClick={onOpenSuiteRun}>Open Suite Execution</Button> : null}
-          {onOpenScenario ? <Button size="small" onClick={onOpenScenario}>Open Scenario</Button> : null}
+          {onOpenSuiteRun
+            ? <Button size="small" onClick={onOpenSuiteRun}>{t('execution:openSuiteExecution')}</Button>
+            : null}
+          {onOpenScenario
+            ? <Button size="small" onClick={onOpenScenario}>{t('scenario:openScenario')}</Button>
+            : null}
         </div>
       </header>
       <div className="run-tab-detail">
@@ -672,8 +680,10 @@ function RunTabPane({
 }
 
 function ApiSpecTabPane({ projectId, spec }: { projectId: string, spec?: ApiSpecRecord }) {
+  const { t } = useTranslation('api')
+
   if (!spec) {
-    return <div className="workbench-empty"><Text type="secondary">API spec not found.</Text></div>
+    return <div className="workbench-empty"><Text type="secondary">{t('specNotFound')}</Text></div>
   }
   return (
     <div className="api-spec-tab-pane">
@@ -684,7 +694,7 @@ function ApiSpecTabPane({ projectId, spec }: { projectId: string, spec?: ApiSpec
         </div>
         <div className="api-spec-tab-meta">
           {spec.specVersion ? <span>{spec.specVersion}</span> : null}
-          <span>{spec.operationCount} operations</span>
+          <span>{t('operationCount', { count: spec.operationCount })}</span>
         </div>
       </header>
       <div className="api-spec-tab-content">
@@ -709,6 +719,7 @@ function ScenariosSidebar({
   onOpenScenario: (record: CaseRecord) => void
   onCreate: () => void
 }) {
+  const { t } = useTranslation(['scenario', 'workspace'])
   const casesByFolder = new Map<string | undefined, CaseRecord[]>()
   cases.forEach((record) => {
     const key = record.folderId ?? undefined
@@ -734,14 +745,20 @@ function ScenariosSidebar({
   return (
     <>
       <div className="workbench-sidebar-head">
-        <Text strong>Scenarios</Text>
-        <Button type="text" size="small" icon={<PlusOutlined />} title="New scenario" onClick={onCreate} />
+        <Text strong>{t('scenario:title')}</Text>
+        <Button
+          type="text"
+          size="small"
+          icon={<PlusOutlined />}
+          title={t('scenario:newScenarioShort')}
+          onClick={onCreate}
+        />
       </div>
       <Input
         allowClear
         className="workbench-sidebar-search"
         prefix={<SearchOutlined />}
-        placeholder="Search scenarios"
+        placeholder={t('workspace:workbench.searchScenarios')}
         value={filter}
         onChange={(event) => onFilterChange(event.target.value)}
       />
@@ -808,43 +825,52 @@ function RunsSidebar({
   onOpen: (record: RunRecord) => void
   onOpenSuite: (record: SuiteRunRecord) => void
 }) {
+  const { t, i18n } = useTranslation(['execution', 'workspace'])
   const caseNamesById = new Map(cases.map((record) => [record.id, record.name]))
   return (
     <>
-      <div className="workbench-sidebar-head"><Text strong>Execution History</Text></div>
+      <div className="workbench-sidebar-head"><Text strong>{t('execution:title')}</Text></div>
       <Input
         allowClear
         className="workbench-sidebar-search"
         prefix={<SearchOutlined />}
-        placeholder="Search executions"
+        placeholder={t('workspace:workbench.searchExecutions')}
         value={filter}
         onChange={(event) => onFilterChange(event.target.value)}
       />
       <div className="workbench-sidebar-scroll">
-        <div className="run-history-group-title">Suite Executions</div>
+        <div className="run-history-group-title">{t('execution:suiteExecutions')}</div>
         {suiteRecords.map((record) => (
           <button key={record.id} type="button" className="run-history-row" onClick={() => onOpenSuite(record)}>
             <span className="run-history-row-title">
               <span>{record.suiteName}</span>
               <StatusPill status={record.status} />
             </span>
-            <span>{new Date(record.startedAt).toLocaleString()}</span>
-            <span>{record.runs.length} scenarios · {record.durationMs} ms</span>
+            <span>{formatDateTime(record.startedAt, i18n.resolvedLanguage)}</span>
+            <span>
+              {t('execution:scenarioCount', { count: record.runs.length })}
+              {' · '}
+              {t('execution:duration', { duration: record.durationMs })}
+            </span>
           </button>
         ))}
-        {!suiteRecords.length ? <Text type="secondary" className="workbench-sidebar-empty">No suite executions.</Text> : null}
-        <div className="run-history-group-title">Scenario Executions</div>
+        {!suiteRecords.length
+          ? <Text type="secondary" className="workbench-sidebar-empty">{t('execution:noSuiteExecutions')}</Text>
+          : null}
+        <div className="run-history-group-title">{t('execution:scenarioExecutions')}</div>
         {records.map((record) => (
           <button key={record.id} type="button" className="run-history-row" onClick={() => onOpen(record)}>
             <span className="run-history-row-title">
               <span>{caseNamesById.get(record.caseId) ?? shortId(record.id)}</span>
               <StatusPill status={record.status} />
             </span>
-            <span>{new Date(record.startedAt).toLocaleString()}</span>
-            <span>{record.durationMs} ms</span>
+            <span>{formatDateTime(record.startedAt, i18n.resolvedLanguage)}</span>
+            <span>{t('execution:duration', { duration: record.durationMs })}</span>
           </button>
         ))}
-        {!records.length ? <Text type="secondary" className="workbench-sidebar-empty">No scenario executions.</Text> : null}
+        {!records.length
+          ? <Text type="secondary" className="workbench-sidebar-empty">{t('execution:noScenarioExecutions')}</Text>
+          : null}
       </div>
     </>
   )
