@@ -19,6 +19,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import jakarta.annotation.PostConstruct;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotEmpty;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -98,6 +99,30 @@ public class PlatformCatalogService {
         return toProjectRecord(requireProject(projectId));
     }
 
+    @Transactional
+    public ProjectRecord createProject(UpsertProjectRequest request) {
+        String baseCode = request.name()
+                .trim()
+                .toLowerCase()
+                .replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("(^-|-$)", "");
+        if (baseCode.isBlank()) {
+            baseCode = "workspace";
+        }
+        String code = baseCode;
+        int suffix = 2;
+        while (projectRepository.findByCode(code).isPresent()) {
+            code = baseCode + "-" + suffix++;
+        }
+
+        ProjectEntity entity = new ProjectEntity();
+        entity.setCode(code);
+        entity.setName(request.name().trim());
+        entity.setDescription(request.description() == null ? "" : request.description().trim());
+        entity.setStatus("ACTIVE");
+        return toProjectRecord(projectRepository.save(entity));
+    }
+
     @Transactional(readOnly = true)
     public List<EnvironmentRecord> listEnvironments(String projectId) {
         requireProject(projectId);
@@ -117,9 +142,13 @@ public class PlatformCatalogService {
         EnvironmentEntity entity = request.id() == null || request.id().isBlank()
                 ? new EnvironmentEntity()
                 : requireEnvironment(request.id());
+        if (entity.getId() != null && !projectId.equals(entity.getProjectId())) {
+            throw new IllegalArgumentException("Environment does not belong to the selected project");
+        }
         entity.setProjectId(projectId);
         entity.setName(request.name());
         entity.setBaseUrl(request.baseUrl());
+        entity.setEndpointsJson(jsonCodec.write(request.endpoints() == null ? Map.of() : request.endpoints()));
         entity.setVariablesJson(jsonCodec.write(request.variables() == null ? Map.of() : request.variables()));
         entity.setStatus(defaultStatus(request.status()));
         return toEnvironmentRecord(environmentRepository.save(entity));
@@ -201,6 +230,20 @@ public class PlatformCatalogService {
         ProfileEntity entity = request.id() == null || request.id().isBlank()
                 ? new ProfileEntity()
                 : requireProfile(request.id());
+        if (entity.getId() != null && !projectId.equals(entity.getProjectId())) {
+            throw new IllegalArgumentException("Profile does not belong to the selected project");
+        }
+        Set<String> environmentIds = request.environmentIds() == null
+                ? Set.of()
+                : new HashSet<>(request.environmentIds());
+        if (environmentIds.isEmpty()) {
+            throw new IllegalArgumentException("Select at least one environment for the profile");
+        }
+        for (String environmentId : environmentIds) {
+            if (!projectId.equals(requireEnvironment(environmentId).getProjectId())) {
+                throw new IllegalArgumentException("Profile environment does not belong to the selected project");
+            }
+        }
         entity.setProjectId(projectId);
         entity.setName(request.name());
         entity.setType(request.type() == null || request.type().isBlank() ? "PGP" : request.type());
@@ -211,6 +254,7 @@ public class PlatformCatalogService {
         entity.setRecipientPrivateKey(request.recipientPrivateKey());
         entity.setRecipientPrivateKeyPassphrase(request.recipientPrivateKeyPassphrase());
         entity.setEnabled(request.enabled() == null || request.enabled());
+        entity.setEnvironmentIds(environmentIds);
         return toProfileRecord(profileRepository.save(entity));
     }
 
@@ -240,11 +284,41 @@ public class PlatformCatalogService {
         if (folderId != null && !projectId.equals(requireFolder(folderId).getProjectId())) {
             throw new IllegalArgumentException("Folder does not belong to the selected project");
         }
+        String defaultEnvironmentId = blankToNull(request.defaultEnvironmentId());
+        EnvironmentEntity defaultEnvironment = defaultEnvironmentId == null
+                ? null
+                : requireEnvironment(defaultEnvironmentId);
+        if (defaultEnvironment != null) {
+            if (!projectId.equals(defaultEnvironment.getProjectId())) {
+                throw new IllegalArgumentException("Default environment does not belong to the selected project");
+            }
+            if (!"ACTIVE".equalsIgnoreCase(defaultEnvironment.getStatus())) {
+                throw new IllegalArgumentException("Default environment is inactive");
+            }
+        }
+        String defaultProfileId = blankToNull(request.defaultProfileId());
+        if (defaultProfileId != null) {
+            ProfileEntity profile = requireProfile(defaultProfileId);
+            if (!projectId.equals(profile.getProjectId())) {
+                throw new IllegalArgumentException("Default profile does not belong to the selected project");
+            }
+            if (defaultEnvironmentId == null) {
+                throw new IllegalArgumentException("Select a default environment before selecting a profile");
+            }
+            if (!profile.isEnabled()) {
+                throw new IllegalArgumentException("Default profile is disabled");
+            }
+            if (!profile.getEnvironmentIds().contains(defaultEnvironmentId)) {
+                throw new IllegalArgumentException("Default profile is not available in the selected environment");
+            }
+        }
         entity.setProjectId(projectId);
         entity.setName(request.name());
         entity.setCode(request.code());
         entity.setDescription(request.description());
         entity.setFolderId(folderId);
+        entity.setDefaultEnvironmentId(defaultEnvironmentId);
+        entity.setDefaultProfileId(defaultProfileId);
         entity.setTagsJson(jsonCodec.write(request.tags() == null ? List.of() : request.tags()));
         entity.setDslVersion(request.dslVersion() == null || request.dslVersion().isBlank() ? "v1" : request.dslVersion());
         entity.setContent(request.content());
@@ -296,13 +370,28 @@ public class PlatformCatalogService {
             SuiteCaseEntity suiteCase = new SuiteCaseEntity();
             suiteCase.setSuiteId(saved.getId());
             suiteCase.setCaseId(suiteCaseRequest.caseId());
-            suiteCase.setAlias(suiteCaseRequest.alias());
+            suiteCase.setDisplayName(suiteCaseRequest.displayName());
             suiteCase.setCaseOrder(suiteCaseRequest.order() == null ? i + 1 : suiteCaseRequest.order());
             suiteCase.setEnabled(suiteCaseRequest.enabled() == null || suiteCaseRequest.enabled());
             suiteCase.setVariableOverridesJson(jsonCodec.write(
                     suiteCaseRequest.variableOverrides() == null ? Map.of() : suiteCaseRequest.variableOverrides()));
-            suiteCase.setEnvironmentId(blankToNull(suiteCaseRequest.environmentId()));
-            suiteCase.setProfileId(blankToNull(suiteCaseRequest.profileId()));
+            String environmentId = blankToNull(suiteCaseRequest.environmentId());
+            String profileId = blankToNull(suiteCaseRequest.profileId());
+            if (environmentId != null && !projectId.equals(requireEnvironment(environmentId).getProjectId())) {
+                throw new IllegalArgumentException("Suite environment does not belong to the selected project");
+            }
+            if (profileId != null) {
+                ProfileEntity profile = requireProfile(profileId);
+                if (!projectId.equals(profile.getProjectId())) {
+                    throw new IllegalArgumentException("Suite profile does not belong to the selected project");
+                }
+                if (environmentId != null && !profile.getEnvironmentIds().contains(environmentId)) {
+                    throw new IllegalArgumentException(
+                            "Suite profile is not available in the selected environment");
+                }
+            }
+            suiteCase.setEnvironmentId(environmentId);
+            suiteCase.setProfileId(profileId);
             suiteCaseRepository.save(suiteCase);
         }
 
@@ -338,7 +427,26 @@ public class PlatformCatalogService {
         entity.setDslVersion("v1");
         entity.setContent(content);
         entity.setStatus("ACTIVE");
+        applyProjectDefaultExecutionContext(entity, projectId);
         caseRepository.save(entity);
+    }
+
+    private void applyProjectDefaultExecutionContext(CaseEntity testCase, String projectId) {
+        for (EnvironmentEntity environment : environmentRepository.findByProjectIdOrderByNameAsc(projectId)) {
+            if (!"ACTIVE".equalsIgnoreCase(environment.getStatus())) {
+                continue;
+            }
+            ProfileEntity profile = profileRepository.findByProjectIdOrderByNameAsc(projectId).stream()
+                    .filter(ProfileEntity::isEnabled)
+                    .filter(candidate -> candidate.getEnvironmentIds().contains(environment.getId()))
+                    .findFirst()
+                    .orElse(null);
+            if (profile != null) {
+                testCase.setDefaultEnvironmentId(environment.getId());
+                testCase.setDefaultProfileId(profile.getId());
+                return;
+            }
+        }
     }
 
     private void ensureDemoSuite(String projectId) {
@@ -367,7 +475,7 @@ public class PlatformCatalogService {
             SuiteCaseEntity suiteCase = new SuiteCaseEntity();
             suiteCase.setSuiteId(savedSuite.getId());
             suiteCase.setCaseId(cases.get(i).getId());
-            suiteCase.setAlias(cases.get(i).getName());
+            suiteCase.setDisplayName(cases.get(i).getName());
             suiteCase.setCaseOrder(i + 1);
             suiteCase.setEnabled(true);
             suiteCase.setVariableOverridesJson(jsonCodec.write(Map.of()));
@@ -385,15 +493,25 @@ public class PlatformCatalogService {
         environment.setProjectId(projectId);
         environment.setName("local-mock");
         environment.setBaseUrl("http://localhost:8081");
+        environment.setEndpointsJson(jsonCodec.write(Map.of()));
         environment.setVariablesJson(jsonCodec.write(Map.of("baseUrl", "http://localhost:8081")));
         environment.setStatus("ACTIVE");
         environmentRepository.save(environment);
     }
 
     private void ensureProfile(String projectId) {
-        boolean exists = profileRepository.findByProjectIdOrderByNameAsc(projectId).stream()
-                .anyMatch(profile -> "local-secure-profile".equals(profile.getName()));
-        if (exists) {
+        List<String> environmentIds = environmentRepository.findByProjectIdOrderByNameAsc(projectId).stream()
+                .map(EnvironmentEntity::getId)
+                .toList();
+        ProfileEntity existing = profileRepository.findByProjectIdOrderByNameAsc(projectId).stream()
+                .filter(profile -> "local-secure-profile".equals(profile.getName()))
+                .findFirst()
+                .orElse(null);
+        if (existing != null) {
+            if (existing.getEnvironmentIds().isEmpty() && !environmentIds.isEmpty()) {
+                existing.setEnvironmentIds(new HashSet<>(environmentIds));
+                profileRepository.save(existing);
+            }
             return;
         }
         ProfileEntity profile = new ProfileEntity();
@@ -407,6 +525,7 @@ public class PlatformCatalogService {
         profile.setRecipientPrivateKey(readOptionalFile("test-framework/src/test/resources/keys/client-private.asc"));
         profile.setRecipientPrivateKeyPassphrase("demo-client-passphrase");
         profile.setEnabled(true);
+        profile.setEnvironmentIds(new HashSet<>(environmentIds));
         profileRepository.save(profile);
     }
 
@@ -457,6 +576,7 @@ public class PlatformCatalogService {
                 entity.getProjectId(),
                 entity.getName(),
                 entity.getBaseUrl(),
+                jsonCodec.readStringMap(entity.getEndpointsJson()),
                 jsonCodec.readStringMap(entity.getVariablesJson()),
                 entity.getStatus());
     }
@@ -473,6 +593,7 @@ public class PlatformCatalogService {
                 entity.getRecipientPublicKey(),
                 entity.getRecipientPrivateKey(),
                 entity.getRecipientPrivateKeyPassphrase(),
+                List.copyOf(entity.getEnvironmentIds()),
                 entity.isEnabled());
     }
 
@@ -495,6 +616,8 @@ public class PlatformCatalogService {
                 entity.getCode(),
                 entity.getDescription(),
                 entity.getFolderId(),
+                entity.getDefaultEnvironmentId(),
+                entity.getDefaultProfileId(),
                 jsonCodec.readStringList(entity.getTagsJson()),
                 entity.getDslVersion(),
                 entity.getContent(),
@@ -525,7 +648,7 @@ public class PlatformCatalogService {
                 entity.getCaseId(),
                 testCase.getName(),
                 testCase.getCode(),
-                entity.getAlias(),
+                entity.getDisplayName(),
                 entity.getCaseOrder(),
                 entity.isEnabled(),
                 jsonCodec.read(entity.getVariableOverridesJson(), new TypeReference<Map<String, Object>>() {}, Map.of()),
@@ -621,11 +744,17 @@ public class PlatformCatalogService {
             Instant updatedAt) {
     }
 
+    public record UpsertProjectRequest(
+            @NotBlank String name,
+            String description) {
+    }
+
     public record EnvironmentRecord(
             String id,
             String projectId,
             String name,
             String baseUrl,
+            Map<String, String> endpoints,
             Map<String, String> variables,
             String status) {
     }
@@ -641,6 +770,7 @@ public class PlatformCatalogService {
             String recipientPublicKey,
             String recipientPrivateKey,
             String recipientPrivateKeyPassphrase,
+            List<String> environmentIds,
             boolean enabled) {
     }
 
@@ -661,6 +791,8 @@ public class PlatformCatalogService {
             String code,
             String description,
             String folderId,
+            String defaultEnvironmentId,
+            String defaultProfileId,
             List<String> tags,
             String dslVersion,
             String content,
@@ -685,7 +817,7 @@ public class PlatformCatalogService {
             String caseId,
             String caseName,
             String caseCode,
-            String alias,
+            String displayName,
             Integer order,
             boolean enabled,
             Map<String, Object> variableOverrides,
@@ -697,6 +829,7 @@ public class PlatformCatalogService {
             String id,
             @NotBlank String name,
             @NotBlank String baseUrl,
+            Map<String, String> endpoints,
             Map<String, String> variables,
             String status) {
     }
@@ -711,6 +844,7 @@ public class PlatformCatalogService {
             String recipientPublicKey,
             String recipientPrivateKey,
             String recipientPrivateKeyPassphrase,
+            @NotEmpty List<String> environmentIds,
             Boolean enabled) {
     }
 
@@ -720,6 +854,8 @@ public class PlatformCatalogService {
             @NotBlank String code,
             String description,
             String folderId,
+            String defaultEnvironmentId,
+            String defaultProfileId,
             List<String> tags,
             String dslVersion,
             @NotBlank String content,
@@ -743,7 +879,7 @@ public class PlatformCatalogService {
     public record UpsertSuiteCaseRequest(
             String id,
             @NotBlank String caseId,
-            String alias,
+            String displayName,
             Integer order,
             Boolean enabled,
             Map<String, Object> variableOverrides,

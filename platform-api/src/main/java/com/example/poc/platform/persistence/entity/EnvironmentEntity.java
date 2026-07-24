@@ -23,6 +23,9 @@ public class EnvironmentEntity {
     private String baseUrl;
 
     @Column(nullable = false, columnDefinition = "text")
+    private String endpointsJson;
+
+    @Column(nullable = false, columnDefinition = "text")
     private String variablesJson;
 
     @Column(nullable = false, length = 50)
@@ -43,6 +46,8 @@ public class EnvironmentEntity {
     public void setName(String name) { this.name = name; }
     public String getBaseUrl() { return baseUrl; }
     public void setBaseUrl(String baseUrl) { this.baseUrl = baseUrl; }
+    public String getEndpointsJson() { return endpointsJson; }
+    public void setEndpointsJson(String endpointsJson) { this.endpointsJson = endpointsJson; }
     public String getVariablesJson() { return variablesJson; }
     public void setVariablesJson(String variablesJson) { this.variablesJson = variablesJson; }
     public String getStatus() { return status; }

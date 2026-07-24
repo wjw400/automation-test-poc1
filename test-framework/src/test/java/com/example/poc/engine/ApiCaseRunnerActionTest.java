@@ -58,6 +58,53 @@ class ApiCaseRunnerActionTest {
         }
     }
 
+    @Test
+    void resolvesBaseUrlFromApiSpecBindingBeforeDefaultBaseUrl() throws Exception {
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/health", exchange -> {
+            byte[] responseBytes = "{\"status\":\"UP\"}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, responseBytes.length);
+            exchange.getResponseBody().write(responseBytes);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            String caseYaml = """
+                    dslVersion: v1
+                    name: API Spec endpoint binding
+                    variables:
+                      baseUrl: http://127.0.0.1:1
+                      customer-api.baseUrl: http://127.0.0.1:%d
+                    steps:
+                      - name: Check service health
+                        type: http
+                        operation:
+                          apiSpecId: customer-api
+                          operationId: getHealth
+                          method: GET
+                          path: /health
+                        request: {}
+                        response:
+                          status: 200
+                          assertions:
+                            - source: response.body
+                              path: $.status
+                              operator: equals
+                              expected: UP
+                    """.formatted(server.getAddress().getPort());
+
+            ApiCaseExecutionReport report = new ApiCaseRunner().executeInline("endpoint-binding.yaml", caseYaml);
+
+            assertThat(report.getStatus()).isEqualTo("PASSED");
+            assertThat(report.getSteps().get(0).getRequest().getUrl())
+                    .isEqualTo("http://127.0.0.1:" + server.getAddress().getPort() + "/health");
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private void handleSecureExchange(
             HttpExchange exchange,
             AtomicReference<Map<String, Object>> wireRequest,

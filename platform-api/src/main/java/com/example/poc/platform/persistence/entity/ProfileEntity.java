@@ -1,10 +1,16 @@
 package com.example.poc.platform.persistence.entity;
 
 import jakarta.persistence.Column;
+import jakarta.persistence.CollectionTable;
+import jakarta.persistence.ElementCollection;
 import jakarta.persistence.Entity;
+import jakarta.persistence.FetchType;
 import jakarta.persistence.Id;
+import jakarta.persistence.JoinColumn;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.UUID;
 
 @Entity
@@ -43,6 +49,13 @@ public class ProfileEntity {
     @Column(nullable = false)
     private boolean enabled;
 
+    @ElementCollection(fetch = FetchType.EAGER)
+    @CollectionTable(
+            name = "platform_profile_environment",
+            joinColumns = @JoinColumn(name = "profile_id"))
+    @Column(name = "environment_id", nullable = false)
+    private Set<String> environmentIds = new LinkedHashSet<>();
+
     @PrePersist
     public void onCreate() {
         if (id == null || id.isBlank()) {
@@ -72,4 +85,8 @@ public class ProfileEntity {
     public void setRecipientPrivateKeyPassphrase(String recipientPrivateKeyPassphrase) { this.recipientPrivateKeyPassphrase = recipientPrivateKeyPassphrase; }
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
+    public Set<String> getEnvironmentIds() { return environmentIds; }
+    public void setEnvironmentIds(Set<String> environmentIds) {
+        this.environmentIds = environmentIds == null ? new LinkedHashSet<>() : new LinkedHashSet<>(environmentIds);
+    }
 }

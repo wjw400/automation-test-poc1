@@ -3,6 +3,7 @@ import {
   ArrowUpOutlined,
   CodeOutlined,
   DeleteOutlined,
+  PlayCircleOutlined,
   PlusOutlined,
   SaveOutlined,
 } from '@ant-design/icons'
@@ -24,11 +25,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { platformApi } from '../api/platformApi'
+import { JsonObjectEditor } from '../components/JsonObjectEditor'
 import { StatusPill } from '../components/StatusPill'
+import { parseDsl } from '../utils/caseDsl'
 import type {
+  CaseRecord,
   SaveSuiteCaseInput,
   SaveSuiteInput,
   SuiteRecord,
+  SuiteRunRecord,
 } from '../types/platform'
 
 const { Text } = Typography
@@ -48,22 +53,47 @@ const emptyDraft: SuiteDraft = {
   cases: [],
 }
 
-export function SuitesPage() {
+type SuitesPageProps = {
+  embedded?: boolean
+  projectId?: string
+  suiteId?: string
+  onDirtyChange?: (dirty: boolean) => void
+  onTitleChange?: (title: string) => void
+  onSaveReady?: (save?: () => Promise<void>) => void
+  onRunCompleted?: (run: SuiteRunRecord) => void
+  onDeleted?: () => void
+}
+
+export function SuitesPage({
+  embedded = false,
+  projectId,
+  suiteId,
+  onDirtyChange,
+  onTitleChange,
+  onSaveReady,
+  onRunCompleted,
+  onDeleted,
+}: SuitesPageProps = {}) {
   const { message, modal } = App.useApp()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const [draft, setDraft] = useState<SuiteDraft>(emptyDraft)
   const [isCreating, setIsCreating] = useState(false)
   const [caseToAddId, setCaseToAddId] = useState<string>()
-  const [variablesEditor, setVariablesEditor] = useState<{ index: number; text: string }>()
+  const [variablesEditor, setVariablesEditor] = useState<{
+    index: number
+    defaults: Record<string, unknown>
+    value: Record<string, unknown>
+  }>()
+  const [variablesEditorError, setVariablesEditorError] = useState<string | null>(null)
 
   const projectsQuery = useQuery({
     queryKey: ['projects'],
     queryFn: platformApi.listProjects,
   })
 
-  const selectedProjectId = searchParams.get('projectId') ?? projectsQuery.data?.[0]?.id
-  const selectedSuiteId = searchParams.get('suiteId')
+  const selectedProjectId = projectId ?? searchParams.get('projectId') ?? projectsQuery.data?.[0]?.id
+  const selectedSuiteId = suiteId ?? searchParams.get('suiteId')
 
   const suitesQuery = useQuery({
     queryKey: ['suites', selectedProjectId],
@@ -109,6 +139,12 @@ export function SuitesPage() {
       if (!selectedProjectId) {
         throw new Error('Select a project first.')
       }
+      if (variablesEditorError) {
+        throw new Error(`Fix Variables JSON before saving: ${variablesEditorError}`)
+      }
+      if (!draft.name.trim()) {
+        throw new Error('Suite name is required.')
+      }
       const payload = normalizeDraftForSave(draft)
       return isCreating || !selectedSuite
         ? platformApi.createSuite(selectedProjectId, payload)
@@ -117,10 +153,19 @@ export function SuitesPage() {
     onSuccess: async (savedSuite) => {
       await queryClient.invalidateQueries({ queryKey: ['suites', selectedProjectId] })
       setIsCreating(false)
-      setSearchParams({ projectId: selectedProjectId!, suiteId: savedSuite.id })
+      if (!embedded) {
+        setSearchParams({ projectId: selectedProjectId!, suiteId: savedSuite.id })
+      }
       void message.success('Suite saved')
     },
   })
+
+  useEffect(() => {
+    onSaveReady?.(async () => {
+      await saveSuiteMutation.mutateAsync()
+    })
+    return () => onSaveReady?.(undefined)
+  }, [onSaveReady, saveSuiteMutation])
 
   const deleteSuiteMutation = useMutation({
     mutationFn: async () => {
@@ -133,8 +178,36 @@ export function SuitesPage() {
       await queryClient.invalidateQueries({ queryKey: ['suites', selectedProjectId] })
       setIsCreating(false)
       setDraft(emptyDraft)
-      setSearchParams(selectedProjectId ? { projectId: selectedProjectId } : {})
+      if (embedded) {
+        onDeleted?.()
+      } else {
+        setSearchParams(selectedProjectId ? { projectId: selectedProjectId } : {})
+      }
       void message.success('Suite deleted')
+    },
+  })
+
+  const runSuiteMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedSuite || isCreating) {
+        throw new Error('Save the suite before running it.')
+      }
+      return platformApi.startSuiteRun({
+        suiteId: selectedSuite.id,
+        triggeredBy: 'manual',
+      })
+    },
+    onSuccess: async (run) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['runs'] }),
+        queryClient.invalidateQueries({ queryKey: ['suite-runs'] }),
+      ])
+      onRunCompleted?.(run)
+      if (run.status === 'PASSED') {
+        void message.success('Suite passed')
+      } else {
+        void message.warning('Suite failed')
+      }
     },
   })
 
@@ -175,7 +248,7 @@ export function SuitesPage() {
         ...current.cases,
         {
           caseId: selectedCase.id,
-          alias: selectedCase.name,
+          displayName: selectedCase.name,
           order: current.cases.length + 1,
           enabled: true,
           variableOverrides: {},
@@ -229,21 +302,17 @@ export function SuitesPage() {
   }
 
   const saveVariableOverrides = () => {
-    if (!variablesEditor) {
+    if (!variablesEditor || variablesEditorError) {
       return
     }
-    try {
-      const parsed = variablesEditor.text.trim() ? JSON.parse(variablesEditor.text) : {}
-      if (!parsed || Array.isArray(parsed) || typeof parsed !== 'object') {
-        throw new Error('Variable overrides must be a JSON object.')
-      }
-      updateSuiteCase(variablesEditor.index, {
-        variableOverrides: parsed as Record<string, unknown>,
-      })
-      setVariablesEditor(undefined)
-    } catch (error) {
-      void message.error(error instanceof Error ? error.message : 'Invalid JSON object.')
-    }
+    updateSuiteCase(variablesEditor.index, {
+      variableOverrides: calculateVariableOverrides(
+        variablesEditor.defaults,
+        variablesEditor.value,
+      ),
+    })
+    setVariablesEditor(undefined)
+    setVariablesEditorError(null)
   }
 
   const getCaseDisplay = (suiteCase: SaveSuiteCaseInput) => {
@@ -293,14 +362,14 @@ export function SuitesPage() {
       },
     },
     {
-      title: 'Alias',
-      dataIndex: 'alias',
+      title: 'Display Name',
+      dataIndex: 'displayName',
       width: 210,
       render: (value: string | undefined, _record, index) => (
         <Input
           value={value}
-          placeholder="Optional run label"
-          onChange={(event) => updateSuiteCase(index, { alias: event.target.value })}
+          placeholder="Optional display name"
+          onChange={(event) => updateSuiteCase(index, { displayName: event.target.value })}
         />
       ),
     },
@@ -308,7 +377,7 @@ export function SuitesPage() {
       title: 'Environment',
       dataIndex: 'environmentId',
       width: 180,
-      render: (value: string | undefined, _record, index) => (
+      render: (value: string | undefined, record, index) => (
         <Select
           allowClear
           className="suite-case-select"
@@ -317,8 +386,19 @@ export function SuitesPage() {
           options={(environmentsQuery.data ?? []).map((environment) => ({
             label: environment.name,
             value: environment.id,
+            disabled: environment.status !== 'ACTIVE',
           }))}
-          onChange={(nextValue) => updateSuiteCase(index, { environmentId: nextValue })}
+          onChange={(nextValue) => {
+            const currentProfile = (profilesQuery.data ?? []).find(
+              (profile) => profile.id === record.profileId,
+            )
+            updateSuiteCase(index, {
+              environmentId: nextValue,
+              profileId: nextValue && currentProfile?.environmentIds.includes(nextValue)
+                ? record.profileId
+                : undefined,
+            })
+          }}
         />
       ),
     },
@@ -326,16 +406,21 @@ export function SuitesPage() {
       title: 'Profile',
       dataIndex: 'profileId',
       width: 180,
-      render: (value: string | undefined, _record, index) => (
+      render: (value: string | undefined, record, index) => (
         <Select
           allowClear
           className="suite-case-select"
           placeholder="Suite default"
           value={value}
-          options={(profilesQuery.data ?? []).map((profile) => ({
-            label: profile.name,
-            value: profile.id,
-          }))}
+          options={(profilesQuery.data ?? [])
+            .filter((profile) => (
+              profile.enabled
+              && (!record.environmentId || profile.environmentIds.includes(record.environmentId))
+            ))
+            .map((profile) => ({
+              label: profile.name,
+              value: profile.id,
+            }))}
           onChange={(nextValue) => updateSuiteCase(index, { profileId: nextValue })}
         />
       ),
@@ -358,12 +443,18 @@ export function SuitesPage() {
             size="small"
             type="text"
             icon={<CodeOutlined />}
-            onClick={() =>
+            onClick={() => {
+              const defaults = scenarioVariables(caseLookup.get(record.caseId))
+              setVariablesEditorError(null)
               setVariablesEditor({
                 index,
-                text: JSON.stringify(record.variableOverrides ?? {}, null, 2),
+                defaults,
+                value: {
+                  ...defaults,
+                  ...(record.variableOverrides ?? {}),
+                },
               })
-            }
+            }}
           />
           <Button
             size="small"
@@ -378,10 +469,28 @@ export function SuitesPage() {
   ]
 
   const canEdit = Boolean(selectedProjectId && (selectedSuite || isCreating))
+  const isDraftDirty = useMemo(
+    () => isCreating || Boolean(
+      selectedSuite
+      && JSON.stringify(normalizeDraftForSave(draft))
+        !== JSON.stringify(normalizeDraftForSave(toDraft(selectedSuite))),
+    ),
+    [draft, isCreating, selectedSuite],
+  )
+
+  useEffect(() => {
+    onDirtyChange?.(isDraftDirty || Boolean(variablesEditorError))
+  }, [isDraftDirty, onDirtyChange, variablesEditorError])
+
+  useEffect(() => {
+    if (draft.name) {
+      onTitleChange?.(draft.name)
+    }
+  }, [draft.name, onTitleChange])
 
   return (
-    <div className="page-shell">
-      <section className="hero-band">
+    <div className={embedded ? 'page-shell suite-page embedded' : 'page-shell'}>
+      {embedded ? null : <section className="hero-band">
         <div>
           <h1>Suites</h1>
           <p>Group reusable cases into ordered suites without changing the cases themselves.</p>
@@ -401,10 +510,10 @@ export function SuitesPage() {
             New Suite
           </Button>
         </Space>
-      </section>
+      </section>}
 
-      <div className="suites-layout">
-        <section className="panel-section suites-library-panel">
+      <div className={embedded ? 'suites-layout embedded' : 'suites-layout'}>
+        {embedded ? null : <section className="panel-section suites-library-panel">
           <div className="panel-title-row compact">
             <div>
               <h2 className="panel-title">Suite Library</h2>
@@ -444,7 +553,7 @@ export function SuitesPage() {
               </button>
             ))}
           </div>
-        </section>
+        </section>}
 
         <section className="suite-editor-column">
           {canEdit ? (
@@ -474,11 +583,20 @@ export function SuitesPage() {
                     </div>
                     <Button
                       icon={<SaveOutlined />}
-                      type="primary"
+                      disabled={!isDraftDirty}
                       loading={saveSuiteMutation.isPending}
                       onClick={() => void saveSuiteMutation.mutateAsync()}
                     >
                       Save
+                    </Button>
+                    <Button
+                      type="primary"
+                      icon={<PlayCircleOutlined />}
+                      disabled={isCreating || !selectedSuite || isDraftDirty || !draft.cases.some((suiteCase) => suiteCase.enabled)}
+                      loading={runSuiteMutation.isPending}
+                      onClick={() => void runSuiteMutation.mutateAsync()}
+                    >
+                      Run
                     </Button>
                     <Button
                       danger
@@ -504,6 +622,16 @@ export function SuitesPage() {
 
                 {saveSuiteMutation.isError ? (
                   <Alert className="section-alert" type="error" showIcon message="Failed to save suite." />
+                ) : null}
+                {runSuiteMutation.isError ? (
+                  <Alert
+                    className="section-alert"
+                    type="error"
+                    showIcon
+                    message={runSuiteMutation.error instanceof Error
+                      ? runSuiteMutation.error.message
+                      : 'Failed to run suite.'}
+                  />
                 ) : null}
               </section>
 
@@ -560,23 +688,82 @@ export function SuitesPage() {
       <Modal
         title="Variable Overrides"
         open={Boolean(variablesEditor)}
-        onCancel={() => setVariablesEditor(undefined)}
+        destroyOnHidden
+        okButtonProps={{ disabled: Boolean(variablesEditorError) }}
+        onCancel={() => {
+          setVariablesEditor(undefined)
+          setVariablesEditorError(null)
+        }}
         onOk={saveVariableOverrides}
         okText="Apply"
       >
         <div className="api-import-stack">
-          <Text type="secondary">Optional JSON object passed to this suite case entry.</Text>
-          <Input.TextArea
-            rows={10}
-            value={variablesEditor?.text}
-            onChange={(event) =>
-              setVariablesEditor((current) => current ? { ...current, text: event.target.value } : current)
-            }
+          <Text type="secondary">Scenario variables with this suite entry's overrides applied.</Text>
+          <JsonObjectEditor
+            ariaLabel="Variable overrides JSON editor"
+            height="240px"
+            resetLabel="Restore Default"
+            resetValue={variablesEditor?.defaults ?? {}}
+            value={variablesEditor?.value ?? {}}
+            onValidationChange={setVariablesEditorError}
+            onCommit={(value) => {
+              setVariablesEditor((current) => current ? { ...current, value } : current)
+            }}
           />
         </div>
       </Modal>
     </div>
   )
+}
+
+function scenarioVariables(record: CaseRecord | undefined): Record<string, unknown> {
+  if (!record) {
+    return {}
+  }
+  const parsed = parseDsl(record.content)
+  const variables = parsed.data?.variables
+  return variables && typeof variables === 'object' && !Array.isArray(variables)
+    ? structuredClone(variables as Record<string, unknown>)
+    : {}
+}
+
+function calculateVariableOverrides(
+  defaults: Record<string, unknown>,
+  effectiveValue: Record<string, unknown>,
+) {
+  return Object.fromEntries(
+    Object.entries(effectiveValue).filter(([key, value]) => (
+      !(key in defaults) || !jsonValuesEqual(value, defaults[key])
+    )),
+  )
+}
+
+function jsonValuesEqual(left: unknown, right: unknown): boolean {
+  if (Object.is(left, right)) {
+    return true
+  }
+  if (Array.isArray(left) || Array.isArray(right)) {
+    return Array.isArray(left)
+      && Array.isArray(right)
+      && left.length === right.length
+      && left.every((value, index) => jsonValuesEqual(value, right[index]))
+  }
+  if (isJsonObject(left) || isJsonObject(right)) {
+    if (!isJsonObject(left) || !isJsonObject(right)) {
+      return false
+    }
+    const leftKeys = Object.keys(left).sort()
+    const rightKeys = Object.keys(right).sort()
+    return leftKeys.length === rightKeys.length
+      && leftKeys.every((key, index) => (
+        key === rightKeys[index] && jsonValuesEqual(left[key], right[key])
+      ))
+  }
+  return false
+}
+
+function isJsonObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
 
 function toDraft(suite: SuiteRecord): SuiteDraft {
@@ -588,7 +775,7 @@ function toDraft(suite: SuiteRecord): SuiteDraft {
       suite.cases.map((suiteCase) => ({
         id: suiteCase.id,
         caseId: suiteCase.caseId,
-        alias: suiteCase.alias ?? '',
+        displayName: suiteCase.displayName ?? '',
         order: suiteCase.order,
         enabled: suiteCase.enabled,
         variableOverrides: suiteCase.variableOverrides ?? {},
@@ -609,7 +796,7 @@ function normalizeDraftForSave(draft: SuiteDraft): SaveSuiteInput {
       return {
         id: suiteCase.id,
         caseId: suiteCase.caseId,
-        alias: suiteCase.alias?.trim(),
+        displayName: suiteCase.displayName?.trim(),
         order: suiteCase.order,
         enabled: suiteCase.enabled,
         environmentId: suiteCase.environmentId || undefined,

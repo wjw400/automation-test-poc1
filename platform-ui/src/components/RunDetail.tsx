@@ -75,8 +75,8 @@ export function RunDetail({
             { key: 'runId', label: 'Run ID', children: run.id },
             { key: 'caseId', label: 'Case ID', children: run.caseId },
             { key: 'duration', label: 'Duration', children: `${run.durationMs} ms` },
-            { key: 'environment', label: 'Environment', children: run.environmentId ?? '-' },
-            { key: 'profile', label: 'Profile', children: run.profileId ?? '-' },
+            { key: 'environment', label: 'Environment', children: run.environmentName ?? run.environmentId ?? '-' },
+            { key: 'profile', label: 'Profile', children: run.profileName ?? run.profileId ?? '-' },
             { key: 'startedAt', label: 'Started At', children: run.startedAt },
           ]}
         />

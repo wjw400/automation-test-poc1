@@ -12,14 +12,22 @@ import type {
   SaveEnvironmentInput,
   SaveFolderInput,
   SaveProfileInput,
+  SaveProjectInput,
   SaveSuiteInput,
   StartRunInput,
+  StartSuiteRunInput,
   SuiteRecord,
+  SuiteRunRecord,
 } from '../types/platform'
 
 export const platformApi = {
   async listProjects() {
     const { data } = await apiClient.get<Project[]>('/projects')
+    return data
+  },
+
+  async createProject(input: SaveProjectInput) {
+    const { data } = await apiClient.post<Project>('/projects', input)
     return data
   },
 
@@ -106,6 +114,14 @@ export const platformApi = {
     return data
   },
 
+  async updateEnvironment(projectId: string, environmentId: string, payload: SaveEnvironmentInput) {
+    const { data } = await apiClient.put<Environment>(
+      `/projects/${projectId}/environments/${environmentId}`,
+      payload,
+    )
+    return data
+  },
+
   async listProfiles(projectId: string) {
     const { data } = await apiClient.get<Profile[]>(`/projects/${projectId}/profiles`)
     return data
@@ -114,6 +130,14 @@ export const platformApi = {
   async createProfile(projectId: string, payload: SaveProfileInput) {
     const { data } = await apiClient.post<Profile>(
       `/projects/${projectId}/profiles`,
+      payload,
+    )
+    return data
+  },
+
+  async updateProfile(projectId: string, profileId: string, payload: SaveProfileInput) {
+    const { data } = await apiClient.put<Profile>(
+      `/projects/${projectId}/profiles/${profileId}`,
       payload,
     )
     return data
@@ -131,6 +155,21 @@ export const platformApi = {
 
   async startRun(payload: StartRunInput) {
     const { data } = await apiClient.post<RunRecord>('/runs', payload)
+    return data
+  },
+
+  async listSuiteRuns() {
+    const { data } = await apiClient.get<SuiteRunRecord[]>('/suite-runs')
+    return data
+  },
+
+  async getSuiteRun(suiteRunId: string) {
+    const { data } = await apiClient.get<SuiteRunRecord>(`/suite-runs/${suiteRunId}`)
+    return data
+  },
+
+  async startSuiteRun(payload: StartSuiteRunInput) {
+    const { data } = await apiClient.post<SuiteRunRecord>('/suite-runs', payload)
     return data
   },
 

@@ -11,6 +11,7 @@ import com.example.poc.platform.catalog.PlatformCatalogService.UpsertCaseRequest
 import com.example.poc.platform.catalog.PlatformCatalogService.UpsertEnvironmentRequest;
 import com.example.poc.platform.catalog.PlatformCatalogService.UpsertFolderRequest;
 import com.example.poc.platform.catalog.PlatformCatalogService.UpsertProfileRequest;
+import com.example.poc.platform.catalog.PlatformCatalogService.UpsertProjectRequest;
 import com.example.poc.platform.catalog.PlatformCatalogService.UpsertSuiteRequest;
 import jakarta.validation.Valid;
 import java.util.List;
@@ -37,6 +38,11 @@ public class CatalogController {
         return catalogService.listProjects();
     }
 
+    @PostMapping("/projects")
+    public ProjectRecord createProject(@Valid @RequestBody UpsertProjectRequest request) {
+        return catalogService.createProject(request);
+    }
+
     @GetMapping("/projects/{projectId}")
     public ProjectRecord getProject(@PathVariable("projectId") String projectId) {
         return catalogService.getProject(projectId);
@@ -52,6 +58,20 @@ public class CatalogController {
         return catalogService.saveEnvironment(projectId, request);
     }
 
+    @PutMapping("/projects/{projectId}/environments/{environmentId}")
+    public EnvironmentRecord updateEnvironment(
+            @PathVariable("projectId") String projectId,
+            @PathVariable("environmentId") String environmentId,
+            @Valid @RequestBody UpsertEnvironmentRequest request) {
+        return catalogService.saveEnvironment(projectId, new UpsertEnvironmentRequest(
+                environmentId,
+                request.name(),
+                request.baseUrl(),
+                request.endpoints(),
+                request.variables(),
+                request.status()));
+    }
+
     @GetMapping("/projects/{projectId}/profiles")
     public List<ProfileRecord> listProfiles(@PathVariable("projectId") String projectId) {
         return catalogService.listProfiles(projectId);
@@ -60,6 +80,25 @@ public class CatalogController {
     @PostMapping("/projects/{projectId}/profiles")
     public ProfileRecord createProfile(@PathVariable("projectId") String projectId, @Valid @RequestBody UpsertProfileRequest request) {
         return catalogService.saveProfile(projectId, request);
+    }
+
+    @PutMapping("/projects/{projectId}/profiles/{profileId}")
+    public ProfileRecord updateProfile(
+            @PathVariable("projectId") String projectId,
+            @PathVariable("profileId") String profileId,
+            @Valid @RequestBody UpsertProfileRequest request) {
+        return catalogService.saveProfile(projectId, new UpsertProfileRequest(
+                profileId,
+                request.name(),
+                request.type(),
+                request.senderPublicKey(),
+                request.senderPrivateKey(),
+                request.senderPrivateKeyPassphrase(),
+                request.recipientPublicKey(),
+                request.recipientPrivateKey(),
+                request.recipientPrivateKeyPassphrase(),
+                request.environmentIds(),
+                request.enabled()));
     }
 
     @GetMapping("/projects/{projectId}/folders")
@@ -111,6 +150,8 @@ public class CatalogController {
                 request.code(),
                 request.description(),
                 request.folderId(),
+                request.defaultEnvironmentId(),
+                request.defaultProfileId(),
                 request.tags(),
                 request.dslVersion(),
                 request.content(),

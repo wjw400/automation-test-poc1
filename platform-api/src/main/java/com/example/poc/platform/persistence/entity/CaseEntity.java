@@ -32,6 +32,10 @@ public class CaseEntity {
 
     private String folderId;
 
+    private String defaultEnvironmentId;
+
+    private String defaultProfileId;
+
     @Column(nullable = false, columnDefinition = "text")
     private String tagsJson;
 
@@ -81,6 +85,10 @@ public class CaseEntity {
     public void setFolderPath(String folderPath) { this.folderPath = folderPath; }
     public String getFolderId() { return folderId; }
     public void setFolderId(String folderId) { this.folderId = folderId; }
+    public String getDefaultEnvironmentId() { return defaultEnvironmentId; }
+    public void setDefaultEnvironmentId(String defaultEnvironmentId) { this.defaultEnvironmentId = defaultEnvironmentId; }
+    public String getDefaultProfileId() { return defaultProfileId; }
+    public void setDefaultProfileId(String defaultProfileId) { this.defaultProfileId = defaultProfileId; }
     public String getTagsJson() { return tagsJson; }
     public void setTagsJson(String tagsJson) { this.tagsJson = tagsJson; }
     public String getDslVersion() { return dslVersion; }

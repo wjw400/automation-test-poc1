@@ -14,11 +14,15 @@ import com.example.poc.platform.catalog.PlatformCatalogService;
 import com.example.poc.platform.catalog.PlatformCatalogService.CaseRecord;
 import com.example.poc.platform.catalog.PlatformCatalogService.EnvironmentRecord;
 import com.example.poc.platform.catalog.PlatformCatalogService.ProfileRecord;
+import com.example.poc.platform.catalog.PlatformCatalogService.SuiteCaseRecord;
+import com.example.poc.platform.catalog.PlatformCatalogService.SuiteRecord;
 import com.example.poc.platform.persistence.JsonCodec;
 import com.example.poc.platform.persistence.entity.RunEntity;
 import com.example.poc.platform.persistence.entity.StepRunEntity;
+import com.example.poc.platform.persistence.entity.SuiteRunEntity;
 import com.example.poc.platform.persistence.repo.RunRepository;
 import com.example.poc.platform.persistence.repo.StepRunRepository;
+import com.example.poc.platform.persistence.repo.SuiteRunRepository;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -26,6 +30,7 @@ import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,6 +43,7 @@ public class RunExecutionService {
     private final PlatformCatalogService catalogService;
     private final RunRepository runRepository;
     private final StepRunRepository stepRunRepository;
+    private final SuiteRunRepository suiteRunRepository;
     private final JsonCodec jsonCodec;
     private final ApiCaseRunner apiCaseRunner = new ApiCaseRunner();
     private final ObjectMapper yamlMapper = new ObjectMapper(new YAMLFactory());
@@ -46,10 +52,12 @@ public class RunExecutionService {
             PlatformCatalogService catalogService,
             RunRepository runRepository,
             StepRunRepository stepRunRepository,
+            SuiteRunRepository suiteRunRepository,
             JsonCodec jsonCodec) {
         this.catalogService = catalogService;
         this.runRepository = runRepository;
         this.stepRunRepository = stepRunRepository;
+        this.suiteRunRepository = suiteRunRepository;
         this.jsonCodec = jsonCodec;
     }
 
@@ -67,32 +75,138 @@ public class RunExecutionService {
         return toRunRecord(run, stepRunRepository.findByRunIdOrderByStepIndexAsc(runId));
     }
 
+    @Transactional(readOnly = true)
+    public List<SuiteRunRecord> listSuiteRuns() {
+        return suiteRunRepository.findAllByOrderByStartedAtDesc().stream()
+                .map(this::toSuiteRunRecord)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public SuiteRunRecord getSuiteRun(String suiteRunId) {
+        SuiteRunEntity suiteRun = suiteRunRepository.findById(suiteRunId)
+                .orElseThrow(() -> new NoSuchElementException("Suite run not found: " + suiteRunId));
+        return toSuiteRunRecord(suiteRun);
+    }
+
     @Transactional
     public RunRecord startRun(@Valid StartRunRequest request) {
-        CaseRecord testCase = catalogService.getCase(request.caseId());
-        EnvironmentRecord environment = request.environmentId() == null || request.environmentId().isBlank()
-                ? null
-                : catalogService.getEnvironment(request.environmentId());
-        ProfileRecord profile = request.profileId() == null || request.profileId().isBlank()
-                ? null
-                : catalogService.getProfile(request.profileId());
+        return executeCase(request, Map.of(), null, null, null, null);
+    }
 
-        if (environment != null && !environment.projectId().equals(testCase.projectId())) {
+    @Transactional
+    public SuiteRunRecord startSuiteRun(@Valid StartSuiteRunRequest request) {
+        SuiteRecord suite = catalogService.getSuite(request.suiteId());
+        List<SuiteCaseRecord> enabledCases = suite.cases().stream()
+                .filter(SuiteCaseRecord::enabled)
+                .toList();
+        if (enabledCases.isEmpty()) {
+            throw new IllegalArgumentException("Suite does not contain any enabled scenarios");
+        }
+
+        Instant startedAt = Instant.now();
+        SuiteRunEntity suiteRun = new SuiteRunEntity();
+        suiteRun.setProjectId(suite.projectId());
+        suiteRun.setSuiteId(suite.id());
+        suiteRun.setSuiteName(suite.name());
+        suiteRun.setTriggeredBy(normalizeTriggeredBy(request.triggeredBy()));
+        suiteRun.setStatus("RUNNING");
+        suiteRun.setStartedAt(startedAt);
+        suiteRun.setFinishedAt(startedAt);
+        suiteRun.setDurationMs(0);
+        suiteRun = suiteRunRepository.save(suiteRun);
+
+        List<RunRecord> childRuns = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
+        for (SuiteCaseRecord suiteCase : enabledCases) {
+            try {
+                RunRecord childRun = executeCase(
+                        new StartRunRequest(
+                                suiteCase.caseId(),
+                                suiteCase.environmentId(),
+                                suiteCase.profileId(),
+                                suiteRun.getTriggeredBy()),
+                        suiteCase.variableOverrides(),
+                        suiteRun.getId(),
+                        suiteCase.id(),
+                        suiteCase.displayName(),
+                        suiteCase.order());
+                childRuns.add(childRun);
+                if (!"PASSED".equalsIgnoreCase(childRun.status())
+                        && childRun.errorMessage() != null
+                        && !childRun.errorMessage().isBlank()) {
+                    errors.add((suiteCase.displayName() == null || suiteCase.displayName().isBlank()
+                            ? suiteCase.caseName()
+                            : suiteCase.displayName()) + ": " + childRun.errorMessage());
+                }
+            } catch (RuntimeException error) {
+                RunRecord failedRun = saveFailedSuiteCaseRun(suite, suiteRun, suiteCase, error);
+                childRuns.add(failedRun);
+                errors.add((suiteCase.displayName() == null || suiteCase.displayName().isBlank()
+                        ? suiteCase.caseName()
+                        : suiteCase.displayName()) + ": " + error.getMessage());
+            }
+        }
+
+        Instant finishedAt = Instant.now();
+        boolean passed = childRuns.stream().allMatch(run -> "PASSED".equalsIgnoreCase(run.status()));
+        suiteRun.setStatus(passed ? "PASSED" : "FAILED");
+        suiteRun.setFinishedAt(finishedAt);
+        suiteRun.setDurationMs(Math.max(0, finishedAt.toEpochMilli() - startedAt.toEpochMilli()));
+        suiteRun.setErrorMessage(errors.isEmpty() ? null : String.join("\n", errors));
+        suiteRun = suiteRunRepository.save(suiteRun);
+        return toSuiteRunRecord(suiteRun, childRuns);
+    }
+
+    private RunRecord executeCase(
+            StartRunRequest request,
+            Map<String, Object> variableOverrides,
+            String suiteRunId,
+            String suiteCaseId,
+            String suiteDisplayName,
+            Integer suiteCaseOrder) {
+        CaseRecord testCase = catalogService.getCase(request.caseId());
+        String environmentId = firstNonBlank(request.environmentId(), testCase.defaultEnvironmentId());
+        String profileId = firstNonBlank(request.profileId(), testCase.defaultProfileId());
+        if (environmentId == null || profileId == null) {
+            throw new IllegalArgumentException(
+                    "Scenario does not have a complete default environment and profile");
+        }
+        EnvironmentRecord environment = catalogService.getEnvironment(environmentId);
+        ProfileRecord profile = catalogService.getProfile(profileId);
+
+        if (!environment.projectId().equals(testCase.projectId())) {
             throw new IllegalArgumentException("Environment does not belong to the same project as the case");
         }
-        if (profile != null && !profile.projectId().equals(testCase.projectId())) {
+        if (!profile.projectId().equals(testCase.projectId())) {
             throw new IllegalArgumentException("Profile does not belong to the same project as the case");
         }
+        if (!"ACTIVE".equalsIgnoreCase(environment.status())) {
+            throw new IllegalArgumentException("Environment is inactive: " + environment.name());
+        }
+        if (!profile.enabled()) {
+            throw new IllegalArgumentException("Profile is disabled: " + profile.name());
+        }
+        if (!profile.environmentIds().contains(environment.id())) {
+            throw new IllegalArgumentException(
+                    "Profile " + profile.name() + " is not available in environment " + environment.name());
+        }
 
-        String executableContent = prepareExecutableCase(testCase, environment, profile);
+        String executableContent = prepareExecutableCase(testCase, environment, profile, variableOverrides);
         ApiCaseExecutionReport report = apiCaseRunner.executeInline(testCase.code() + ".yaml", executableContent);
 
         RunEntity runEntity = new RunEntity();
         runEntity.setProjectId(testCase.projectId());
         runEntity.setCaseId(testCase.id());
-        runEntity.setEnvironmentId(environment == null ? null : environment.id());
-        runEntity.setProfileId(profile == null ? null : profile.id());
-        runEntity.setTriggeredBy(request.triggeredBy() == null || request.triggeredBy().isBlank() ? "manual" : request.triggeredBy());
+        runEntity.setSuiteRunId(suiteRunId);
+        runEntity.setSuiteCaseId(suiteCaseId);
+        runEntity.setSuiteDisplayName(suiteDisplayName);
+        runEntity.setSuiteCaseOrder(suiteCaseOrder);
+        runEntity.setEnvironmentId(environment.id());
+        runEntity.setEnvironmentName(environment.name());
+        runEntity.setProfileId(profile.id());
+        runEntity.setProfileName(profile.name());
+        runEntity.setTriggeredBy(normalizeTriggeredBy(request.triggeredBy()));
         runEntity.setStatus(report.getStatus());
         runEntity.setStartedAt(report.getStartedAt());
         runEntity.setFinishedAt(report.getFinishedAt());
@@ -108,7 +222,11 @@ public class RunExecutionService {
         return toRunRecord(runEntity, stepEntities);
     }
 
-    private String prepareExecutableCase(CaseRecord managedCase, EnvironmentRecord environment, ProfileRecord profile) {
+    private String prepareExecutableCase(
+            CaseRecord managedCase,
+            EnvironmentRecord environment,
+            ProfileRecord profile,
+            Map<String, Object> variableOverrides) {
         try {
             ApiTestCase testCase = yamlMapper.readValue(managedCase.content(), ApiTestCase.class);
 
@@ -116,7 +234,10 @@ public class RunExecutionService {
             if (environment != null) {
                 variables.putAll(environment.variables());
                 variables.put("baseUrl", environment.baseUrl());
+                environment.endpoints().forEach(
+                        (apiSpecId, baseUrl) -> variables.put(apiSpecId + ".baseUrl", baseUrl));
             }
+            variables.putAll(variableOverrides == null ? Map.of() : variableOverrides);
             testCase.setVariables(variables);
 
             if (profile != null) {
@@ -134,7 +255,9 @@ public class RunExecutionService {
 
             return yamlMapper.writeValueAsString(testCase);
         } catch (JsonProcessingException e) {
-            throw new IllegalArgumentException("Failed to prepare executable case " + managedCase.code(), e);
+            throw new IllegalArgumentException(
+                    "Failed to prepare executable case " + managedCase.code() + ": " + e.getOriginalMessage(),
+                    e);
         }
     }
 
@@ -147,6 +270,43 @@ public class RunExecutionService {
         cryptoProfile.setRecipientPrivateKey(profile.recipientPrivateKey());
         cryptoProfile.setRecipientPrivateKeyPassphrase(profile.recipientPrivateKeyPassphrase());
         return cryptoProfile;
+    }
+
+    private String firstNonBlank(String preferred, String fallback) {
+        if (preferred != null && !preferred.isBlank()) {
+            return preferred;
+        }
+        return fallback == null || fallback.isBlank() ? null : fallback;
+    }
+
+    private String normalizeTriggeredBy(String triggeredBy) {
+        return triggeredBy == null || triggeredBy.isBlank() ? "manual" : triggeredBy;
+    }
+
+    private RunRecord saveFailedSuiteCaseRun(
+            SuiteRecord suite,
+            SuiteRunEntity suiteRun,
+            SuiteCaseRecord suiteCase,
+            RuntimeException error) {
+        CaseRecord testCase = catalogService.getCase(suiteCase.caseId());
+        Instant now = Instant.now();
+        RunEntity run = new RunEntity();
+        run.setProjectId(suite.projectId());
+        run.setCaseId(suiteCase.caseId());
+        run.setSuiteRunId(suiteRun.getId());
+        run.setSuiteCaseId(suiteCase.id());
+        run.setSuiteDisplayName(suiteCase.displayName());
+        run.setSuiteCaseOrder(suiteCase.order());
+        run.setEnvironmentId(firstNonBlank(suiteCase.environmentId(), testCase.defaultEnvironmentId()));
+        run.setProfileId(firstNonBlank(suiteCase.profileId(), testCase.defaultProfileId()));
+        run.setTriggeredBy(suiteRun.getTriggeredBy());
+        run.setStatus("FAILED");
+        run.setStartedAt(now);
+        run.setFinishedAt(now);
+        run.setDurationMs(0);
+        run.setErrorMessage(error.getMessage());
+        run = runRepository.save(run);
+        return toRunRecord(run, List.of());
     }
 
     private StepRunEntity toStepRunEntity(String runId, ApiStepExecutionReport step) {
@@ -171,8 +331,14 @@ public class RunExecutionService {
                 runEntity.getId(),
                 runEntity.getProjectId(),
                 runEntity.getCaseId(),
+                runEntity.getSuiteRunId(),
+                runEntity.getSuiteCaseId(),
+                runEntity.getSuiteDisplayName(),
+                runEntity.getSuiteCaseOrder(),
                 runEntity.getEnvironmentId(),
+                runEntity.getEnvironmentName(),
                 runEntity.getProfileId(),
+                runEntity.getProfileName(),
                 runEntity.getTriggeredBy(),
                 runEntity.getStatus(),
                 runEntity.getStartedAt(),
@@ -180,6 +346,28 @@ public class RunExecutionService {
                 runEntity.getDurationMs(),
                 runEntity.getErrorMessage(),
                 stepEntities.stream().map(this::toStepRecord).toList());
+    }
+
+    private SuiteRunRecord toSuiteRunRecord(SuiteRunEntity entity) {
+        List<RunRecord> childRuns = runRepository.findBySuiteRunIdOrderBySuiteCaseOrderAsc(entity.getId()).stream()
+                .map(run -> toRunRecord(run, stepRunRepository.findByRunIdOrderByStepIndexAsc(run.getId())))
+                .toList();
+        return toSuiteRunRecord(entity, childRuns);
+    }
+
+    private SuiteRunRecord toSuiteRunRecord(SuiteRunEntity entity, List<RunRecord> childRuns) {
+        return new SuiteRunRecord(
+                entity.getId(),
+                entity.getProjectId(),
+                entity.getSuiteId(),
+                entity.getSuiteName(),
+                entity.getTriggeredBy(),
+                entity.getStatus(),
+                entity.getStartedAt(),
+                entity.getFinishedAt(),
+                entity.getDurationMs(),
+                entity.getErrorMessage(),
+                childRuns);
     }
 
     private StepRecord toStepRecord(StepRunEntity entity) {
@@ -204,12 +392,23 @@ public class RunExecutionService {
             String triggeredBy) {
     }
 
+    public record StartSuiteRunRequest(
+            @NotBlank String suiteId,
+            String triggeredBy) {
+    }
+
     public record RunRecord(
             String id,
             String projectId,
             String caseId,
+            String suiteRunId,
+            String suiteCaseId,
+            String suiteDisplayName,
+            Integer suiteCaseOrder,
             String environmentId,
+            String environmentName,
             String profileId,
+            String profileName,
             String triggeredBy,
             String status,
             Instant startedAt,
@@ -217,6 +416,20 @@ public class RunExecutionService {
             long durationMs,
             String errorMessage,
             List<StepRecord> steps) {
+    }
+
+    public record SuiteRunRecord(
+            String id,
+            String projectId,
+            String suiteId,
+            String suiteName,
+            String triggeredBy,
+            String status,
+            Instant startedAt,
+            Instant finishedAt,
+            long durationMs,
+            String errorMessage,
+            List<RunRecord> runs) {
     }
 
     public record StepRecord(

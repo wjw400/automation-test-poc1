@@ -21,10 +21,28 @@ public class RunEntity {
     private String caseId;
 
     @Column
+    private String suiteRunId;
+
+    @Column
+    private String suiteCaseId;
+
+    @Column(length = 200)
+    private String suiteDisplayName;
+
+    @Column
+    private Integer suiteCaseOrder;
+
+    @Column
     private String environmentId;
+
+    @Column(length = 200)
+    private String environmentName;
 
     @Column
     private String profileId;
+
+    @Column(length = 200)
+    private String profileName;
 
     @Column(nullable = false, length = 100)
     private String triggeredBy;
@@ -57,10 +75,22 @@ public class RunEntity {
     public void setProjectId(String projectId) { this.projectId = projectId; }
     public String getCaseId() { return caseId; }
     public void setCaseId(String caseId) { this.caseId = caseId; }
+    public String getSuiteRunId() { return suiteRunId; }
+    public void setSuiteRunId(String suiteRunId) { this.suiteRunId = suiteRunId; }
+    public String getSuiteCaseId() { return suiteCaseId; }
+    public void setSuiteCaseId(String suiteCaseId) { this.suiteCaseId = suiteCaseId; }
+    public String getSuiteDisplayName() { return suiteDisplayName; }
+    public void setSuiteDisplayName(String suiteDisplayName) { this.suiteDisplayName = suiteDisplayName; }
+    public Integer getSuiteCaseOrder() { return suiteCaseOrder; }
+    public void setSuiteCaseOrder(Integer suiteCaseOrder) { this.suiteCaseOrder = suiteCaseOrder; }
     public String getEnvironmentId() { return environmentId; }
     public void setEnvironmentId(String environmentId) { this.environmentId = environmentId; }
+    public String getEnvironmentName() { return environmentName; }
+    public void setEnvironmentName(String environmentName) { this.environmentName = environmentName; }
     public String getProfileId() { return profileId; }
     public void setProfileId(String profileId) { this.profileId = profileId; }
+    public String getProfileName() { return profileName; }
+    public void setProfileName(String profileName) { this.profileName = profileName; }
     public String getTriggeredBy() { return triggeredBy; }
     public void setTriggeredBy(String triggeredBy) { this.triggeredBy = triggeredBy; }
     public String getStatus() { return status; }

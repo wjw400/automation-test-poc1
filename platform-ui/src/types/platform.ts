@@ -8,11 +8,17 @@ export type Project = {
   updatedAt: string
 }
 
+export type SaveProjectInput = {
+  name: string
+  description?: string
+}
+
 export type Environment = {
   id: string
   projectId: string
   name: string
   baseUrl: string
+  endpoints: Record<string, string>
   variables: Record<string, string>
   status: string
 }
@@ -28,6 +34,7 @@ export type Profile = {
   recipientPublicKey?: string | null
   recipientPrivateKey?: string | null
   recipientPrivateKeyPassphrase?: string | null
+  environmentIds: string[]
   enabled: boolean
 }
 
@@ -38,6 +45,8 @@ export type CaseRecord = {
   code: string
   description: string
   folderId?: string | null
+  defaultEnvironmentId?: string | null
+  defaultProfileId?: string | null
   tags: string[]
   dslVersion: string
   content: string
@@ -61,7 +70,7 @@ export type SuiteCaseRecord = {
   caseId: string
   caseName: string
   caseCode: string
-  alias?: string | null
+  displayName?: string | null
   order: number
   enabled: boolean
   variableOverrides: Record<string, unknown>
@@ -132,8 +141,14 @@ export type RunRecord = {
   id: string
   projectId: string
   caseId: string
+  suiteRunId?: string | null
+  suiteCaseId?: string | null
+  suiteDisplayName?: string | null
+  suiteCaseOrder?: number | null
   environmentId?: string | null
+  environmentName?: string | null
   profileId?: string | null
+  profileName?: string | null
   triggeredBy: string
   status: string
   startedAt: string
@@ -143,11 +158,27 @@ export type RunRecord = {
   steps: StepRun[]
 }
 
+export type SuiteRunRecord = {
+  id: string
+  projectId: string
+  suiteId: string
+  suiteName: string
+  triggeredBy: string
+  status: string
+  startedAt: string
+  finishedAt: string
+  durationMs: number
+  errorMessage?: string | null
+  runs: RunRecord[]
+}
+
 export type SaveCaseInput = {
   name: string
   code: string
   description: string
   folderId?: string
+  defaultEnvironmentId?: string
+  defaultProfileId?: string
   tags: string[]
   dslVersion: string
   content: string
@@ -162,7 +193,7 @@ export type SaveFolderInput = {
 export type SaveSuiteCaseInput = {
   id?: string
   caseId: string
-  alias?: string
+  displayName?: string
   order: number
   enabled: boolean
   variableOverrides: Record<string, unknown>
@@ -180,6 +211,7 @@ export type SaveSuiteInput = {
 export type SaveEnvironmentInput = {
   name: string
   baseUrl: string
+  endpoints: Record<string, string>
   variables: Record<string, string>
   status: string
 }
@@ -193,6 +225,7 @@ export type SaveProfileInput = {
   recipientPublicKey: string
   recipientPrivateKey: string
   recipientPrivateKeyPassphrase: string
+  environmentIds: string[]
   enabled: boolean
 }
 
@@ -200,6 +233,11 @@ export type StartRunInput = {
   caseId: string
   environmentId?: string
   profileId?: string
+  triggeredBy?: string
+}
+
+export type StartSuiteRunInput = {
+  suiteId: string
   triggeredBy?: string
 }
 

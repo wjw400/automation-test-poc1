@@ -1,17 +1,23 @@
 import { Alert, App, Button, Drawer, Form, Input, Select, Switch, Table, Tabs, Typography } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { EditOutlined, PlusOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { platformApi } from '../api/platformApi'
 import { StatusPill } from '../components/StatusPill'
-import type { SaveEnvironmentInput, SaveProfileInput } from '../types/platform'
+import type {
+  Environment,
+  Profile,
+  SaveEnvironmentInput,
+  SaveProfileInput,
+} from '../types/platform'
 
 const { Text } = Typography
 
 const emptyEnvironment: SaveEnvironmentInput = {
   name: '',
   baseUrl: '',
+  endpoints: {},
   variables: {},
   status: 'ACTIVE',
 }
@@ -25,6 +31,7 @@ const emptyProfile: SaveProfileInput = {
   recipientPublicKey: '',
   recipientPrivateKey: '',
   recipientPrivateKeyPassphrase: '',
+  environmentIds: [],
   enabled: true,
 }
 
@@ -34,6 +41,8 @@ export function ConfigPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [environmentDraft, setEnvironmentDraft] = useState<SaveEnvironmentInput>(emptyEnvironment)
   const [profileDraft, setProfileDraft] = useState<SaveProfileInput>(emptyProfile)
+  const [editingEnvironmentId, setEditingEnvironmentId] = useState<string>()
+  const [editingProfileId, setEditingProfileId] = useState<string>()
   const [showEnvironmentDrawer, setShowEnvironmentDrawer] = useState(false)
   const [showProfileDrawer, setShowProfileDrawer] = useState(false)
 
@@ -43,7 +52,10 @@ export function ConfigPage() {
   })
 
   const selectedProjectId = searchParams.get('projectId') ?? projectsQuery.data?.[0]?.id
-  const activeTab = searchParams.get('tab') === 'profiles' ? 'profiles' : 'environments'
+  const requestedTab = searchParams.get('tab')
+  const activeTab = requestedTab === 'profiles'
+    ? requestedTab
+    : 'environments'
 
   const updateSearchParams = (nextValues: Record<string, string>) => {
     const next = new URLSearchParams(searchParams)
@@ -63,25 +75,70 @@ export function ConfigPage() {
     enabled: Boolean(selectedProjectId),
   })
 
-  const createEnvironmentMutation = useMutation({
-    mutationFn: () => platformApi.createEnvironment(selectedProjectId!, environmentDraft),
+  const apiSpecsQuery = useQuery({
+    queryKey: ['api-specs', selectedProjectId],
+    queryFn: () => platformApi.listApiSpecs(selectedProjectId!),
+    enabled: Boolean(selectedProjectId),
+  })
+
+  const saveEnvironmentMutation = useMutation({
+    mutationFn: () => editingEnvironmentId
+      ? platformApi.updateEnvironment(selectedProjectId!, editingEnvironmentId, environmentDraft)
+      : platformApi.createEnvironment(selectedProjectId!, environmentDraft),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['environments', selectedProjectId] })
       setShowEnvironmentDrawer(false)
+      setEditingEnvironmentId(undefined)
       setEnvironmentDraft(emptyEnvironment)
-      void message.success('Environment created')
+      void message.success(editingEnvironmentId ? 'Environment updated' : 'Environment created')
     },
   })
 
-  const createProfileMutation = useMutation({
-    mutationFn: () => platformApi.createProfile(selectedProjectId!, profileDraft),
+  const saveProfileMutation = useMutation({
+    mutationFn: () => editingProfileId
+      ? platformApi.updateProfile(selectedProjectId!, editingProfileId, profileDraft)
+      : platformApi.createProfile(selectedProjectId!, profileDraft),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['profiles', selectedProjectId] })
       setShowProfileDrawer(false)
+      setEditingProfileId(undefined)
       setProfileDraft(emptyProfile)
-      void message.success('Profile created')
+      void message.success(editingProfileId ? 'Profile updated' : 'Profile created')
     },
   })
+
+  const openEnvironmentDrawer = (environment?: Environment) => {
+    setEditingEnvironmentId(environment?.id)
+    setEnvironmentDraft(environment
+      ? {
+          name: environment.name,
+          baseUrl: environment.baseUrl,
+          endpoints: environment.endpoints ?? {},
+          variables: environment.variables,
+          status: environment.status,
+        }
+      : emptyEnvironment)
+    setShowEnvironmentDrawer(true)
+  }
+
+  const openProfileDrawer = (profile?: Profile) => {
+    setEditingProfileId(profile?.id)
+    setProfileDraft(profile
+      ? {
+          name: profile.name,
+          type: profile.type,
+          senderPublicKey: profile.senderPublicKey ?? '',
+          senderPrivateKey: profile.senderPrivateKey ?? '',
+          senderPrivateKeyPassphrase: profile.senderPrivateKeyPassphrase ?? '',
+          recipientPublicKey: profile.recipientPublicKey ?? '',
+          recipientPrivateKey: profile.recipientPrivateKey ?? '',
+          recipientPrivateKeyPassphrase: profile.recipientPrivateKeyPassphrase ?? '',
+          environmentIds: profile.environmentIds,
+          enabled: profile.enabled,
+        }
+      : emptyProfile)
+    setShowProfileDrawer(true)
+  }
 
   const variablePreview = useMemo(
     () => JSON.stringify(environmentDraft.variables, null, 2),
@@ -93,7 +150,7 @@ export function ConfigPage() {
       <section className="hero-band">
         <div>
           <h1>Configuration</h1>
-          <p>Bind environments and PGP profiles once, then reuse them across cases and runs.</p>
+          <p>Manage deployment environments, service endpoints, and reusable identities.</p>
         </div>
         <Select
           className="project-picker"
@@ -120,12 +177,12 @@ export function ConfigPage() {
           <div className="panel-title-row compact">
             <div>
               <h2 className="panel-title">Environments</h2>
-              <Text type="secondary">Base URLs and runtime variables per target.</Text>
+              <Text type="secondary">Service endpoints and runtime variables for each deployment.</Text>
             </div>
             <Button
               type="primary"
               icon={<PlusOutlined />}
-              onClick={() => setShowEnvironmentDrawer(true)}
+              onClick={() => openEnvironmentDrawer()}
               disabled={!selectedProjectId}
             >
               New Environment
@@ -141,7 +198,14 @@ export function ConfigPage() {
             pagination={false}
             columns={[
               { title: 'Name', dataIndex: 'name' },
-              { title: 'Base URL', dataIndex: 'baseUrl' },
+              { title: 'Default Base URL', dataIndex: 'baseUrl' },
+              {
+                title: 'API Endpoints',
+                dataIndex: 'endpoints',
+                render: (value: Record<string, string>) => (
+                  <Text type="secondary">{formatEndpointCount(value)}</Text>
+                ),
+              },
               {
                 title: 'Variables',
                 dataIndex: 'variables',
@@ -153,6 +217,20 @@ export function ConfigPage() {
                 title: 'Status',
                 dataIndex: 'status',
                 render: (status: string) => <StatusPill status={status} />,
+              },
+              {
+                title: '',
+                key: 'actions',
+                width: 56,
+                render: (_value: unknown, environment: Environment) => (
+                  <Button
+                    type="text"
+                    icon={<EditOutlined />}
+                    aria-label={`Edit ${environment.name}`}
+                    title="Edit environment"
+                    onClick={() => openEnvironmentDrawer(environment)}
+                  />
+                ),
               },
             ]}
             dataSource={environmentsQuery.data ?? []}
@@ -168,12 +246,12 @@ export function ConfigPage() {
           <div className="panel-title-row compact">
             <div>
               <h2 className="panel-title">Profiles</h2>
-              <Text type="secondary">Execution-time security material and protocol bindings.</Text>
+              <Text type="secondary">Reusable identities and the environments where they are valid.</Text>
             </div>
             <Button
               type="primary"
               icon={<PlusOutlined />}
-              onClick={() => setShowProfileDrawer(true)}
+              onClick={() => openProfileDrawer()}
               disabled={!selectedProjectId}
             >
               New Profile
@@ -191,9 +269,32 @@ export function ConfigPage() {
               { title: 'Name', dataIndex: 'name' },
               { title: 'Type', dataIndex: 'type' },
               {
+                title: 'Available Environments',
+                dataIndex: 'environmentIds',
+                render: (environmentIds: string[]) => (
+                  <Text type="secondary">
+                    {formatEnvironmentNames(environmentIds, environmentsQuery.data ?? [])}
+                  </Text>
+                ),
+              },
+              {
                 title: 'Enabled',
                 dataIndex: 'enabled',
                 render: (value: boolean) => <StatusPill status={value ? 'ACTIVE' : 'INACTIVE'} />,
+              },
+              {
+                title: '',
+                key: 'actions',
+                width: 56,
+                render: (_value: unknown, profile: Profile) => (
+                  <Button
+                    type="text"
+                    icon={<EditOutlined />}
+                    aria-label={`Edit ${profile.name}`}
+                    title="Edit profile"
+                    onClick={() => openProfileDrawer(profile)}
+                  />
+                ),
               },
             ]}
             dataSource={profilesQuery.data ?? []}
@@ -206,14 +307,19 @@ export function ConfigPage() {
 
       <Drawer
         open={showEnvironmentDrawer}
-        width={520}
-        title="New Environment"
-        onClose={() => setShowEnvironmentDrawer(false)}
+        size="large"
+        title={editingEnvironmentId ? 'Edit Environment' : 'New Environment'}
+        onClose={() => {
+          setShowEnvironmentDrawer(false)
+          setEditingEnvironmentId(undefined)
+          setEnvironmentDraft(emptyEnvironment)
+        }}
         extra={
           <Button
             type="primary"
-            loading={createEnvironmentMutation.isPending}
-            onClick={() => void createEnvironmentMutation.mutateAsync()}
+            loading={saveEnvironmentMutation.isPending}
+            disabled={!environmentDraft.name.trim() || !environmentDraft.baseUrl.trim()}
+            onClick={() => void saveEnvironmentMutation.mutateAsync()}
           >
             Save
           </Button>
@@ -228,13 +334,49 @@ export function ConfigPage() {
               }
             />
           </Form.Item>
-          <Form.Item label="Base URL">
+          <Form.Item
+            label="Default Base URL"
+            extra="Used when an API Spec does not have an explicit endpoint binding."
+          >
             <Input
               value={environmentDraft.baseUrl}
               onChange={(event) =>
                 setEnvironmentDraft({ ...environmentDraft, baseUrl: event.target.value })
               }
             />
+          </Form.Item>
+          <Form.Item
+            label="API Endpoint Bindings"
+            extra="Each operation resolves its base URL from the API Spec it belongs to."
+          >
+            <div className="endpoint-binding-list">
+              {(apiSpecsQuery.data ?? []).map((apiSpec) => (
+                <div className="endpoint-binding-row" key={apiSpec.id}>
+                  <div className="endpoint-binding-name">
+                    <strong>{apiSpec.title || apiSpec.name}</strong>
+                    <Text type="secondary">{apiSpec.name}</Text>
+                  </div>
+                  <Input
+                    aria-label={`${apiSpec.name} base URL`}
+                    placeholder={environmentDraft.baseUrl || 'https://api.example.com'}
+                    value={environmentDraft.endpoints[apiSpec.id] ?? ''}
+                    onChange={(event) => {
+                      const endpoints = { ...environmentDraft.endpoints }
+                      const value = event.target.value
+                      if (value) {
+                        endpoints[apiSpec.id] = value
+                      } else {
+                        delete endpoints[apiSpec.id]
+                      }
+                      setEnvironmentDraft({ ...environmentDraft, endpoints })
+                    }}
+                  />
+                </div>
+              ))}
+              {!apiSpecsQuery.data?.length ? (
+                <Text type="secondary">Import an API Spec to configure service-specific endpoints.</Text>
+              ) : null}
+            </div>
           </Form.Item>
           <Form.Item label="Status">
             <Select
@@ -268,14 +410,19 @@ export function ConfigPage() {
 
       <Drawer
         open={showProfileDrawer}
-        width={620}
-        title="New Profile"
-        onClose={() => setShowProfileDrawer(false)}
+        size="large"
+        title={editingProfileId ? 'Edit Profile' : 'New Profile'}
+        onClose={() => {
+          setShowProfileDrawer(false)
+          setEditingProfileId(undefined)
+          setProfileDraft(emptyProfile)
+        }}
         extra={
           <Button
             type="primary"
-            loading={createProfileMutation.isPending}
-            onClick={() => void createProfileMutation.mutateAsync()}
+            loading={saveProfileMutation.isPending}
+            disabled={!profileDraft.name.trim() || profileDraft.environmentIds.length === 0}
+            onClick={() => void saveProfileMutation.mutateAsync()}
           >
             Save
           </Button>
@@ -293,6 +440,27 @@ export function ConfigPage() {
               value={profileDraft.type}
               options={[{ value: 'PGP', label: 'PGP' }]}
               onChange={(value) => setProfileDraft({ ...profileDraft, type: value })}
+            />
+          </Form.Item>
+          <Form.Item
+            label="Available Environments"
+            required
+            extra="The profile can only be selected when the run uses one of these environments."
+          >
+            <Select
+              mode="multiple"
+              aria-label="Available environments"
+              value={profileDraft.environmentIds}
+              placeholder="Select one or more environments"
+              options={(environmentsQuery.data ?? []).map((environment) => ({
+                label: environment.name,
+                value: environment.id,
+                disabled: environment.status !== 'ACTIVE',
+              }))}
+              onChange={(environmentIds) => setProfileDraft({
+                ...profileDraft,
+                environmentIds,
+              })}
             />
           </Form.Item>
           <Form.Item label="Enabled">
@@ -361,6 +529,7 @@ export function ConfigPage() {
           </Form.Item>
         </Form>
       </Drawer>
+
     </div>
   )
 }
@@ -368,4 +537,14 @@ export function ConfigPage() {
 function formatVariableCount(value?: Record<string, string>) {
   const count = Object.keys(value ?? {}).length
   return count === 1 ? '1 variable' : `${count} variables`
+}
+
+function formatEndpointCount(value?: Record<string, string>) {
+  const count = Object.keys(value ?? {}).length
+  return count === 1 ? '1 binding' : `${count} bindings`
+}
+
+function formatEnvironmentNames(environmentIds: string[], environments: Environment[]) {
+  const namesById = new Map(environments.map((environment) => [environment.id, environment.name]))
+  return environmentIds.map((id) => namesById.get(id) ?? id).join(', ')
 }

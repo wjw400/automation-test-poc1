@@ -19,8 +19,8 @@ public class SuiteCaseEntity {
     @Column(nullable = false)
     private String caseId;
 
-    @Column(length = 200)
-    private String alias;
+    @Column(name = "display_name", length = 200)
+    private String displayName;
 
     @Column(nullable = false)
     private int caseOrder;
@@ -48,8 +48,8 @@ public class SuiteCaseEntity {
     public void setSuiteId(String suiteId) { this.suiteId = suiteId; }
     public String getCaseId() { return caseId; }
     public void setCaseId(String caseId) { this.caseId = caseId; }
-    public String getAlias() { return alias; }
-    public void setAlias(String alias) { this.alias = alias; }
+    public String getDisplayName() { return displayName; }
+    public void setDisplayName(String displayName) { this.displayName = displayName; }
     public int getCaseOrder() { return caseOrder; }
     public void setCaseOrder(int caseOrder) { this.caseOrder = caseOrder; }
     public boolean isEnabled() { return enabled; }

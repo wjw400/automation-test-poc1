@@ -5,7 +5,6 @@ import {
   Dropdown,
   Input,
   Modal,
-  Popover,
   Select,
   Space,
   Typography,
@@ -48,6 +47,8 @@ const emptyDraft: SaveCaseInput = {
   code: '',
   description: '',
   folderId: undefined,
+  defaultEnvironmentId: undefined,
+  defaultProfileId: undefined,
   tags: [],
   dslVersion: 'v1',
   content: stringifyDsl({
@@ -62,14 +63,33 @@ const emptyDraft: SaveCaseInput = {
   status: 'ACTIVE',
 }
 
-export function CasesPage() {
+type CasesPageProps = {
+  embedded?: boolean
+  projectId?: string
+  caseId?: string
+  onDirtyChange?: (dirty: boolean) => void
+  onTitleChange?: (title: string) => void
+  onSaveReady?: (save?: () => Promise<void>) => void
+  onDeleted?: () => void
+}
+
+export function CasesPage({
+  embedded = false,
+  projectId,
+  caseId,
+  onDirtyChange,
+  onTitleChange,
+  onSaveReady,
+  onDeleted,
+}: CasesPageProps = {}) {
   const { message, modal } = App.useApp()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const [draft, setDraft] = useState<SaveCaseInput>(emptyDraft)
   const [draftCaseId, setDraftCaseId] = useState<string>()
-  const [environmentId, setEnvironmentId] = useState<string>()
-  const [profileId, setProfileId] = useState<string>()
+  const [batchEnvironmentIds, setBatchEnvironmentIds] = useState<string[]>([])
+  const [batchProfileId, setBatchProfileId] = useState<string>()
+  const [isBatchRunModalOpen, setIsBatchRunModalOpen] = useState(false)
   const [isCreating, setIsCreating] = useState(false)
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false)
   const [createCaseName, setCreateCaseName] = useState('')
@@ -91,6 +111,8 @@ export function CasesPage() {
   const [isResultsCollapsed, setIsResultsCollapsed] = useState(true)
   const [resultsPanelHeight, setResultsPanelHeight] = useState(300)
   const [runResultOverride, setRunResultOverride] = useState<RunRecord>()
+  const [variablesJsonError, setVariablesJsonError] = useState<string | null>(null)
+  const [embeddedStepIndex, setEmbeddedStepIndex] = useState<number>()
   const titleBeforeEditRef = useRef('')
   const isCancellingTitleEditRef = useRef(false)
 
@@ -99,9 +121,11 @@ export function CasesPage() {
     queryFn: platformApi.listProjects,
   })
 
-  const selectedProjectId = searchParams.get('projectId') ?? projectsQuery.data?.[0]?.id
-  const selectedCaseId = searchParams.get('caseId')
-  const selectedStepParam = searchParams.get('step')
+  const selectedProjectId = projectId ?? searchParams.get('projectId') ?? projectsQuery.data?.[0]?.id
+  const selectedCaseId = caseId ?? searchParams.get('caseId')
+  const selectedStepParam = embedded
+    ? embeddedStepIndex == null ? null : String(embeddedStepIndex)
+    : searchParams.get('step')
 
   const casesQuery = useQuery({
     queryKey: ['cases', selectedProjectId],
@@ -162,14 +186,23 @@ export function CasesPage() {
     })
   }, [caseFilter, casesQuery.data, folderNamesById])
 
-  const selectedEnvironment = useMemo(
-    () => (environmentsQuery.data ?? []).find((environment) => environment.id === environmentId),
-    [environmentId, environmentsQuery.data],
+  const activeEnvironments = useMemo(
+    () => (environmentsQuery.data ?? []).filter((environment) => environment.status === 'ACTIVE'),
+    [environmentsQuery.data],
   )
-
+  const selectedEnvironment = useMemo(
+    () => activeEnvironments.find((environment) => environment.id === draft.defaultEnvironmentId),
+    [activeEnvironments, draft.defaultEnvironmentId],
+  )
+  const compatibleProfiles = useMemo(
+    () => (profilesQuery.data ?? []).filter((profile) => (
+      profile.enabled && selectedEnvironment && profile.environmentIds.includes(selectedEnvironment.id)
+    )),
+    [profilesQuery.data, selectedEnvironment],
+  )
   const selectedProfile = useMemo(
-    () => (profilesQuery.data ?? []).find((profile) => profile.id === profileId),
-    [profileId, profilesQuery.data],
+    () => compatibleProfiles.find((profile) => profile.id === draft.defaultProfileId),
+    [compatibleProfiles, draft.defaultProfileId],
   )
 
   const selectedProject = useMemo(
@@ -190,6 +223,10 @@ export function CasesPage() {
       setRunResultOverride(undefined)
     }
   }, [runResultOverride, selectedCase?.id])
+
+  useEffect(() => {
+    setVariablesJsonError(null)
+  }, [isCreating, selectedCase?.id])
 
   const parsedDraft = useMemo(() => parseDsl(draft.content), [draft.content])
   const draftSteps = Array.isArray(parsedDraft.data?.steps) ? parsedDraft.data.steps : []
@@ -230,6 +267,16 @@ export function CasesPage() {
     () => isCreating || (selectedCase ? isCaseDraftDirty(draft, selectedCase) : false),
     [draft, isCreating, selectedCase],
   )
+
+  useEffect(() => {
+    onDirtyChange?.(isDraftDirty || Boolean(variablesJsonError))
+  }, [isDraftDirty, onDirtyChange, variablesJsonError])
+
+  useEffect(() => {
+    if (draft.name) {
+      onTitleChange?.(draft.name)
+    }
+  }, [draft.name, onTitleChange])
 
   const explorerNodes = useMemo(() => {
     const records = filteredCases.map((record) => {
@@ -288,6 +335,9 @@ export function CasesPage() {
       if (!selectedProjectId) {
         throw new Error('Select a project first.')
       }
+      if (variablesJsonError) {
+        throw new Error(`Fix Variables JSON before saving: ${variablesJsonError}`)
+      }
       const payload = normalizeDraftForSave(draft)
       return isCreating || !selectedCase
         ? platformApi.createCase(selectedProjectId, payload)
@@ -298,14 +348,23 @@ export function CasesPage() {
       setDraft(draftFromCase(savedCase))
       setDraftCaseId(savedCase.id)
       setIsCreating(false)
-      setSearchParams({
-        projectId: selectedProjectId!,
-        caseId: savedCase.id,
-        ...(selectedEditorView === 'step' ? { step: String(activeStepIndex) } : {}),
-      })
+      if (!embedded) {
+        setSearchParams({
+          projectId: selectedProjectId!,
+          caseId: savedCase.id,
+          ...(selectedEditorView === 'step' ? { step: String(activeStepIndex) } : {}),
+        })
+      }
       void message.success('Case saved')
     },
   })
+
+  useEffect(() => {
+    onSaveReady?.(async () => {
+      await saveCaseMutation.mutateAsync()
+    })
+    return () => onSaveReady?.(undefined)
+  }, [onSaveReady, saveCaseMutation])
 
   const deleteCaseMutation = useMutation({
     mutationFn: platformApi.deleteCase,
@@ -317,6 +376,10 @@ export function CasesPage() {
       ])
 
       if (selectedCase?.id === deletedCaseId) {
+        if (embedded) {
+          onDeleted?.()
+          return
+        }
         const nextCase = remainingCases[0]
         if (selectedProjectId && nextCase) {
           setSearchParams({ projectId: selectedProjectId, caseId: nextCase.id })
@@ -446,24 +509,45 @@ export function CasesPage() {
   })
 
   const runMutation = useMutation({
-    mutationFn: async ({ caseId }: { caseId?: string } = {}) => {
+    mutationFn: async ({
+      caseId,
+      executions,
+    }: {
+      caseId?: string
+      executions?: Array<{ environmentId: string; profileId: string }>
+    } = {}) => {
       const targetCaseId = caseId ?? selectedCase?.id
       if (!targetCaseId) {
         throw new Error('Save the case before running it.')
       }
-      return platformApi.startRun({
-        caseId: targetCaseId,
-        environmentId,
-        profileId,
-        triggeredBy: 'platform-ui',
-      })
+      const runs: RunRecord[] = []
+      const selectedExecutions = executions?.length ? executions : [undefined]
+      for (const execution of selectedExecutions) {
+        runs.push(await platformApi.startRun({
+          caseId: targetCaseId,
+          ...(execution
+            ? {
+                environmentId: execution.environmentId,
+                profileId: execution.profileId,
+              }
+            : {}),
+          triggeredBy: 'platform-ui',
+        }))
+      }
+      return runs
     },
-    onSuccess: async (run) => {
+    onSuccess: async (runs) => {
       await queryClient.invalidateQueries({ queryKey: ['runs'] })
+      const run = runs.at(-1)
+      if (!run) {
+        return
+      }
       setRunResultOverride(run)
       setSelectedEvidenceStepIndex(run.steps[0]?.index ?? 1)
       setIsResultsCollapsed(false)
-      void message.success(`Run ${run.status.toLowerCase()}`)
+      void message.success(runs.length === 1
+        ? `Run ${run.status.toLowerCase()}`
+        : `${runs.length} environments completed`)
     },
   })
 
@@ -476,12 +560,21 @@ export function CasesPage() {
     if (!selectedProjectId || !selectedCase) {
       return
     }
+    if (embedded) {
+      setEmbeddedStepIndex(stepIndex)
+      setSelectedEvidenceStepIndex(stepIndex + 1)
+      return
+    }
     setSearchParams({ projectId: selectedProjectId, caseId: selectedCase.id, step: String(stepIndex) })
     setSelectedEvidenceStepIndex(stepIndex + 1)
   }
 
   const handleSelectCaseOverview = () => {
     if (!selectedProjectId || !selectedCase) {
+      return
+    }
+    if (embedded) {
+      setEmbeddedStepIndex(undefined)
       return
     }
     setSearchParams({ projectId: selectedProjectId, caseId: selectedCase.id })
@@ -707,7 +800,12 @@ export function CasesPage() {
             trigger={['click']}
             menu={{
               items: [
-                { key: 'run', label: 'Run', icon: <PlayCircleOutlined /> },
+                {
+                  key: 'run',
+                  label: 'Run',
+                  icon: <PlayCircleOutlined />,
+                  disabled: !record.defaultEnvironmentId || !record.defaultProfileId,
+                },
                 { key: 'rename', label: 'Rename', icon: <EditOutlined /> },
                 { key: 'duplicate', label: 'Duplicate', icon: <FileTextOutlined /> },
                 { key: 'move', label: 'Move', icon: <FolderOutlined /> },
@@ -740,41 +838,41 @@ export function CasesPage() {
     )
   }
 
-  const runContextContent = (
-    <div className="scenario-context-popover">
-      <div className="scenario-context-field">
-        <Text className="designer-label">Environment</Text>
-        <Select
-          allowClear
-          placeholder="Select environment"
-          value={environmentId}
-          options={(environmentsQuery.data ?? []).map((environment) => ({
-            label: environment.name,
-            value: environment.id,
-          }))}
-          onChange={setEnvironmentId}
-        />
-      </div>
-      <div className="scenario-context-field">
-        <Text className="designer-label">Profile</Text>
-        <Select
-          allowClear
-          placeholder="Select profile"
-          value={profileId}
-          options={(profilesQuery.data ?? []).map((profile) => ({
-            label: profile.name,
-            value: profile.id,
-          }))}
-          onChange={setProfileId}
-        />
-      </div>
-    </div>
+  const selectEnvironment = (environmentId: string) => {
+    const currentProfileIsCompatible = Boolean(
+      draft.defaultProfileId
+      && (profilesQuery.data ?? []).find(
+        (profile) => profile.id === draft.defaultProfileId
+          && profile.enabled
+          && profile.environmentIds.includes(environmentId),
+      ),
+    )
+    setDraft({
+      ...draft,
+      defaultEnvironmentId: environmentId,
+      defaultProfileId: currentProfileIsCompatible ? draft.defaultProfileId : undefined,
+    })
+  }
+
+  const selectProfile = (profileId: string) => {
+    setDraft({ ...draft, defaultProfileId: profileId })
+  }
+
+  const openBatchRunModal = () => {
+    setBatchProfileId(selectedProfile?.id)
+    setBatchEnvironmentIds(selectedEnvironment ? [selectedEnvironment.id] : [])
+    setIsBatchRunModalOpen(true)
+  }
+
+  const batchProfile = (profilesQuery.data ?? []).find((profile) => profile.id === batchProfileId)
+  const batchEnvironments = activeEnvironments.filter(
+    (environment) => batchProfile?.environmentIds.includes(environment.id),
   )
 
   return (
-    <div className="scenario-page">
-      <div className="scenario-shell">
-        <aside className="scenario-sidebar">
+    <div className={embedded ? 'scenario-page embedded' : 'scenario-page'}>
+      <div className={embedded ? 'scenario-shell embedded' : 'scenario-shell'}>
+        {embedded ? null : <aside className="scenario-sidebar">
           <div className="scenario-root-row">
             <button type="button" className="scenario-tree-primary scenario-root-primary">
               <DownOutlined className="scenario-folder-toggle" />
@@ -828,7 +926,7 @@ export function CasesPage() {
             {!casesQuery.isLoading && !foldersQuery.isLoading && explorerNodes.length === 0 ? <div className="scenario-muted-row">No scenarios or folders yet.</div> : null}
             {explorerNodes.map((node) => renderExplorerNode(node))}
           </div>
-        </aside>
+        </aside>}
 
         <main className="scenario-main">
           <section className="scenario-topbar">
@@ -864,39 +962,87 @@ export function CasesPage() {
                   onPressEnter={(event) => event.currentTarget.blur()}
                 />
               </div>
-              <Text className={isDraftDirty ? 'scenario-draft-state dirty' : 'scenario-draft-state'}>
-                {saveTitleMutation.isPending ? 'Saving...' : isDraftDirty ? 'Unsaved' : 'Saved'}
+              <Text className={variablesJsonError ? 'scenario-draft-state invalid' : isDraftDirty ? 'scenario-draft-state dirty' : 'scenario-draft-state'}>
+                {variablesJsonError ? 'Invalid JSON' : saveTitleMutation.isPending ? 'Saving...' : isDraftDirty ? 'Unsaved' : 'Saved'}
               </Text>
             </div>
 
             <Space wrap size={[8, 8]} className="scenario-toolbar-actions">
-              <Popover placement="bottomRight" title="Run context" content={runContextContent} trigger="click">
-                <Button className="scenario-run-context" icon={<ControlOutlined />}>
-                  <span className="scenario-run-context-copy">
-                    <span>Run context</span>
-                    <span>{selectedEnvironment?.name ?? 'No environment'} · {selectedProfile?.name ?? 'No profile'}</span>
-                  </span>
-                  <DownOutlined className="scenario-run-context-chevron" />
-                </Button>
-              </Popover>
+              <div
+                className="scenario-execution-picker"
+                title="Scenario default execution context"
+              >
+                <ControlOutlined />
+                <Select
+                  aria-label="Environment"
+                  value={selectedEnvironment?.id}
+                  placeholder="Environment"
+                  popupMatchSelectWidth={false}
+                  options={activeEnvironments.map((environment) => ({
+                    label: environment.name,
+                    value: environment.id,
+                  }))}
+                  onChange={selectEnvironment}
+                />
+                <Select
+                  aria-label="Profile"
+                  value={selectedProfile?.id}
+                  placeholder={selectedEnvironment ? 'Profile' : 'Select environment first'}
+                  popupMatchSelectWidth={false}
+                  disabled={!selectedEnvironment}
+                  options={compatibleProfiles.map((profile) => ({
+                    label: profile.name,
+                    value: profile.id,
+                  }))}
+                  onChange={selectProfile}
+                />
+              </div>
               <Button
                 icon={<SaveOutlined />}
-                disabled={!isDraftDirty}
+                disabled={!isDraftDirty || Boolean(variablesJsonError)}
                 loading={saveCaseMutation.isPending}
+                title={variablesJsonError ? 'Fix Variables JSON before saving' : 'Save scenario'}
                 onClick={() => void saveCaseMutation.mutateAsync()}
               >
                 Save
               </Button>
-              <Button
-                type="primary"
-                icon={<PlayCircleOutlined />}
-                loading={runMutation.isPending}
-                disabled={!selectedCase || isCreating || isDraftDirty}
-                title={isDraftDirty ? 'Save changes before running this scenario' : 'Run scenario'}
-                onClick={() => void runMutation.mutateAsync({})}
-              >
-                Run
-              </Button>
+              <Space.Compact>
+                <Button
+                  type="primary"
+                  icon={<PlayCircleOutlined />}
+                  loading={runMutation.isPending}
+                  disabled={!selectedCase || !selectedEnvironment || !selectedProfile || isCreating || isDraftDirty || Boolean(variablesJsonError)}
+                  title={variablesJsonError ? 'Fix Variables JSON before running this scenario' : isDraftDirty ? 'Save changes before running this scenario' : 'Run selected environment and profile'}
+                  onClick={() => void runMutation.mutateAsync({})}
+                >
+                  Run
+                </Button>
+                <Dropdown
+                  trigger={['click']}
+                  menu={{
+                    items: [{
+                      key: 'multiple',
+                      label: 'Run in multiple environments...',
+                      disabled: !(profilesQuery.data ?? []).some((profile) => (
+                        profile.enabled && profile.environmentIds.length > 0
+                      )),
+                    }],
+                    onClick: ({ key }) => {
+                      if (key === 'multiple') {
+                        openBatchRunModal()
+                      }
+                    },
+                  }}
+                >
+                  <Button
+                    type="primary"
+                    aria-label="More run options"
+                    icon={<DownOutlined />}
+                    disabled={!selectedCase || isCreating || isDraftDirty || Boolean(variablesJsonError) || runMutation.isPending}
+                    title="More run options"
+                  />
+                </Dropdown>
+              </Space.Compact>
             </Space>
           </section>
 
@@ -911,6 +1057,7 @@ export function CasesPage() {
           ) : null}
 
           <CaseDesigner
+            key={isCreating ? '__new__' : selectedCase?.id ?? '__empty__'}
             draft={draft}
             onChange={setDraft}
             operations={operationsQuery.data ?? []}
@@ -919,6 +1066,7 @@ export function CasesPage() {
             onSelectCaseOverview={handleSelectCaseOverview}
             onSelectStep={handleSelectDraftStep}
             onActiveStepChange={setSelectedEvidenceStepIndex}
+            onVariablesValidationChange={setVariablesJsonError}
           />
 
           <section
@@ -961,6 +1109,70 @@ export function CasesPage() {
         </main>
 
       </div>
+      <Modal
+        title="Run in Multiple Environments"
+        open={isBatchRunModalOpen}
+        okText={`Run ${batchEnvironmentIds.length || ''}`.trim()}
+        okButtonProps={{ disabled: !batchProfileId || batchEnvironmentIds.length === 0 }}
+        confirmLoading={runMutation.isPending}
+        onCancel={() => setIsBatchRunModalOpen(false)}
+        onOk={() => {
+          if (!batchProfileId) {
+            return
+          }
+          void runMutation.mutateAsync({
+            executions: batchEnvironmentIds.map((environmentId) => ({
+              environmentId,
+              profileId: batchProfileId,
+            })),
+          }).then(() => {
+            setIsBatchRunModalOpen(false)
+          })
+        }}
+      >
+        <div className="batch-run-fields">
+          <Text type="secondary">
+            Run the same scenario and profile against one or more compatible environments.
+          </Text>
+          <Select
+            aria-label="Batch profile"
+            placeholder="Select profile"
+            value={batchProfileId}
+            options={(profilesQuery.data ?? [])
+              .filter((profile) => profile.enabled)
+              .map((profile) => ({
+                label: profile.name,
+                value: profile.id,
+              }))}
+            onChange={(profileId) => {
+              const profile = (profilesQuery.data ?? []).find((item) => item.id === profileId)
+              const availableEnvironmentIds = new Set(profile?.environmentIds ?? [])
+              const nextEnvironmentIds = batchEnvironmentIds.filter(
+                (environmentId) => availableEnvironmentIds.has(environmentId),
+              )
+              setBatchProfileId(profileId)
+              setBatchEnvironmentIds(nextEnvironmentIds.length
+                ? nextEnvironmentIds
+                : activeEnvironments
+                    .filter((environment) => availableEnvironmentIds.has(environment.id))
+                    .slice(0, 1)
+                    .map((environment) => environment.id))
+            }}
+          />
+          <Select
+            mode="multiple"
+            aria-label="Batch environments"
+            placeholder="Select environments"
+            value={batchEnvironmentIds}
+            options={batchEnvironments.map((environment) => ({
+              label: environment.name,
+              value: environment.id,
+            }))}
+            onChange={setBatchEnvironmentIds}
+          />
+        </div>
+      </Modal>
+
       <Modal
         title="Move Scenario"
         open={Boolean(caseToMove)}
@@ -1067,6 +1279,8 @@ function createEmptyDraft(name: string, folderId?: string): SaveCaseInput {
     code: scenarioCode(name),
     description: '',
     folderId,
+    defaultEnvironmentId: undefined,
+    defaultProfileId: undefined,
     tags: [],
     dslVersion: 'v1',
     content,
@@ -1092,6 +1306,8 @@ function draftFromCase(record: CaseRecord): SaveCaseInput {
     code: record.code,
     description: record.description ?? '',
     folderId: record.folderId ?? undefined,
+    defaultEnvironmentId: record.defaultEnvironmentId ?? undefined,
+    defaultProfileId: record.defaultProfileId ?? undefined,
     tags: record.tags ?? [],
     dslVersion: record.dslVersion,
     content: record.content,
@@ -1104,6 +1320,8 @@ function isCaseDraftDirty(draft: SaveCaseInput, record: CaseRecord) {
     || draft.code !== record.code
     || draft.description !== (record.description ?? '')
     || (draft.folderId ?? undefined) !== (record.folderId ?? undefined)
+    || (draft.defaultEnvironmentId ?? undefined) !== (record.defaultEnvironmentId ?? undefined)
+    || (draft.defaultProfileId ?? undefined) !== (record.defaultProfileId ?? undefined)
     || draft.dslVersion !== record.dslVersion
     || draft.content !== record.content
     || draft.status !== record.status

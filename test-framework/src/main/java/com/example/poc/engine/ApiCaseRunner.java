@@ -302,6 +302,12 @@ public class ApiCaseRunner {
     }
 
     private String resolveBaseUrl(OperationSpec operation, TestContext context) {
+        if (!isBlank(operation.getApiSpecId())) {
+            Object apiSpecBaseUrl = context.get(operation.getApiSpecId() + ".baseUrl").orElse(null);
+            if (apiSpecBaseUrl != null) {
+                return String.valueOf(apiSpecBaseUrl);
+            }
+        }
         if (!isBlank(operation.getService())) {
             Object serviceBaseUrl = context.get(operation.getService() + ".baseUrl").orElse(null);
             if (serviceBaseUrl != null) {

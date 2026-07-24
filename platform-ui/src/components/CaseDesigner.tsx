@@ -20,6 +20,7 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { ApiOperationRecord, SaveCaseInput } from '../types/platform'
+import { JsonObjectEditor } from './JsonObjectEditor'
 import {
   parseDsl,
   parseStructuredText,
@@ -39,6 +40,7 @@ type CaseDesignerProps = {
   onSelectCaseOverview: () => void
   onSelectStep: (stepIndex: number) => void
   onActiveStepChange?: (stepIndex: number) => void
+  onVariablesValidationChange?: (error: string | null) => void
 }
 
 type AssertionRule = {
@@ -119,6 +121,7 @@ export function CaseDesigner({
   onSelectCaseOverview,
   onSelectStep,
   onActiveStepChange,
+  onVariablesValidationChange,
 }: CaseDesignerProps) {
   const { modal } = App.useApp()
   const parsed = useMemo(() => parseDsl(draft.content), [draft.content])
@@ -277,6 +280,7 @@ export function CaseDesigner({
         onDeleteStep={confirmDeleteStep}
         onMoveStep={moveStep}
         onSelectStep={onSelectStep}
+        onVariablesValidationChange={onVariablesValidationChange}
         updateDsl={updateDsl}
       />
     </section>
@@ -295,6 +299,7 @@ function CaseOverview({
   onDeleteStep,
   onMoveStep,
   onSelectStep,
+  onVariablesValidationChange,
   updateDsl,
 }: {
   activeStepIndex?: number
@@ -308,11 +313,13 @@ function CaseOverview({
   onDeleteStep: (stepIndex: number) => void
   onMoveStep: (fromIndex: number, toIndex: number) => void
   onSelectStep: (stepIndex: number) => void
+  onVariablesValidationChange?: (error: string | null) => void
   updateDsl: (recipe: (next: DslObject) => void) => void
 }) {
   const [isAddingTag, setIsAddingTag] = useState(false)
   const [tagInput, setTagInput] = useState('')
   const stepItemRefs = useRef(new Map<number, HTMLDivElement>())
+  const tags = draft.tags ?? []
 
   useEffect(() => {
     if (activeStepIndex == null) {
@@ -326,8 +333,8 @@ function CaseOverview({
 
   const addTag = () => {
     const nextTag = tagInput.trim()
-    if (nextTag && !draft.tags.includes(nextTag)) {
-      onChange({ ...draft, tags: [...draft.tags, nextTag] })
+    if (nextTag && !tags.includes(nextTag)) {
+      onChange({ ...draft, tags: [...tags, nextTag] })
     }
     setTagInput('')
     setIsAddingTag(false)
@@ -339,14 +346,14 @@ function CaseOverview({
         <ScenarioSectionHeader title="Tags" />
         <div className="case-overview-tags">
           <div className="case-overview-tags-list">
-            {draft.tags.map((tag) => (
+            {tags.map((tag) => (
               <Tag
                 key={tag}
                 closable
                 className="case-overview-tag"
                 onClose={(event) => {
                   event.preventDefault()
-                  onChange({ ...draft, tags: draft.tags.filter((value) => value !== tag) })
+                  onChange({ ...draft, tags: tags.filter((value) => value !== tag) })
                 }}
               >
                 {tag}
@@ -485,14 +492,16 @@ function CaseOverview({
 
       <section className="case-overview-section">
         <ScenarioSectionHeader title="Variables" />
-        <StructuredEditor
-          label=""
+        <JsonObjectEditor
+          ariaLabel="Variables JSON editor"
           value={dsl.variables ?? {}}
+          onValidationChange={onVariablesValidationChange}
           onCommit={(value) => updateDsl((next) => {
             next.variables = value
           })}
         />
       </section>
+
     </div>
   )
 }
