@@ -23,15 +23,12 @@ import {
   PlusOutlined,
   RightOutlined,
   SaveOutlined,
-  UpOutlined,
 } from '@ant-design/icons'
 import { useEffect, useMemo, useRef, useState } from 'react'
-import type { MouseEvent as ReactMouseEvent } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { CaseDesigner } from '../components/CaseDesigner'
-import { RunDetail } from '../components/RunDetail'
+import { ScenarioRunHistory } from '../components/ScenarioRunHistory'
 import { platformApi } from '../api/platformApi'
-import { StatusPill } from '../components/StatusPill'
 import { parseDsl, stringifyDsl } from '../utils/caseDsl'
 import type {
   CaseRecord,
@@ -105,12 +102,11 @@ export function CasesPage({
   const [folderParentId, setFolderParentId] = useState<string>()
   const [scenarioToRename, setScenarioToRename] = useState<CaseRecord>()
   const [scenarioName, setScenarioName] = useState('')
-  const [selectedEvidenceStepIndex, setSelectedEvidenceStepIndex] = useState(1)
   const [caseFilter, setCaseFilter] = useState('')
   const [expandedFolderKeys, setExpandedFolderKeys] = useState<Set<string>>(() => new Set())
-  const [isResultsCollapsed, setIsResultsCollapsed] = useState(true)
-  const [resultsPanelHeight, setResultsPanelHeight] = useState(300)
   const [runResultOverride, setRunResultOverride] = useState<RunRecord>()
+  const [activeAssetView, setActiveAssetView] = useState<'definition' | 'runs'>('definition')
+  const [selectedRunId, setSelectedRunId] = useState<string>()
   const [variablesJsonError, setVariablesJsonError] = useState<string | null>(null)
   const [embeddedStepIndex, setEmbeddedStepIndex] = useState<number>()
   const titleBeforeEditRef = useRef('')
@@ -160,6 +156,12 @@ export function CasesPage({
   const runsQuery = useQuery({
     queryKey: ['runs'],
     queryFn: platformApi.listRuns,
+    refetchInterval: 15000,
+  })
+
+  const suiteRunsQuery = useQuery({
+    queryKey: ['suite-runs'],
+    queryFn: platformApi.listSuiteRuns,
     refetchInterval: 15000,
   })
 
@@ -235,18 +237,23 @@ export function CasesPage({
     ? Math.min(Math.max(requestedStepIndex, 0), Math.max(draftSteps.length - 1, 0))
     : 0
   const selectedEditorView = selectedStepParam != null && draftSteps[activeStepIndex] ? 'step' : 'case'
-  const latestPersistedCaseRun = useMemo(() => {
+  const scenarioRuns = useMemo(() => {
     if (!selectedCase?.id) {
-      return undefined
+      return []
     }
-    return (runsQuery.data ?? [])
+    const records = [...(runsQuery.data ?? [])]
+    if (runResultOverride && !records.some((run) => run.id === runResultOverride.id)) {
+      records.push(runResultOverride)
+    }
+    return records
       .filter((run) => run.caseId === selectedCase.id)
-      .sort((left, right) => new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime())[0]
-  }, [runsQuery.data, selectedCase?.id])
-  const latestCaseRun = runResultOverride?.caseId === selectedCase?.id
-    ? runResultOverride
-    : latestPersistedCaseRun
-  const latestCaseRunFirstStepIndex = latestCaseRun?.steps?.[0]?.index
+      .sort((left, right) => new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime())
+  }, [runResultOverride, runsQuery.data, selectedCase?.id])
+
+  const suiteNamesById = useMemo(
+    () => new Map((suiteRunsQuery.data ?? []).map((run) => [run.id, run.suiteName])),
+    [suiteRunsQuery.data],
+  )
 
   const latestRunsByCaseId = useMemo(() => {
     const runs = [...(runsQuery.data ?? [])]
@@ -308,10 +315,9 @@ export function CasesPage({
   )
 
   useEffect(() => {
-    if (selectedEditorView === 'case' && latestCaseRunFirstStepIndex) {
-      setSelectedEvidenceStepIndex(latestCaseRunFirstStepIndex)
-    }
-  }, [latestCaseRun?.id, latestCaseRunFirstStepIndex, selectedEditorView])
+    setActiveAssetView('definition')
+    setSelectedRunId(undefined)
+  }, [selectedCase?.id])
 
   useEffect(() => {
     if (!selectedFolderKeys.length) {
@@ -543,8 +549,8 @@ export function CasesPage({
         return
       }
       setRunResultOverride(run)
-      setSelectedEvidenceStepIndex(run.steps[0]?.index ?? 1)
-      setIsResultsCollapsed(false)
+      setSelectedRunId(run.id)
+      setActiveAssetView('runs')
       void message.success(runs.length === 1
         ? `Run ${run.status.toLowerCase()}`
         : `${runs.length} environments completed`)
@@ -562,11 +568,9 @@ export function CasesPage({
     }
     if (embedded) {
       setEmbeddedStepIndex(stepIndex)
-      setSelectedEvidenceStepIndex(stepIndex + 1)
       return
     }
     setSearchParams({ projectId: selectedProjectId, caseId: selectedCase.id, step: String(stepIndex) })
-    setSelectedEvidenceStepIndex(stepIndex + 1)
   }
 
   const handleSelectCaseOverview = () => {
@@ -583,7 +587,7 @@ export function CasesPage({
   const confirmDeleteCase = (record: CaseRecord) => {
     modal.confirm({
       title: 'Delete case?',
-      content: `This will remove "${record.name}" from the case library and suites. Run history is kept.`,
+      content: `This will remove "${record.name}" from the case library and suites. Execution history is kept.`,
       okText: 'Delete',
       okButtonProps: { danger: true },
       cancelText: 'Cancel',
@@ -689,26 +693,6 @@ export function CasesPage({
       return
     }
     void saveTitleMutation.mutateAsync({ record: selectedCase, name: normalizedName })
-  }
-
-  const startResultsResize = (event: ReactMouseEvent<HTMLDivElement>) => {
-    event.preventDefault()
-    const startY = event.clientY
-    const startHeight = resultsPanelHeight
-    const maxHeight = Math.max(220, Math.floor(window.innerHeight * 0.7))
-
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const nextHeight = Math.min(Math.max(startHeight + startY - moveEvent.clientY, 180), maxHeight)
-      setResultsPanelHeight(nextHeight)
-    }
-
-    const handleMouseUp = () => {
-      window.removeEventListener('mousemove', handleMouseMove)
-      window.removeEventListener('mouseup', handleMouseUp)
-    }
-
-    window.addEventListener('mousemove', handleMouseMove)
-    window.addEventListener('mouseup', handleMouseUp)
   }
 
   const renderExplorerNode = (node: ExplorerNode, depth = 0) => {
@@ -1056,56 +1040,45 @@ export function CasesPage({
             <Alert className="section-alert" type="error" showIcon message="Failed to delete case." />
           ) : null}
 
-          <CaseDesigner
-            key={isCreating ? '__new__' : selectedCase?.id ?? '__empty__'}
-            draft={draft}
-            onChange={setDraft}
-            operations={operationsQuery.data ?? []}
-            view={selectedEditorView}
-            activeStepIndex={activeStepIndex}
-            onSelectCaseOverview={handleSelectCaseOverview}
-            onSelectStep={handleSelectDraftStep}
-            onActiveStepChange={setSelectedEvidenceStepIndex}
-            onVariablesValidationChange={setVariablesJsonError}
-          />
+          <nav className="asset-context-tabs" aria-label="Scenario sections">
+            <button
+              type="button"
+              className={activeAssetView === 'definition' ? 'active' : ''}
+              onClick={() => setActiveAssetView('definition')}
+            >
+              Definition
+            </button>
+            <button
+              type="button"
+              className={activeAssetView === 'runs' ? 'active' : ''}
+              onClick={() => setActiveAssetView('runs')}
+            >
+              Executions <span>{scenarioRuns.length}</span>
+            </button>
+          </nav>
 
-          <section
-            className={isResultsCollapsed ? 'scenario-response-panel collapsed' : 'scenario-response-panel'}
-            style={isResultsCollapsed ? undefined : { flexBasis: resultsPanelHeight }}
-          >
-            {!isResultsCollapsed ? <div className="scenario-results-resize-handle" onMouseDown={startResultsResize} /> : null}
-            <div className="scenario-response-head">
-              <Space>
-                <Text strong>Results</Text>
-                {latestCaseRun ? <StatusPill status={latestCaseRun.status} /> : <Text type="secondary">No runs yet</Text>}
-              </Space>
-              <Space size={4}>
-                {latestCaseRun ? <Text type="secondary">{latestCaseRun.durationMs} ms</Text> : null}
-                <Button
-                  type="text"
-                  size="small"
-                  aria-label={isResultsCollapsed ? 'Expand results' : 'Collapse results'}
-                  icon={isResultsCollapsed ? <UpOutlined /> : <DownOutlined />}
-                  title={isResultsCollapsed ? 'Expand results' : 'Collapse results'}
-                  onClick={() => setIsResultsCollapsed((collapsed) => !collapsed)}
-                />
-              </Space>
-            </div>
-
-            {!isResultsCollapsed && latestCaseRun ? (
-              <div className="scenario-response-detail">
-                <RunDetail
-                  run={latestCaseRun}
-                  selectedStepIndex={selectedEvidenceStepIndex}
-                  onSelectStep={setSelectedEvidenceStepIndex}
-                />
-              </div>
-            ) : !isResultsCollapsed ? (
-              <div className="scenario-response-empty">
-                <Text type="secondary">Run this scenario to inspect requests, responses, and validations.</Text>
-              </div>
-            ) : null}
-          </section>
+          <div className="asset-context-content">
+            {activeAssetView === 'definition' ? (
+              <CaseDesigner
+                key={isCreating ? '__new__' : selectedCase?.id ?? '__empty__'}
+                draft={draft}
+                onChange={setDraft}
+                operations={operationsQuery.data ?? []}
+                view={selectedEditorView}
+                activeStepIndex={activeStepIndex}
+                onSelectCaseOverview={handleSelectCaseOverview}
+                onSelectStep={handleSelectDraftStep}
+                onVariablesValidationChange={setVariablesJsonError}
+              />
+            ) : (
+              <ScenarioRunHistory
+                runs={scenarioRuns}
+                selectedRunId={selectedRunId}
+                suiteNamesById={suiteNamesById}
+                onSelect={setSelectedRunId}
+              />
+            )}
+          </div>
         </main>
 
       </div>

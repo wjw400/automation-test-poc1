@@ -35,7 +35,7 @@ const navigationItems = [
   { key: 'apis', icon: <ApiOutlined />, label: 'APIs' },
   { key: 'environments', icon: <GlobalOutlined />, label: 'Environments' },
   { key: 'profiles', icon: <KeyOutlined />, label: 'Profiles' },
-  { key: 'runs', icon: <ClockCircleOutlined />, label: 'Runs' },
+  { key: 'runs', icon: <ClockCircleOutlined />, label: 'Execution History' },
 ]
 
 function AppShell() {

@@ -8,7 +8,6 @@ import {
   KeyOutlined,
   PlusOutlined,
   ProfileOutlined,
-  RightOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -23,6 +22,7 @@ import {
 import { RunDetail } from '../components/RunDetail'
 import { StatusPill } from '../components/StatusPill'
 import { StoplightApi } from '../components/StoplightApi'
+import { SuiteRunDetail } from '../components/SuiteRunDetail'
 import type {
   ApiSpecRecord,
   CaseRecord,
@@ -134,7 +134,19 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
       ? current
       : [...current, { key, type, resourceId, title, dirty: false }])
     setActiveTabKey(key)
-  }, [])
+    const targetMode = modeForTabType(type)
+    if (projectId && targetMode && targetMode !== mode) {
+      navigate(`/workspace?projectId=${encodeURIComponent(projectId)}&view=${targetMode}`)
+    }
+  }, [mode, navigate, projectId])
+
+  const activateTab = (tab: WorkbenchTab) => {
+    setActiveTabKey(tab.key)
+    const targetMode = modeForTabType(tab.type)
+    if (projectId && targetMode && targetMode !== mode) {
+      navigate(`/workspace?projectId=${encodeURIComponent(projectId)}&view=${targetMode}`)
+    }
+  }
 
   const updateTab = useCallback((key: string, patch: Partial<WorkbenchTab>) => {
     setTabs((current) => {
@@ -299,9 +311,12 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
   )
   const projectRuns = useMemo(() => {
     const records = (runsQuery.data ?? []).filter((run) => run.projectId === projectId && !run.suiteRunId)
-    return filterByName(records, runFilter, (run) => `${run.id} ${run.status} ${run.caseId}`)
+    const caseNamesById = new Map((casesQuery.data ?? []).map((record) => [record.id, record.name]))
+    return filterByName(records, runFilter, (run) => (
+      `${run.id} ${run.status} ${run.caseId} ${caseNamesById.get(run.caseId) ?? ''}`
+    ))
       .sort((left, right) => new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime())
-  }, [projectId, runFilter, runsQuery.data])
+  }, [casesQuery.data, projectId, runFilter, runsQuery.data])
   const projectSuiteRuns = useMemo(() => {
     const records = (suiteRunsQuery.data ?? []).filter((run) => run.projectId === projectId)
     return filterByName(records, runFilter, (run) => `${run.id} ${run.status} ${run.suiteName}`)
@@ -393,10 +408,11 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
           <RunsSidebar
             records={projectRuns}
             suiteRecords={projectSuiteRuns}
+            cases={casesQuery.data ?? []}
             filter={runFilter}
             onFilterChange={setRunFilter}
             onOpen={(record) => openTab('run', record.id, `Run ${shortId(record.id)}`)}
-            onOpenSuite={(record) => openTab('suiteRun', record.id, `${record.suiteName} Run`)}
+            onOpenSuite={(record) => openTab('suiteRun', record.id, `${record.suiteName} Execution`)}
           />
         ) : null}
       </aside>
@@ -413,7 +429,7 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
                 role="tab"
                 aria-selected={tab.key === activeTabKey}
                 className="workbench-tab-select"
-                onClick={() => setActiveTabKey(tab.key)}
+                onClick={() => activateTab(tab)}
               >
                 {tabIcon(tab.type)}
                 <span>{tab.title}</span>
@@ -561,19 +577,33 @@ function renderTabContent(options: RenderTabOptions) {
         projectId={projectId}
         suiteId={tab.resourceId}
         {...commonCallbacks}
-        onRunCompleted={(run) => openTab('suiteRun', run.id, `${run.suiteName} Run`)}
         onDeleted={() => closeTab(tab.key)}
       />
     )
   }
   if (tab.type === 'run') {
-    return <RunTabPane run={options.runs.find((record) => record.id === tab.resourceId)} />
+    const run = options.runs.find((record) => record.id === tab.resourceId)
+    const scenario = options.cases.find((record) => record.id === run?.caseId)
+    const parentSuiteRun = options.suiteRuns.find((record) => record.id === run?.suiteRunId)
+    return (
+      <RunTabPane
+        run={run}
+        scenarioName={scenario?.name}
+        onOpenScenario={scenario ? () => openTab('scenario', scenario.id, scenario.name) : undefined}
+        onOpenSuiteRun={parentSuiteRun
+          ? () => openTab('suiteRun', parentSuiteRun.id, `${parentSuiteRun.suiteName} Execution`)
+          : undefined}
+      />
+    )
   }
   if (tab.type === 'suiteRun') {
+    const suiteRun = options.suiteRuns.find((record) => record.id === tab.resourceId)
+    const suite = options.suites.find((record) => record.id === suiteRun?.suiteId)
     return (
-      <SuiteRunTabPane
-        run={options.suiteRuns.find((record) => record.id === tab.resourceId)}
+      <SuiteRunDetail
+        run={suiteRun}
         onOpenRun={(run) => openTab('run', run.id, run.suiteDisplayName || `Run ${shortId(run.id)}`)}
+        onOpenSuite={suite ? () => openTab('suite', suite.id, suite.name) : undefined}
       />
     )
   }
@@ -607,65 +637,35 @@ function renderTabContent(options: RenderTabOptions) {
   )
 }
 
-function RunTabPane({ run }: { run?: RunRecord }) {
+function RunTabPane({
+  run,
+  scenarioName,
+  onOpenScenario,
+  onOpenSuiteRun,
+}: {
+  run?: RunRecord
+  scenarioName?: string
+  onOpenScenario?: () => void
+  onOpenSuiteRun?: () => void
+}) {
   const [selectedStepIndex, setSelectedStepIndex] = useState(1)
   useEffect(() => {
     setSelectedStepIndex(run?.steps[0]?.index ?? 1)
   }, [run?.id, run?.steps])
   return (
     <div className="run-tab-pane">
-      <RunDetail run={run} selectedStepIndex={selectedStepIndex} onSelectStep={setSelectedStepIndex} />
-    </div>
-  )
-}
-
-function SuiteRunTabPane({
-  run,
-  onOpenRun,
-}: {
-  run?: SuiteRunRecord
-  onOpenRun: (run: RunRecord) => void
-}) {
-  if (!run) {
-    return <div className="workbench-empty"><Text type="secondary">Suite run not found.</Text></div>
-  }
-  const passedCount = run.runs.filter((child) => child.status === 'PASSED').length
-  return (
-    <div className="suite-run-tab-pane">
-      <header className="suite-run-header">
+      <header className="run-context-header">
         <div>
-          <Text type="secondary">Suite Run</Text>
-          <h1>{run.suiteName}</h1>
+          <Text type="secondary">Scenario Execution</Text>
+          <h1>{scenarioName ?? run?.suiteDisplayName ?? 'Execution Detail'}</h1>
         </div>
-        <div className="suite-run-summary">
-          <StatusPill status={run.status} />
-          <span>{passedCount}/{run.runs.length} passed</span>
-          <span>{run.durationMs} ms</span>
+        <div className="run-context-actions">
+          {onOpenSuiteRun ? <Button size="small" onClick={onOpenSuiteRun}>Open Suite Execution</Button> : null}
+          {onOpenScenario ? <Button size="small" onClick={onOpenScenario}>Open Scenario</Button> : null}
         </div>
       </header>
-      <div className="suite-run-body">
-        {run.errorMessage ? <div className="suite-run-error">{run.errorMessage}</div> : null}
-        <div className="suite-run-meta">
-          <span>Started {new Date(run.startedAt).toLocaleString()}</span>
-          <span>Triggered by {run.triggeredBy}</span>
-        </div>
-        <section className="suite-run-results">
-          <h2>Scenario Results</h2>
-          <div className="suite-run-list">
-            {run.runs.map((child, index) => (
-              <button key={child.id} type="button" className="suite-run-row" onClick={() => onOpenRun(child)}>
-                <span className="suite-run-order">{String(child.suiteCaseOrder ?? index + 1).padStart(2, '0')}</span>
-                <span className="suite-run-row-copy">
-                  <strong>{child.suiteDisplayName || child.caseId}</strong>
-                  <span>{[child.environmentName, child.profileName].filter(Boolean).join(' · ') || 'Runtime context unavailable'}</span>
-                </span>
-                <StatusPill status={child.status} />
-                <span className="suite-run-duration">{child.durationMs} ms</span>
-                <RightOutlined />
-              </button>
-            ))}
-          </div>
-        </section>
+      <div className="run-tab-detail">
+        <RunDetail run={run} selectedStepIndex={selectedStepIndex} onSelectStep={setSelectedStepIndex} />
       </div>
     </div>
   )
@@ -794,6 +794,7 @@ function ResourceListSidebar({
 function RunsSidebar({
   records,
   suiteRecords,
+  cases,
   filter,
   onFilterChange,
   onOpen,
@@ -801,24 +802,26 @@ function RunsSidebar({
 }: {
   records: RunRecord[]
   suiteRecords: SuiteRunRecord[]
+  cases: CaseRecord[]
   filter: string
   onFilterChange: (value: string) => void
   onOpen: (record: RunRecord) => void
   onOpenSuite: (record: SuiteRunRecord) => void
 }) {
+  const caseNamesById = new Map(cases.map((record) => [record.id, record.name]))
   return (
     <>
-      <div className="workbench-sidebar-head"><Text strong>Run History</Text></div>
+      <div className="workbench-sidebar-head"><Text strong>Execution History</Text></div>
       <Input
         allowClear
         className="workbench-sidebar-search"
         prefix={<SearchOutlined />}
-        placeholder="Search runs"
+        placeholder="Search executions"
         value={filter}
         onChange={(event) => onFilterChange(event.target.value)}
       />
       <div className="workbench-sidebar-scroll">
-        <div className="run-history-group-title">Suite Runs</div>
+        <div className="run-history-group-title">Suite Executions</div>
         {suiteRecords.map((record) => (
           <button key={record.id} type="button" className="run-history-row" onClick={() => onOpenSuite(record)}>
             <span className="run-history-row-title">
@@ -829,19 +832,19 @@ function RunsSidebar({
             <span>{record.runs.length} scenarios · {record.durationMs} ms</span>
           </button>
         ))}
-        {!suiteRecords.length ? <Text type="secondary" className="workbench-sidebar-empty">No suite runs.</Text> : null}
-        <div className="run-history-group-title">Scenario Runs</div>
+        {!suiteRecords.length ? <Text type="secondary" className="workbench-sidebar-empty">No suite executions.</Text> : null}
+        <div className="run-history-group-title">Scenario Executions</div>
         {records.map((record) => (
           <button key={record.id} type="button" className="run-history-row" onClick={() => onOpen(record)}>
             <span className="run-history-row-title">
-              <span>{shortId(record.id)}</span>
+              <span>{caseNamesById.get(record.caseId) ?? shortId(record.id)}</span>
               <StatusPill status={record.status} />
             </span>
             <span>{new Date(record.startedAt).toLocaleString()}</span>
             <span>{record.durationMs} ms</span>
           </button>
         ))}
-        {!records.length ? <Text type="secondary" className="workbench-sidebar-empty">No scenario runs.</Text> : null}
+        {!records.length ? <Text type="secondary" className="workbench-sidebar-empty">No scenario executions.</Text> : null}
       </div>
     </>
   )
@@ -888,6 +891,15 @@ function isWorkbenchMode(value: string | null): value is WorkbenchMode {
     || value === 'environments'
     || value === 'profiles'
     || value === 'runs'
+}
+
+function modeForTabType(type: WorkbenchTabType): WorkbenchMode | undefined {
+  if (type === 'scenario') return 'scenarios'
+  if (type === 'suite') return 'suites'
+  if (type === 'apiSpec') return 'apis'
+  if (type === 'environment') return 'environments'
+  if (type === 'profile') return 'profiles'
+  return undefined
 }
 
 function filterByName<T>(

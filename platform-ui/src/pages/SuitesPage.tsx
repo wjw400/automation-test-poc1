@@ -27,13 +27,13 @@ import { useSearchParams } from 'react-router-dom'
 import { platformApi } from '../api/platformApi'
 import { JsonObjectEditor } from '../components/JsonObjectEditor'
 import { StatusPill } from '../components/StatusPill'
+import { SuiteExecutionWorkspace } from '../components/SuiteExecutionWorkspace'
 import { parseDsl } from '../utils/caseDsl'
 import type {
   CaseRecord,
   SaveSuiteCaseInput,
   SaveSuiteInput,
   SuiteRecord,
-  SuiteRunRecord,
 } from '../types/platform'
 
 const { Text } = Typography
@@ -60,7 +60,6 @@ type SuitesPageProps = {
   onDirtyChange?: (dirty: boolean) => void
   onTitleChange?: (title: string) => void
   onSaveReady?: (save?: () => Promise<void>) => void
-  onRunCompleted?: (run: SuiteRunRecord) => void
   onDeleted?: () => void
 }
 
@@ -71,7 +70,6 @@ export function SuitesPage({
   onDirtyChange,
   onTitleChange,
   onSaveReady,
-  onRunCompleted,
   onDeleted,
 }: SuitesPageProps = {}) {
   const { message, modal } = App.useApp()
@@ -86,6 +84,9 @@ export function SuitesPage({
     value: Record<string, unknown>
   }>()
   const [variablesEditorError, setVariablesEditorError] = useState<string | null>(null)
+  const [activeAssetView, setActiveAssetView] = useState<'cases' | 'runs'>('cases')
+  const [selectedSuiteRunId, setSelectedSuiteRunId] = useState<string>()
+  const [selectedChildRunId, setSelectedChildRunId] = useState<string>()
 
   const projectsQuery = useQuery({
     queryKey: ['projects'],
@@ -119,16 +120,47 @@ export function SuitesPage({
     enabled: Boolean(selectedProjectId),
   })
 
+  const suiteRunsQuery = useQuery({
+    queryKey: ['suite-runs'],
+    queryFn: platformApi.listSuiteRuns,
+    refetchInterval: 15000,
+  })
+
   const selectedSuite = useMemo(
     () => suitesQuery.data?.find((suite) => suite.id === selectedSuiteId) ?? suitesQuery.data?.[0],
     [selectedSuiteId, suitesQuery.data],
   )
+
+  const selectedSuiteRuns = useMemo(
+    () => (suiteRunsQuery.data ?? [])
+      .filter((run) => run.suiteId === selectedSuite?.id)
+      .sort((left, right) => new Date(right.startedAt).getTime() - new Date(left.startedAt).getTime()),
+    [selectedSuite?.id, suiteRunsQuery.data],
+  )
+
+  const selectedSuiteRun = selectedSuiteRuns.find((run) => run.id === selectedSuiteRunId)
+    ?? selectedSuiteRuns[0]
 
   useEffect(() => {
     if (selectedSuite && !isCreating) {
       setDraft(toDraft(selectedSuite))
     }
   }, [isCreating, selectedSuite])
+
+  useEffect(() => {
+    setActiveAssetView('cases')
+    setSelectedSuiteRunId(undefined)
+    setSelectedChildRunId(undefined)
+  }, [selectedSuite?.id])
+
+  useEffect(() => {
+    if (selectedSuiteRun?.runs.some((run) => run.id === selectedChildRunId)) {
+      return
+    }
+    const preferredRun = selectedSuiteRun?.runs.find((run) => run.status === 'FAILED')
+      ?? selectedSuiteRun?.runs[0]
+    setSelectedChildRunId(preferredRun?.id)
+  }, [selectedChildRunId, selectedSuiteRun])
 
   const caseLookup = useMemo(() => {
     return new Map((casesQuery.data ?? []).map((record) => [record.id, record]))
@@ -202,7 +234,9 @@ export function SuitesPage({
         queryClient.invalidateQueries({ queryKey: ['runs'] }),
         queryClient.invalidateQueries({ queryKey: ['suite-runs'] }),
       ])
-      onRunCompleted?.(run)
+      setSelectedSuiteRunId(run.id)
+      setSelectedChildRunId((run.runs.find((child) => child.status === 'FAILED') ?? run.runs[0])?.id)
+      setActiveAssetView('runs')
       if (run.status === 'PASSED') {
         void message.success('Suite passed')
       } else {
@@ -610,16 +644,6 @@ export function SuitesPage({
                   </Space>
                 </div>
 
-                <div className="suite-description-field">
-                  <Text className="designer-label">Description</Text>
-                  <Input.TextArea
-                    rows={3}
-                    value={draft.description}
-                    placeholder="Optional note for why these cases belong together"
-                    onChange={(event) => setDraft({ ...draft, description: event.target.value })}
-                  />
-                </div>
-
                 {saveSuiteMutation.isError ? (
                   <Alert className="section-alert" type="error" showIcon message="Failed to save suite." />
                 ) : null}
@@ -635,45 +659,93 @@ export function SuitesPage({
                 ) : null}
               </section>
 
-              <section className="panel-section">
-                <div className="panel-title-row compact">
-                  <div>
-                    <h2 className="panel-title">Case Order</h2>
-                    <Text type="secondary">Suites reference existing cases and can override runtime context per entry.</Text>
+              <nav className="asset-context-tabs" aria-label="Suite sections">
+                <button
+                  type="button"
+                  className={activeAssetView === 'cases' ? 'active' : ''}
+                  onClick={() => setActiveAssetView('cases')}
+                >
+                  Cases
+                </button>
+                <button
+                  type="button"
+                  className={activeAssetView === 'runs' ? 'active' : ''}
+                  onClick={() => setActiveAssetView('runs')}
+                >
+                  Executions <span>{selectedSuiteRuns.length}</span>
+                </button>
+              </nav>
+
+              {activeAssetView === 'cases' ? (
+                <section className="panel-section">
+                  <div className="suite-description-field">
+                    <Text className="designer-label">Description</Text>
+                    <Input.TextArea
+                      rows={3}
+                      value={draft.description}
+                      placeholder="Optional note for why these cases belong together"
+                      onChange={(event) => setDraft({ ...draft, description: event.target.value })}
+                    />
                   </div>
-                </div>
 
-                <div className="suite-case-toolbar">
-                  <Select
-                    showSearch
-                    allowClear
-                    className="suite-add-case-select"
-                    placeholder="Add existing case"
-                    optionFilterProp="label"
-                    value={caseToAddId}
-                    options={(casesQuery.data ?? []).map((record) => ({
-                      label: `${record.name} - ${record.code}`,
-                      value: record.id,
-                    }))}
-                    onChange={setCaseToAddId}
+                  <div className="panel-title-row compact suite-case-order-head">
+                    <div>
+                      <h2 className="panel-title">Case Order</h2>
+                      <Text type="secondary">Suites reference existing cases and can override runtime context per entry.</Text>
+                    </div>
+                  </div>
+
+                  <div className="suite-case-toolbar">
+                    <Select
+                      showSearch
+                      allowClear
+                      className="suite-add-case-select"
+                      placeholder="Add existing case"
+                      optionFilterProp="label"
+                      value={caseToAddId}
+                      options={(casesQuery.data ?? []).map((record) => ({
+                        label: `${record.name} - ${record.code}`,
+                        value: record.id,
+                      }))}
+                      onChange={setCaseToAddId}
+                    />
+                    <Button icon={<PlusOutlined />} onClick={handleAddCase} disabled={!caseToAddId}>
+                      Add Case
+                    </Button>
+                  </div>
+
+                  <Table<SuiteCaseDraft>
+                    rowKey={(record) => record.id ?? record.clientKey}
+                    className="suite-case-table"
+                    size="small"
+                    columns={suiteCaseColumns}
+                    dataSource={draft.cases}
+                    pagination={false}
+                    locale={{
+                      emptyText: 'Add cases to define this suite.',
+                    }}
                   />
-                  <Button icon={<PlusOutlined />} onClick={handleAddCase} disabled={!caseToAddId}>
-                    Add Case
-                  </Button>
-                </div>
-
-                <Table<SuiteCaseDraft>
-                  rowKey={(record) => record.id ?? record.clientKey}
-                  className="suite-case-table"
-                  size="small"
-                  columns={suiteCaseColumns}
-                  dataSource={draft.cases}
-                  pagination={false}
-                  locale={{
-                    emptyText: 'Add cases to define this suite.',
-                  }}
-                />
-              </section>
+                </section>
+              ) : (
+                <section className="suite-context-runs">
+                  {selectedSuiteRuns.length ? (
+                    <main className="suite-context-run-detail">
+                      <SuiteExecutionWorkspace
+                        run={selectedSuiteRun}
+                        executions={selectedSuiteRuns}
+                        onSelectExecution={setSelectedSuiteRunId}
+                        selectedRunId={selectedChildRunId}
+                        onSelectRun={setSelectedChildRunId}
+                      />
+                    </main>
+                  ) : (
+                    <div className="context-runs-empty">
+                      <Text strong>No executions yet</Text>
+                      <Text type="secondary">Run this suite to inspect aggregate and scenario results.</Text>
+                    </div>
+                  )}
+                </section>
+              )}
             </>
           ) : (
             <section className="panel-section">

@@ -10,6 +10,8 @@ type RunDetailProps = {
   run?: RunRecord
   selectedStepIndex: number
   onSelectStep: (stepIndex: number) => void
+  summaryColumns?: 1 | 2 | 3
+  showSummary?: boolean
 }
 
 const validationColumns: ColumnsType<ValidationReport> = [
@@ -50,6 +52,8 @@ export function RunDetail({
   run,
   selectedStepIndex,
   onSelectStep,
+  summaryColumns = 3,
+  showSummary = true,
 }: RunDetailProps) {
   if (!run) {
     return <div className="panel-empty">Select a run to inspect request and response evidence.</div>
@@ -60,30 +64,32 @@ export function RunDetail({
 
   return (
     <div className="workspace-detail">
-      <section className="panel-section">
-        <div className="panel-title-row">
-          <div>
-            <h2 className="panel-title">Run Detail</h2>
-            <Text type="secondary">Trace every step, payload, and validation.</Text>
+      {showSummary ? (
+        <section className="panel-section">
+          <div className="panel-title-row">
+            <div>
+              <h2 className="panel-title">Execution Detail</h2>
+              <Text type="secondary">Trace every step, payload, and validation.</Text>
+            </div>
+            <StatusPill status={run.status} />
           </div>
-          <StatusPill status={run.status} />
-        </div>
-        <Descriptions
-          size="small"
-          column={3}
-          items={[
-            { key: 'runId', label: 'Run ID', children: run.id },
-            { key: 'caseId', label: 'Case ID', children: run.caseId },
-            { key: 'duration', label: 'Duration', children: `${run.durationMs} ms` },
-            { key: 'environment', label: 'Environment', children: run.environmentName ?? run.environmentId ?? '-' },
-            { key: 'profile', label: 'Profile', children: run.profileName ?? run.profileId ?? '-' },
-            { key: 'startedAt', label: 'Started At', children: run.startedAt },
-          ]}
-        />
-        {run.errorMessage ? (
-          <Alert className="section-alert" type="error" message={run.errorMessage} showIcon />
-        ) : null}
-      </section>
+          <Descriptions
+            size="small"
+            column={summaryColumns}
+            items={[
+              { key: 'runId', label: 'Run ID', children: run.id },
+              { key: 'caseId', label: 'Case ID', children: run.caseId },
+              { key: 'duration', label: 'Duration', children: `${run.durationMs} ms` },
+              { key: 'environment', label: 'Environment', children: run.environmentName ?? run.environmentId ?? '-' },
+              { key: 'profile', label: 'Profile', children: run.profileName ?? run.profileId ?? '-' },
+              { key: 'startedAt', label: 'Started At', children: run.startedAt },
+            ]}
+          />
+          {run.errorMessage ? (
+            <Alert className="section-alert" type="error" message={run.errorMessage} showIcon />
+          ) : null}
+        </section>
+      ) : null}
 
       <div className="detail-grid">
         <section className="panel-section">
