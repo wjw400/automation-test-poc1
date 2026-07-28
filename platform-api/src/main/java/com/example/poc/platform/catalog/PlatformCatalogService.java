@@ -259,6 +259,38 @@ public class PlatformCatalogService {
     }
 
     @Transactional(readOnly = true)
+    public List<ResourceReferenceRecord> listEnvironmentReferences(String projectId, String environmentId) {
+        requireProjectEnvironment(projectId, environmentId);
+        return findEnvironmentReferences(projectId, environmentId);
+    }
+
+    @Transactional
+    public void deleteEnvironment(String projectId, String environmentId) {
+        EnvironmentEntity environment = requireProjectEnvironment(projectId, environmentId);
+        List<ResourceReferenceRecord> references = findEnvironmentReferences(projectId, environmentId);
+        if (!references.isEmpty()) {
+            throw new ResourceInUseException("Environment", references);
+        }
+        environmentRepository.delete(environment);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ResourceReferenceRecord> listProfileReferences(String projectId, String profileId) {
+        requireProjectProfile(projectId, profileId);
+        return findProfileReferences(projectId, profileId);
+    }
+
+    @Transactional
+    public void deleteProfile(String projectId, String profileId) {
+        ProfileEntity profile = requireProjectProfile(projectId, profileId);
+        List<ResourceReferenceRecord> references = findProfileReferences(projectId, profileId);
+        if (!references.isEmpty()) {
+            throw new ResourceInUseException("Profile", references);
+        }
+        profileRepository.delete(profile);
+    }
+
+    @Transactional(readOnly = true)
     public List<CaseRecord> listCases(String projectId) {
         requireProject(projectId);
         return caseRepository.findByProjectIdAndStatusNotOrderByUpdatedAtDesc(projectId, "DELETED").stream()
@@ -544,6 +576,57 @@ public class PlatformCatalogService {
                 .orElseThrow(() -> new NoSuchElementException("Profile not found: " + profileId));
     }
 
+    private EnvironmentEntity requireProjectEnvironment(String projectId, String environmentId) {
+        requireProject(projectId);
+        EnvironmentEntity environment = requireEnvironment(environmentId);
+        if (!projectId.equals(environment.getProjectId())) {
+            throw new IllegalArgumentException("Environment does not belong to the selected project");
+        }
+        return environment;
+    }
+
+    private ProfileEntity requireProjectProfile(String projectId, String profileId) {
+        requireProject(projectId);
+        ProfileEntity profile = requireProfile(profileId);
+        if (!projectId.equals(profile.getProjectId())) {
+            throw new IllegalArgumentException("Profile does not belong to the selected project");
+        }
+        return profile;
+    }
+
+    private List<ResourceReferenceRecord> findEnvironmentReferences(String projectId, String environmentId) {
+        List<ResourceReferenceRecord> references = new ArrayList<>();
+        profileRepository.findByProjectIdOrderByNameAsc(projectId).stream()
+                .filter(profile -> profile.getEnvironmentIds().contains(environmentId))
+                .forEach(profile -> references.add(new ResourceReferenceRecord("Profile", profile.getId(), profile.getName())));
+        caseRepository.findByProjectIdAndStatusNotOrderByUpdatedAtDesc(projectId, "DELETED").stream()
+                .filter(testCase -> environmentId.equals(testCase.getDefaultEnvironmentId()))
+                .forEach(testCase -> references.add(new ResourceReferenceRecord("Scenario", testCase.getId(), testCase.getName())));
+        suiteRepository.findByProjectIdOrderByUpdatedAtDesc(projectId).forEach(suite ->
+                suiteCaseRepository.findBySuiteIdOrderByCaseOrderAsc(suite.getId()).stream()
+                        .filter(suiteCase -> environmentId.equals(suiteCase.getEnvironmentId()))
+                        .forEach(suiteCase -> references.add(new ResourceReferenceRecord(
+                                "Suite",
+                                suite.getId(),
+                                suite.getName() + " / " + requireCase(suiteCase.getCaseId()).getName()))));
+        return references;
+    }
+
+    private List<ResourceReferenceRecord> findProfileReferences(String projectId, String profileId) {
+        List<ResourceReferenceRecord> references = new ArrayList<>();
+        caseRepository.findByProjectIdAndStatusNotOrderByUpdatedAtDesc(projectId, "DELETED").stream()
+                .filter(testCase -> profileId.equals(testCase.getDefaultProfileId()))
+                .forEach(testCase -> references.add(new ResourceReferenceRecord("Scenario", testCase.getId(), testCase.getName())));
+        suiteRepository.findByProjectIdOrderByUpdatedAtDesc(projectId).forEach(suite ->
+                suiteCaseRepository.findBySuiteIdOrderByCaseOrderAsc(suite.getId()).stream()
+                        .filter(suiteCase -> profileId.equals(suiteCase.getProfileId()))
+                        .forEach(suiteCase -> references.add(new ResourceReferenceRecord(
+                                "Suite",
+                                suite.getId(),
+                                suite.getName() + " / " + requireCase(suiteCase.getCaseId()).getName()))));
+        return references;
+    }
+
     private FolderEntity requireFolder(String folderId) {
         return folderRepository.findById(folderId)
                 .orElseThrow(() -> new NoSuchElementException("Folder not found: " + folderId));
@@ -772,6 +855,22 @@ public class PlatformCatalogService {
             String recipientPrivateKeyPassphrase,
             List<String> environmentIds,
             boolean enabled) {
+    }
+
+    public record ResourceReferenceRecord(String type, String id, String name) {
+    }
+
+    public static class ResourceInUseException extends RuntimeException {
+        private final List<ResourceReferenceRecord> references;
+
+        public ResourceInUseException(String resourceType, List<ResourceReferenceRecord> references) {
+            super(resourceType + " is still used by " + references.size() + " item(s)");
+            this.references = List.copyOf(references);
+        }
+
+        public List<ResourceReferenceRecord> getReferences() {
+            return references;
+        }
     }
 
     public record FolderRecord(

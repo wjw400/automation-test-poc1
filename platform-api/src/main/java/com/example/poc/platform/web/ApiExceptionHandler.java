@@ -1,5 +1,7 @@
 package com.example.poc.platform.web;
 
+import com.example.poc.platform.api.ApiSpecService.ApiSpecInUseException;
+import com.example.poc.platform.catalog.PlatformCatalogService.ResourceInUseException;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import org.springframework.http.HttpStatus;
@@ -24,5 +26,23 @@ public class ApiExceptionHandler {
         return Map.of(
                 "error", "BAD_REQUEST",
                 "message", exception.getMessage());
+    }
+
+    @ExceptionHandler(ApiSpecInUseException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public Map<String, Object> handleApiSpecInUse(ApiSpecInUseException exception) {
+        return Map.of(
+                "error", "API_SPEC_IN_USE",
+                "message", exception.getMessage(),
+                "references", exception.getReferences());
+    }
+
+    @ExceptionHandler(ResourceInUseException.class)
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public Map<String, Object> handleResourceInUse(ResourceInUseException exception) {
+        return Map.of(
+                "error", "RESOURCE_IN_USE",
+                "message", exception.getMessage(),
+                "references", exception.getReferences());
     }
 }

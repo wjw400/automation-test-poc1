@@ -4,8 +4,14 @@ import com.example.poc.platform.catalog.PlatformCatalogService;
 import com.example.poc.platform.persistence.JsonCodec;
 import com.example.poc.platform.persistence.entity.ApiOperationEntity;
 import com.example.poc.platform.persistence.entity.ApiSpecEntity;
+import com.example.poc.platform.persistence.entity.CaseEntity;
 import com.example.poc.platform.persistence.repo.ApiOperationRepository;
 import com.example.poc.platform.persistence.repo.ApiSpecRepository;
+import com.example.poc.platform.persistence.repo.CaseRepository;
+import com.example.poc.platform.persistence.repo.EnvironmentRepository;
+import com.example.poc.engine.ApiTestCase;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import io.swagger.parser.OpenAPIParser;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
@@ -29,16 +35,23 @@ public class ApiSpecService {
     private final PlatformCatalogService catalogService;
     private final ApiSpecRepository apiSpecRepository;
     private final ApiOperationRepository apiOperationRepository;
+    private final CaseRepository caseRepository;
+    private final EnvironmentRepository environmentRepository;
     private final JsonCodec jsonCodec;
+    private final ObjectMapper yamlMapper = new ObjectMapper(new YAMLFactory());
 
     public ApiSpecService(
             PlatformCatalogService catalogService,
             ApiSpecRepository apiSpecRepository,
             ApiOperationRepository apiOperationRepository,
+            CaseRepository caseRepository,
+            EnvironmentRepository environmentRepository,
             JsonCodec jsonCodec) {
         this.catalogService = catalogService;
         this.apiSpecRepository = apiSpecRepository;
         this.apiOperationRepository = apiOperationRepository;
+        this.caseRepository = caseRepository;
+        this.environmentRepository = environmentRepository;
         this.jsonCodec = jsonCodec;
     }
 
@@ -104,6 +117,59 @@ public class ApiSpecService {
             throw new IllegalArgumentException("API spec does not belong to the selected project");
         }
         return spec.getContent();
+    }
+
+    @Transactional
+    public List<ApiSpecReferenceRecord> listReferences(String projectId, String apiSpecId) {
+        requireProjectSpec(projectId, apiSpecId);
+        return findReferences(projectId, apiSpecId);
+    }
+
+    @Transactional
+    public void deleteSpec(String projectId, String apiSpecId) {
+        ApiSpecEntity spec = requireProjectSpec(projectId, apiSpecId);
+        List<ApiSpecReferenceRecord> references = findReferences(projectId, apiSpecId);
+        if (!references.isEmpty()) {
+            throw new ApiSpecInUseException(references);
+        }
+
+        environmentRepository.findByProjectIdOrderByNameAsc(projectId).forEach(environment -> {
+            Map<String, String> endpoints = new LinkedHashMap<>(jsonCodec.readStringMap(environment.getEndpointsJson()));
+            if (endpoints.remove(apiSpecId) != null) {
+                environment.setEndpointsJson(jsonCodec.write(endpoints));
+            }
+        });
+        apiOperationRepository.deleteByApiSpecId(apiSpecId);
+        apiSpecRepository.delete(spec);
+    }
+
+    private ApiSpecEntity requireProjectSpec(String projectId, String apiSpecId) {
+        catalogService.requireProjectRecord(projectId);
+        ApiSpecEntity spec = apiSpecRepository.findById(apiSpecId)
+                .orElseThrow(() -> new NoSuchElementException("API spec not found: " + apiSpecId));
+        if (!projectId.equals(spec.getProjectId())) {
+            throw new IllegalArgumentException("API spec does not belong to the selected project");
+        }
+        return spec;
+    }
+
+    private List<ApiSpecReferenceRecord> findReferences(String projectId, String apiSpecId) {
+        return caseRepository.findByProjectIdAndStatusNotOrderByUpdatedAtDesc(projectId, "DELETED").stream()
+                .filter(testCase -> usesApiSpec(testCase, apiSpecId))
+                .map(testCase -> new ApiSpecReferenceRecord(testCase.getId(), testCase.getName()))
+                .toList();
+    }
+
+    private boolean usesApiSpec(CaseEntity testCase, String apiSpecId) {
+        try {
+            ApiTestCase definition = yamlMapper.readValue(testCase.getContent(), ApiTestCase.class);
+            return definition.getSteps().stream()
+                    .anyMatch(step -> apiSpecId.equals(step.getOperation().getApiSpecId()));
+        } catch (IOException exception) {
+            throw new IllegalArgumentException(
+                    "Cannot verify API spec references because scenario has invalid YAML: " + testCase.getName(),
+                    exception);
+        }
     }
 
     private List<ApiOperationEntity> extractOperations(String projectId, String apiSpecId, OpenAPI openAPI) {
@@ -208,6 +274,22 @@ public class ApiSpecService {
             int operationCount,
             Instant createdAt,
             Instant updatedAt) {
+    }
+
+    public record ApiSpecReferenceRecord(String caseId, String caseName) {
+    }
+
+    public static class ApiSpecInUseException extends RuntimeException {
+        private final List<ApiSpecReferenceRecord> references;
+
+        public ApiSpecInUseException(List<ApiSpecReferenceRecord> references) {
+            super("API spec is still used by " + references.size() + " test scenario(s)");
+            this.references = List.copyOf(references);
+        }
+
+        public List<ApiSpecReferenceRecord> getReferences() {
+            return references;
+        }
     }
 
     public record ApiOperationRecord(

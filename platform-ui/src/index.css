@@ -411,12 +411,35 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
+  width: 100%;
   min-height: 28px;
+  padding-right: 4px;
   color: #475569;
   font-size: 12px;
   font-weight: 600;
   cursor: pointer;
   list-style: none;
+  border-radius: 4px;
+}
+
+.workbench-tree-folder > summary::-webkit-details-marker {
+  display: none;
+}
+
+.workbench-tree-folder > summary:hover,
+.workbench-tree-folder > summary:focus-visible {
+  background: #eef2f7;
+}
+
+.workbench-tree-chevron {
+  flex: 0 0 auto;
+  color: #94a3b8;
+  font-size: 9px;
+  transition: transform 120ms ease;
+}
+
+.workbench-tree-folder[open] > summary .workbench-tree-chevron {
+  transform: rotate(90deg);
 }
 
 .workbench-asset-row {
@@ -442,10 +465,58 @@ body {
   background: #eef2f7;
 }
 
-.workbench-asset-row span:last-child {
+.workbench-asset-row:focus-visible {
+  outline: 2px solid #9ec5ff;
+  outline-offset: -2px;
+}
+
+.workbench-asset-row.active {
+  color: #1d4ed8;
+  background: #eaf2ff;
+}
+
+.workbench-tree-item-name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.workbench-tree-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  margin-left: auto;
+}
+
+.workbench-tree-action {
+  flex: 0 0 auto;
+  width: 24px;
+  min-width: 24px;
+  height: 24px;
+  padding: 0;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.workbench-asset-row:hover .workbench-tree-action,
+.workbench-asset-row:focus-within .workbench-tree-action,
+.workbench-asset-row.active .workbench-tree-action,
+.workbench-tree-folder > summary:hover .workbench-tree-action,
+.workbench-tree-folder > summary:focus-within .workbench-tree-action {
+  opacity: 1;
+  visibility: visible;
+}
+
+.scenario-dialog-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.scenario-folder-select {
+  width: 100%;
 }
 
 .workbench-main {
@@ -581,6 +652,15 @@ body {
   cursor: pointer;
 }
 
+.run-history-row:focus-visible {
+  outline: 2px solid #9ec5ff;
+  outline-offset: -2px;
+}
+
+.run-history-row.active {
+  background: #eaf2ff;
+}
+
 .run-history-row-title {
   display: flex;
   align-items: center;
@@ -589,6 +669,20 @@ body {
   color: #1f2937;
   font-size: 12px;
   font-weight: 600;
+}
+
+.run-history-row-actions {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+}
+
+.run-history-row:hover .workbench-tree-action,
+.run-history-row:focus-within .workbench-tree-action,
+.run-history-row.active .workbench-tree-action {
+  opacity: 1;
+  visibility: visible;
 }
 
 .run-history-group-title {

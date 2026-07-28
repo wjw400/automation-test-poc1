@@ -38,6 +38,12 @@ export type Profile = {
   enabled: boolean
 }
 
+export type ResourceReferenceRecord = {
+  type: string
+  id: string
+  name: string
+}
+
 export type CaseRecord = {
   id: string
   projectId: string
@@ -251,6 +257,11 @@ export type ApiSpecRecord = {
   operationCount: number
   createdAt: string
   updatedAt: string
+}
+
+export type ApiSpecReferenceRecord = {
+  caseId: string
+  caseName: string
 }
 
 export type ApiOperationRecord = {

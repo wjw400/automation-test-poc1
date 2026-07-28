@@ -6,6 +6,7 @@ import com.example.poc.platform.catalog.PlatformCatalogService.EnvironmentRecord
 import com.example.poc.platform.catalog.PlatformCatalogService.FolderRecord;
 import com.example.poc.platform.catalog.PlatformCatalogService.ProfileRecord;
 import com.example.poc.platform.catalog.PlatformCatalogService.ProjectRecord;
+import com.example.poc.platform.catalog.PlatformCatalogService.ResourceReferenceRecord;
 import com.example.poc.platform.catalog.PlatformCatalogService.SuiteRecord;
 import com.example.poc.platform.catalog.PlatformCatalogService.UpsertCaseRequest;
 import com.example.poc.platform.catalog.PlatformCatalogService.UpsertEnvironmentRequest;
@@ -72,6 +73,20 @@ public class CatalogController {
                 request.status()));
     }
 
+    @GetMapping("/projects/{projectId}/environments/{environmentId}/references")
+    public List<ResourceReferenceRecord> listEnvironmentReferences(
+            @PathVariable("projectId") String projectId,
+            @PathVariable("environmentId") String environmentId) {
+        return catalogService.listEnvironmentReferences(projectId, environmentId);
+    }
+
+    @DeleteMapping("/projects/{projectId}/environments/{environmentId}")
+    public void deleteEnvironment(
+            @PathVariable("projectId") String projectId,
+            @PathVariable("environmentId") String environmentId) {
+        catalogService.deleteEnvironment(projectId, environmentId);
+    }
+
     @GetMapping("/projects/{projectId}/profiles")
     public List<ProfileRecord> listProfiles(@PathVariable("projectId") String projectId) {
         return catalogService.listProfiles(projectId);
@@ -99,6 +114,20 @@ public class CatalogController {
                 request.recipientPrivateKeyPassphrase(),
                 request.environmentIds(),
                 request.enabled()));
+    }
+
+    @GetMapping("/projects/{projectId}/profiles/{profileId}/references")
+    public List<ResourceReferenceRecord> listProfileReferences(
+            @PathVariable("projectId") String projectId,
+            @PathVariable("profileId") String profileId) {
+        return catalogService.listProfileReferences(projectId, profileId);
+    }
+
+    @DeleteMapping("/projects/{projectId}/profiles/{profileId}")
+    public void deleteProfile(
+            @PathVariable("projectId") String projectId,
+            @PathVariable("profileId") String profileId) {
+        catalogService.deleteProfile(projectId, profileId);
     }
 
     @GetMapping("/projects/{projectId}/folders")

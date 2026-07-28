@@ -2,12 +2,14 @@ package com.example.poc.platform.web;
 
 import com.example.poc.platform.api.ApiSpecService;
 import com.example.poc.platform.api.ApiSpecService.ApiOperationRecord;
+import com.example.poc.platform.api.ApiSpecService.ApiSpecReferenceRecord;
 import com.example.poc.platform.api.ApiSpecService.ApiSpecRecord;
 import java.util.List;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -55,5 +57,20 @@ public class ApiSpecController {
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_TYPE, "application/yaml; charset=UTF-8")
                 .body(apiSpecService.getSpecContent(projectId, apiSpecId));
+    }
+
+    @GetMapping("/projects/{projectId}/api-specs/{apiSpecId}/references")
+    public List<ApiSpecReferenceRecord> listReferences(
+            @PathVariable("projectId") String projectId,
+            @PathVariable("apiSpecId") String apiSpecId) {
+        return apiSpecService.listReferences(projectId, apiSpecId);
+    }
+
+    @DeleteMapping("/projects/{projectId}/api-specs/{apiSpecId}")
+    public ResponseEntity<Void> deleteSpec(
+            @PathVariable("projectId") String projectId,
+            @PathVariable("apiSpecId") String apiSpecId) {
+        apiSpecService.deleteSpec(projectId, apiSpecId);
+        return ResponseEntity.noContent().build();
     }
 }

@@ -2,12 +2,14 @@ import { apiClient } from './client'
 import type {
   ApiOperationRecord,
   ApiSpecRecord,
+  ApiSpecReferenceRecord,
   CaseRecord,
   Environment,
   FolderRecord,
   Profile,
   Project,
   RunRecord,
+  ResourceReferenceRecord,
   SaveCaseInput,
   SaveEnvironmentInput,
   SaveFolderInput,
@@ -122,6 +124,17 @@ export const platformApi = {
     return data
   },
 
+  async listEnvironmentReferences(projectId: string, environmentId: string) {
+    const { data } = await apiClient.get<ResourceReferenceRecord[]>(
+      `/projects/${projectId}/environments/${environmentId}/references`,
+    )
+    return data
+  },
+
+  async deleteEnvironment(projectId: string, environmentId: string) {
+    await apiClient.delete(`/projects/${projectId}/environments/${environmentId}`)
+  },
+
   async listProfiles(projectId: string) {
     const { data } = await apiClient.get<Profile[]>(`/projects/${projectId}/profiles`)
     return data
@@ -141,6 +154,17 @@ export const platformApi = {
       payload,
     )
     return data
+  },
+
+  async listProfileReferences(projectId: string, profileId: string) {
+    const { data } = await apiClient.get<ResourceReferenceRecord[]>(
+      `/projects/${projectId}/profiles/${profileId}/references`,
+    )
+    return data
+  },
+
+  async deleteProfile(projectId: string, profileId: string) {
+    await apiClient.delete(`/projects/${projectId}/profiles/${profileId}`)
   },
 
   async listRuns() {
@@ -191,6 +215,17 @@ export const platformApi = {
       },
     )
     return data
+  },
+
+  async listApiSpecReferences(projectId: string, apiSpecId: string) {
+    const { data } = await apiClient.get<ApiSpecReferenceRecord[]>(
+      `/projects/${projectId}/api-specs/${apiSpecId}/references`,
+    )
+    return data
+  },
+
+  async deleteApiSpec(projectId: string, apiSpecId: string) {
+    await apiClient.delete(`/projects/${projectId}/api-specs/${apiSpecId}`)
   },
 
   async listOperations(projectId: string) {

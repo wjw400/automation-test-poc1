@@ -21,7 +21,6 @@ import { useTranslation } from 'react-i18next'
 import { BrowserRouter, Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { ConfigPage } from './pages/ConfigPage'
 import { CasesPage } from './pages/CasesPage'
-import { ApiCatalogPage } from './pages/ApiCatalogPage'
 import { ProjectsPage } from './pages/ProjectsPage'
 import { RunsPage } from './pages/RunsPage'
 import { SuitesPage } from './pages/SuitesPage'
@@ -61,9 +60,7 @@ function AppShell() {
   const requestedView = searchParams.get('view')
   const selectedKey = location.pathname.startsWith('/workspace')
     ? navigationItems.some((item) => item.key === requestedView) ? requestedView! : 'scenarios'
-    : location.pathname.startsWith('/apis')
-      ? 'apis'
-      : location.pathname.startsWith('/suites')
+    : location.pathname.startsWith('/suites')
         ? 'suites'
         : location.pathname.startsWith('/config')
           ? 'environments'
@@ -220,7 +217,6 @@ function AppShell() {
             <Routes>
               <Route path="/" element={<Navigate to="/projects" replace />} />
               <Route path="/workspace" element={<WorkbenchPage onUnsavedGuardChange={setUnsavedGuard} />} />
-              <Route path="/apis" element={<ApiCatalogPage />} />
               <Route path="/cases" element={<CasesPage />} />
               <Route path="/suites" element={<SuitesPage />} />
               <Route path="/runs" element={<RunsPage />} />

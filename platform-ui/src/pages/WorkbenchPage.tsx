@@ -1,17 +1,25 @@
 import {
   ApiOutlined,
   CloseOutlined,
+  CopyOutlined,
+  DeleteOutlined,
+  EditOutlined,
   ExperimentOutlined,
   FileTextOutlined,
+  FolderOutlined,
   FolderOpenOutlined,
   GlobalOutlined,
   KeyOutlined,
+  MoreOutlined,
+  PlayCircleOutlined,
   PlusOutlined,
   ProfileOutlined,
+  RightOutlined,
   SearchOutlined,
+  UploadOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { App, Button, Dropdown, Input, Modal, Typography } from 'antd'
+import { App, Button, Dropdown, Input, Modal, Select, Typography, Upload } from 'antd'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
@@ -26,12 +34,21 @@ import { StoplightApi } from '../components/StoplightApi'
 import { SuiteRunDetail } from '../components/SuiteRunDetail'
 import type {
   ApiSpecRecord,
+  ApiSpecReferenceRecord,
   CaseRecord,
+  Environment,
   FolderRecord,
+  Profile,
+  ResourceReferenceRecord,
   RunRecord,
+  SaveCaseInput,
+  SaveEnvironmentInput,
+  SaveProfileInput,
+  SaveSuiteInput,
+  SuiteRecord,
   SuiteRunRecord,
 } from '../types/platform'
-import { stringifyDsl } from '../utils/caseDsl'
+import { parseDsl, stringifyDsl } from '../utils/caseDsl'
 import { formatDateTime } from '../i18n'
 import { CasesPage } from './CasesPage'
 import { SuitesPage } from './SuitesPage'
@@ -47,6 +64,12 @@ type WorkbenchTab = {
   resourceId: string
   title: string
   dirty: boolean
+}
+
+type FolderDialogState = {
+  mode: 'create' | 'rename' | 'move'
+  folder?: FolderRecord
+  parentFolderId?: string
 }
 
 export type WorkspaceUnsavedGuard = {
@@ -70,6 +93,21 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
   const [runFilter, setRunFilter] = useState('')
   const [createDialog, setCreateDialog] = useState<'scenario' | 'suite'>()
   const [createName, setCreateName] = useState('')
+  const [createFolderId, setCreateFolderId] = useState<string>()
+  const [scenarioToRename, setScenarioToRename] = useState<CaseRecord>()
+  const [scenarioName, setScenarioName] = useState('')
+  const [scenarioToMove, setScenarioToMove] = useState<CaseRecord>()
+  const [moveFolderId, setMoveFolderId] = useState<string>()
+  const [suiteToRename, setSuiteToRename] = useState<SuiteRecord>()
+  const [suiteName, setSuiteName] = useState('')
+  const [environmentToRename, setEnvironmentToRename] = useState<Environment>()
+  const [environmentName, setEnvironmentName] = useState('')
+  const [profileToRename, setProfileToRename] = useState<Profile>()
+  const [profileName, setProfileName] = useState('')
+  const [isImportApiSpecOpen, setIsImportApiSpecOpen] = useState(false)
+  const [folderDialog, setFolderDialog] = useState<FolderDialogState>()
+  const [folderName, setFolderName] = useState('')
+  const [folderParentId, setFolderParentId] = useState<string>()
   const saveHandlersRef = useRef(new Map<string, () => Promise<void>>())
 
   const projectsQuery = useQuery({
@@ -125,6 +163,15 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
     saveHandlersRef.current.clear()
     setTabs([])
     setActiveTabKey(undefined)
+    setCreateDialog(undefined)
+    setCreateFolderId(undefined)
+    setScenarioToRename(undefined)
+    setScenarioToMove(undefined)
+    setSuiteToRename(undefined)
+    setEnvironmentToRename(undefined)
+    setProfileToRename(undefined)
+    setIsImportApiSpecOpen(false)
+    setFolderDialog(undefined)
   }, [projectId])
 
   useEffect(() => {
@@ -279,6 +326,7 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
             variables: {},
             steps: [],
           }),
+          folderId: createFolderId,
           status: 'ACTIVE',
         }),
       }
@@ -287,10 +335,495 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
       await queryClient.invalidateQueries({ queryKey: [type === 'suite' ? 'suites' : 'cases', projectId] })
       setCreateDialog(undefined)
       setCreateName('')
+      setCreateFolderId(undefined)
       openTab(type, record.id, record.name)
       void message.success(type === 'suite' ? 'Suite created' : 'Scenario created')
     },
   })
+
+  const importApiSpecMutation = useMutation({
+    mutationFn: async (file: File) => {
+      if (!projectId) {
+        throw new Error(t('scenario:messages.selectProjectFirst'))
+      }
+      return platformApi.importApiSpec(projectId, file)
+    },
+    onSuccess: async (record) => {
+      await queryClient.invalidateQueries({ queryKey: ['api-specs', projectId] })
+      setIsImportApiSpecOpen(false)
+      openTab('apiSpec', record.id, record.title || record.name)
+      void message.success(t('api:imported'))
+    },
+    onError: () => {
+      void message.error(t('api:importError'))
+    },
+  })
+
+  const deleteApiSpecMutation = useMutation({
+    mutationFn: async (apiSpecId: string) => {
+      if (!projectId) {
+        throw new Error(t('scenario:messages.selectProjectFirst'))
+      }
+      await platformApi.deleteApiSpec(projectId, apiSpecId)
+      return apiSpecId
+    },
+    onSuccess: async (apiSpecId) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['api-specs', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['operations', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['environments', projectId] }),
+      ])
+      closeTabNow(`apiSpec:${apiSpecId}`)
+      void message.success(t('api:deleted'))
+    },
+    onError: () => {
+      void message.error(t('api:deleteFailed'))
+    },
+  })
+
+  const renameEnvironmentMutation = useMutation({
+    mutationFn: async ({ record, name }: { record: Environment, name: string }) => {
+      if (!projectId) throw new Error(t('scenario:messages.selectProjectFirst'))
+      return platformApi.updateEnvironment(projectId, record.id, environmentInputFromRecord(record, { name }))
+    },
+    onSuccess: async (record) => {
+      await queryClient.invalidateQueries({ queryKey: ['environments', projectId] })
+      updateTab(`environment:${record.id}`, { title: record.name })
+      setEnvironmentToRename(undefined)
+      void message.success(t('config:environmentSaved'))
+    },
+    onError: () => void message.error(t('config:environmentSaveFailed')),
+  })
+
+  const renameProfileMutation = useMutation({
+    mutationFn: async ({ record, name }: { record: Profile, name: string }) => {
+      if (!projectId) throw new Error(t('scenario:messages.selectProjectFirst'))
+      return platformApi.updateProfile(projectId, record.id, profileInputFromRecord(record, { name }))
+    },
+    onSuccess: async (record) => {
+      await queryClient.invalidateQueries({ queryKey: ['profiles', projectId] })
+      updateTab(`profile:${record.id}`, { title: record.name })
+      setProfileToRename(undefined)
+      void message.success(t('config:profileSaved'))
+    },
+    onError: () => void message.error(t('config:profileSaveFailed')),
+  })
+
+  const deleteEnvironmentMutation = useMutation({
+    mutationFn: async (environmentId: string) => {
+      if (!projectId) throw new Error(t('scenario:messages.selectProjectFirst'))
+      await platformApi.deleteEnvironment(projectId, environmentId)
+      return environmentId
+    },
+    onSuccess: async (environmentId) => {
+      await queryClient.invalidateQueries({ queryKey: ['environments', projectId] })
+      closeTabNow(`environment:${environmentId}`)
+      void message.success(t('config:environmentDeleted'))
+    },
+    onError: () => void message.error(t('config:environmentDeleteFailed')),
+  })
+
+  const deleteProfileMutation = useMutation({
+    mutationFn: async (profileId: string) => {
+      if (!projectId) throw new Error(t('scenario:messages.selectProjectFirst'))
+      await platformApi.deleteProfile(projectId, profileId)
+      return profileId
+    },
+    onSuccess: async (profileId) => {
+      await queryClient.invalidateQueries({ queryKey: ['profiles', projectId] })
+      closeTabNow(`profile:${profileId}`)
+      void message.success(t('config:profileDeleted'))
+    },
+    onError: () => void message.error(t('config:profileDeleteFailed')),
+  })
+
+  const renameScenarioMutation = useMutation({
+    mutationFn: async ({ record, name }: { record: CaseRecord, name: string }) => {
+      if (!projectId) {
+        throw new Error(t('scenario:messages.selectProjectFirst'))
+      }
+      return platformApi.updateCase(projectId, record.id, caseInputFromRecord(record, {
+        name,
+        content: renameScenarioInDsl(record.content, name),
+      }))
+    },
+    onSuccess: async (record) => {
+      await queryClient.invalidateQueries({ queryKey: ['cases', projectId] })
+      updateTab(`scenario:${record.id}`, { title: record.name })
+      setScenarioToRename(undefined)
+    },
+    onError: () => {
+      void message.error(t('scenario:messages.renameFailed'))
+    },
+  })
+
+  const moveScenarioMutation = useMutation({
+    mutationFn: async () => {
+      if (!projectId || !scenarioToMove) {
+        throw new Error(t('scenario:messages.selectScenarioToMove'))
+      }
+      return platformApi.updateCase(projectId, scenarioToMove.id, caseInputFromRecord(scenarioToMove, {
+        folderId: moveFolderId,
+      }))
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['cases', projectId] })
+      setScenarioToMove(undefined)
+      void message.success(t('scenario:messages.moved'))
+    },
+  })
+
+  const duplicateScenarioMutation = useMutation({
+    mutationFn: async (record: CaseRecord) => {
+      if (!projectId) {
+        throw new Error(t('scenario:messages.selectProjectFirst'))
+      }
+      const name = `${record.name} copy`
+      return platformApi.createCase(projectId, caseInputFromRecord(record, {
+        name,
+        code: `${record.code.slice(0, 75)}-copy-${Date.now()}`,
+        content: renameScenarioInDsl(record.content, name),
+      }))
+    },
+    onSuccess: async (record) => {
+      await queryClient.invalidateQueries({ queryKey: ['cases', projectId] })
+      openTab('scenario', record.id, record.name)
+      void message.success(t('scenario:messages.duplicated'))
+    },
+  })
+
+  const deleteScenarioMutation = useMutation({
+    mutationFn: platformApi.deleteCase,
+    onSuccess: async (_, caseId) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['cases', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['suites', projectId] }),
+      ])
+      closeTabNow(`scenario:${caseId}`)
+      void message.success(t('scenario:messages.caseDeleted'))
+    },
+    onError: () => {
+      void message.error(t('scenario:messages.deleteFailed'))
+    },
+  })
+
+  const runScenarioMutation = useMutation({
+    mutationFn: async (record: CaseRecord) => platformApi.startRun({
+      caseId: record.id,
+      triggeredBy: 'platform-ui',
+    }),
+    onSuccess: async (run) => {
+      await queryClient.invalidateQueries({ queryKey: ['runs'] })
+      openTab('run', run.id, `${t('execution:run')} ${shortId(run.id)}`)
+      void message.success(run.status === 'FAILED' ? t('scenario:runFailed') : t('scenario:runPassed'))
+    },
+    onError: () => {
+      void message.error(t('scenario:messages.runFailed'))
+    },
+  })
+
+  const saveFolderMutation = useMutation({
+    mutationFn: async () => {
+      if (!projectId || !folderDialog) {
+        throw new Error(t('scenario:folders.selectFirst'))
+      }
+      const name = folderName.trim()
+      if (!name) {
+        throw new Error(t('scenario:folders.nameRequired'))
+      }
+      const parentFolderId = folderDialog.mode === 'move'
+        ? folderParentId
+        : folderDialog.parentFolderId ?? folderDialog.folder?.parentFolderId ?? undefined
+      return folderDialog.folder
+        ? platformApi.updateFolder(projectId, folderDialog.folder.id, { name, parentFolderId })
+        : platformApi.createFolder(projectId, { name, parentFolderId })
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['folders', projectId] })
+      setFolderDialog(undefined)
+      void message.success(t('scenario:folders.saved'))
+    },
+    onError: (error) => {
+      void message.error(error instanceof Error ? error.message : t('scenario:folders.saveFailed'))
+    },
+  })
+
+  const deleteFolderMutation = useMutation({
+    mutationFn: platformApi.deleteFolder,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['folders', projectId] })
+      void message.success(t('scenario:folders.deleted'))
+    },
+    onError: (error) => {
+      void message.error(error instanceof Error ? error.message : t('scenario:folders.emptyError'))
+    },
+  })
+
+  const renameSuiteMutation = useMutation({
+    mutationFn: async ({ record, name }: { record: SuiteRecord, name: string }) => {
+      if (!projectId) {
+        throw new Error(t('suite:selectProject'))
+      }
+      return platformApi.updateSuite(projectId, record.id, suiteInputFromRecord(record, { name }))
+    },
+    onSuccess: async (record) => {
+      await queryClient.invalidateQueries({ queryKey: ['suites', projectId] })
+      updateTab(`suite:${record.id}`, { title: record.name })
+      setSuiteToRename(undefined)
+      void message.success(t('suite:saved'))
+    },
+    onError: () => {
+      void message.error(t('suite:saveFailed'))
+    },
+  })
+
+  const duplicateSuiteMutation = useMutation({
+    mutationFn: async (record: SuiteRecord) => {
+      if (!projectId) {
+        throw new Error(t('suite:selectProject'))
+      }
+      return platformApi.createSuite(
+        projectId,
+        suiteInputFromRecord(record, { name: `${record.name} copy` }, false),
+      )
+    },
+    onSuccess: async (record) => {
+      await queryClient.invalidateQueries({ queryKey: ['suites', projectId] })
+      openTab('suite', record.id, record.name)
+      void message.success(t('suite:duplicated'))
+    },
+    onError: () => {
+      void message.error(t('suite:saveFailed'))
+    },
+  })
+
+  const deleteSuiteMutation = useMutation({
+    mutationFn: platformApi.deleteSuite,
+    onSuccess: async (_, suiteId) => {
+      await queryClient.invalidateQueries({ queryKey: ['suites', projectId] })
+      closeTabNow(`suite:${suiteId}`)
+      void message.success(t('suite:deleted'))
+    },
+    onError: () => {
+      void message.error(t('suite:saveFailed'))
+    },
+  })
+
+  const runSuiteMutation = useMutation({
+    mutationFn: async (record: SuiteRecord) => platformApi.startSuiteRun({
+      suiteId: record.id,
+      triggeredBy: 'platform-ui',
+    }),
+    onSuccess: async (run) => {
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['runs'] }),
+        queryClient.invalidateQueries({ queryKey: ['suite-runs'] }),
+      ])
+      openTab('suiteRun', run.id, `${run.suiteName} · ${t('execution:execution')}`)
+      void message.success(run.status === 'PASSED' ? t('suite:runPassed') : t('suite:runFailed'))
+    },
+    onError: () => {
+      void message.error(t('suite:runFailedGeneric'))
+    },
+  })
+
+  const isScenarioTabDirty = (caseId: string) => Boolean(
+    tabs.find((tab) => tab.key === `scenario:${caseId}`)?.dirty,
+  )
+  const isSuiteTabDirty = (suiteId: string) => Boolean(
+    tabs.find((tab) => tab.key === `suite:${suiteId}`)?.dirty,
+  )
+  const isConfigTabDirty = (type: 'environment' | 'profile', resourceId: string) => Boolean(
+    tabs.find((tab) => tab.key === `${type}:${resourceId}`)?.dirty,
+  )
+
+  const openCreateScenario = (folderId?: string) => {
+    setCreateName('')
+    setCreateFolderId(folderId)
+    setCreateDialog('scenario')
+  }
+
+  const openFolderDialog = (mode: FolderDialogState['mode'], folder?: FolderRecord, parentFolderId?: string) => {
+    setFolderDialog({ mode, folder, parentFolderId })
+    setFolderName(mode === 'create' ? '' : folder?.name ?? '')
+    setFolderParentId(mode === 'move'
+      ? folder?.parentFolderId ?? undefined
+      : parentFolderId ?? folder?.parentFolderId ?? undefined)
+  }
+
+  const openRenameScenario = (record: CaseRecord) => {
+    if (isScenarioTabDirty(record.id)) {
+      void message.warning(t('scenario:messages.saveBeforeRename'))
+      return
+    }
+    setScenarioToRename(record)
+    setScenarioName(record.name)
+  }
+
+  const openMoveScenario = (record: CaseRecord) => {
+    if (isScenarioTabDirty(record.id)) {
+      void message.warning(t('scenario:messages.saveBeforeMove'))
+      return
+    }
+    setScenarioToMove(record)
+    setMoveFolderId(record.folderId ?? undefined)
+  }
+
+  const runScenario = (record: CaseRecord) => {
+    if (isScenarioTabDirty(record.id)) {
+      void message.warning(t('scenario:messages.saveBeforeRun'))
+      return
+    }
+    void runScenarioMutation.mutateAsync(record)
+  }
+
+  const confirmDeleteScenario = (record: CaseRecord) => {
+    modal.confirm({
+      title: t('scenario:dialogs.delete'),
+      content: t('scenario:messages.deleteCaseDescription', { name: record.name }),
+      okText: t('common:actions.delete'),
+      okButtonProps: { danger: true },
+      cancelText: t('common:actions.cancel'),
+      onOk: () => deleteScenarioMutation.mutateAsync(record.id),
+    })
+  }
+
+  const confirmDeleteFolder = (folder: FolderRecord) => {
+    modal.confirm({
+      title: t('scenario:folders.deleteConfirm'),
+      content: t('scenario:folders.deleteDescription', { name: folder.name }),
+      okText: t('common:actions.delete'),
+      okButtonProps: { danger: true },
+      cancelText: t('common:actions.cancel'),
+      onOk: () => deleteFolderMutation.mutateAsync(folder.id),
+    })
+  }
+
+  const openRenameSuite = (record: SuiteRecord) => {
+    if (isSuiteTabDirty(record.id)) {
+      void message.warning(t('suite:saveBeforeChange'))
+      return
+    }
+    setSuiteToRename(record)
+    setSuiteName(record.name)
+  }
+
+  const runSuite = (record: SuiteRecord) => {
+    if (isSuiteTabDirty(record.id)) {
+      void message.warning(t('suite:saveBeforeRun'))
+      return
+    }
+    void runSuiteMutation.mutateAsync(record)
+  }
+
+  const confirmDeleteSuite = (record: SuiteRecord) => {
+    modal.confirm({
+      title: t('suite:deleteConfirm'),
+      content: t('suite:deleteDescription', { name: record.name }),
+      okText: t('common:actions.delete'),
+      okButtonProps: { danger: true },
+      cancelText: t('common:actions.cancel'),
+      onOk: () => deleteSuiteMutation.mutateAsync(record.id),
+    })
+  }
+
+  const confirmDeleteApiSpec = async (record: ApiSpecRecord) => {
+    if (!projectId) {
+      void message.error(t('scenario:messages.selectProjectFirst'))
+      return
+    }
+    let references: ApiSpecReferenceRecord[]
+    try {
+      references = await platformApi.listApiSpecReferences(projectId, record.id)
+    } catch {
+      void message.error(t('api:referenceCheckFailed'))
+      return
+    }
+
+    if (references.length) {
+      modal.warning({
+        title: t('api:deleteBlockedTitle'),
+        content: (
+          <div className="api-spec-reference-list">
+            <Text>{t('api:deleteBlockedDescription')}</Text>
+            <ul>{references.map((reference) => <li key={reference.caseId}>{reference.caseName}</li>)}</ul>
+          </div>
+        ),
+        okText: t('common:actions.close'),
+      })
+      return
+    }
+
+    modal.confirm({
+      title: t('api:deleteConfirm'),
+      content: t('api:deleteDescription', { name: record.title || record.name }),
+      okText: t('common:actions.delete'),
+      okButtonProps: { danger: true },
+      cancelText: t('common:actions.cancel'),
+      onOk: () => deleteApiSpecMutation.mutateAsync(record.id),
+    })
+  }
+
+  const openRenameEnvironment = (record: Environment) => {
+    if (isConfigTabDirty('environment', record.id)) {
+      void message.warning(t('config:saveBeforeChange'))
+      return
+    }
+    setEnvironmentToRename(record)
+    setEnvironmentName(record.name)
+  }
+
+  const openRenameProfile = (record: Profile) => {
+    if (isConfigTabDirty('profile', record.id)) {
+      void message.warning(t('config:saveBeforeChange'))
+      return
+    }
+    setProfileToRename(record)
+    setProfileName(record.name)
+  }
+
+  const confirmDeleteConfigAsset = async (
+    kind: 'environment' | 'profile',
+    record: Environment | Profile,
+  ) => {
+    if (!projectId) {
+      void message.error(t('scenario:messages.selectProjectFirst'))
+      return
+    }
+    try {
+      const references: ResourceReferenceRecord[] = kind === 'environment'
+        ? await platformApi.listEnvironmentReferences(projectId, record.id)
+        : await platformApi.listProfileReferences(projectId, record.id)
+      if (references.length) {
+        modal.warning({
+          title: t(kind === 'environment' ? 'config:environmentDeleteBlockedTitle' : 'config:profileDeleteBlockedTitle'),
+          content: (
+            <div className="api-spec-reference-list">
+              <Text>{t(kind === 'environment' ? 'config:environmentDeleteBlockedDescription' : 'config:profileDeleteBlockedDescription')}</Text>
+              <ul>{references.map((reference) => <li key={`${reference.type}:${reference.id}`}>{reference.name}</li>)}</ul>
+            </div>
+          ),
+          okText: t('common:actions.close'),
+        })
+        return
+      }
+    } catch {
+      void message.error(t('config:referenceCheckFailed'))
+      return
+    }
+
+    const isEnvironment = kind === 'environment'
+    modal.confirm({
+      title: t(isEnvironment ? 'config:environmentDeleteConfirm' : 'config:profileDeleteConfirm'),
+      content: t(isEnvironment ? 'config:environmentDeleteDescription' : 'config:profileDeleteDescription', { name: record.name }),
+      okText: t('common:actions.delete'),
+      okButtonProps: { danger: true },
+      cancelText: t('common:actions.cancel'),
+      onOk: () => isEnvironment
+        ? deleteEnvironmentMutation.mutateAsync(record.id)
+        : deleteProfileMutation.mutateAsync(record.id),
+    })
+  }
 
   const filteredCases = useMemo(
     () => filterByName(casesQuery.data ?? [], assetFilter),
@@ -311,6 +844,10 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
   const filteredApiSpecs = useMemo(
     () => filterByName(apiSpecsQuery.data ?? [], assetFilter, (record) => `${record.title ?? ''} ${record.name}`),
     [apiSpecsQuery.data, assetFilter],
+  )
+  const folderOptions = useMemo(
+    () => buildFolderOptions(foldersQuery.data ?? []),
+    [foldersQuery.data],
   )
   const projectRuns = useMemo(() => {
     const records = (runsQuery.data ?? []).filter((run) => run.projectId === projectId && !run.suiteRunId)
@@ -336,12 +873,19 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
             cases={filteredCases}
             folders={foldersQuery.data ?? []}
             filter={assetFilter}
+            activeScenarioId={activeTab?.type === 'scenario' ? activeTab.resourceId : undefined}
             onFilterChange={setAssetFilter}
             onOpenScenario={(record) => openTab('scenario', record.id, record.name)}
-            onCreate={() => {
-              setCreateName('')
-              setCreateDialog('scenario')
-            }}
+            onCreateScenario={openCreateScenario}
+            onCreateFolder={(parentFolderId) => openFolderDialog('create', undefined, parentFolderId)}
+            onRunScenario={runScenario}
+            onRenameScenario={openRenameScenario}
+            onDuplicateScenario={(record) => void duplicateScenarioMutation.mutateAsync(record)}
+            onMoveScenario={openMoveScenario}
+            onDeleteScenario={confirmDeleteScenario}
+            onRenameFolder={(folder) => openFolderDialog('rename', folder)}
+            onMoveFolder={(folder) => openFolderDialog('move', folder)}
+            onDeleteFolder={confirmDeleteFolder}
           />
         ) : null}
         {mode === 'suites' ? (
@@ -356,7 +900,49 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
             }}
           >
             {filteredSuites.map((record) => (
-              <AssetRow key={record.id} icon={<ProfileOutlined />} title={record.name} onClick={() => openTab('suite', record.id, record.name)} />
+              <AssetRow
+                key={record.id}
+                active={activeTab?.type === 'suite' && activeTab.resourceId === record.id}
+                icon={<ProfileOutlined />}
+                title={record.name}
+                onClick={() => openTab('suite', record.id, record.name)}
+                action={(
+                  <Dropdown
+                    trigger={['click']}
+                    menu={{
+                      items: [
+                        {
+                          key: 'run',
+                          label: t('common:actions.run'),
+                          icon: <PlayCircleOutlined />,
+                          disabled: !record.cases.length,
+                        },
+                        { key: 'rename', label: t('common:actions.rename'), icon: <EditOutlined /> },
+                        { key: 'duplicate', label: t('common:actions.duplicate'), icon: <CopyOutlined /> },
+                        { type: 'divider' },
+                        { key: 'delete', label: t('common:actions.delete'), icon: <DeleteOutlined />, danger: true },
+                      ],
+                      onClick: ({ key }) => {
+                        if (key === 'run') runSuite(record)
+                        if (key === 'rename') openRenameSuite(record)
+                        if (key === 'duplicate') void duplicateSuiteMutation.mutateAsync(record)
+                        if (key === 'delete') confirmDeleteSuite(record)
+                      },
+                    }}
+                  >
+                    <Button
+                      aria-label={t('scenario:actions.manage', { name: record.name })}
+                      className="workbench-tree-action"
+                      icon={<MoreOutlined />}
+                      size="small"
+                      title={t('scenario:actions.manage', { name: record.name })}
+                      type="text"
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    />
+                  </Dropdown>
+                )}
+              />
             ))}
           </ResourceListSidebar>
         ) : null}
@@ -366,15 +952,32 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
             searchPlaceholder={t('workspace:workbench.searchApis')}
             filter={assetFilter}
             onFilterChange={setAssetFilter}
-            onCreate={() => navigate(`/apis?projectId=${encodeURIComponent(projectId ?? '')}`)}
-            createTitle={t('api:manageSpecs')}
+            onCreate={() => setIsImportApiSpecOpen(true)}
+            createTitle={t('api:addSpec')}
           >
             {filteredApiSpecs.map((record) => (
               <AssetRow
                 key={record.id}
+                active={activeTab?.type === 'apiSpec' && activeTab.resourceId === record.id}
                 icon={<ApiOutlined />}
                 title={record.title || record.name}
                 onClick={() => openTab('apiSpec', record.id, record.title || record.name)}
+                action={(
+                  <Button
+                    aria-label={t('common:actions.delete')}
+                    className="workbench-tree-action"
+                    danger
+                    icon={<DeleteOutlined />}
+                    size="small"
+                    title={t('common:actions.delete')}
+                    type="text"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void confirmDeleteApiSpec(record)
+                    }}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  />
+                )}
               />
             ))}
           </ResourceListSidebar>
@@ -389,7 +992,40 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
             createTitle={t('config:newEnvironment')}
           >
             {filteredEnvironments.map((record) => (
-              <AssetRow key={record.id} icon={<GlobalOutlined />} title={record.name} onClick={() => openTab('environment', record.id, record.name)} />
+              <AssetRow
+                key={record.id}
+                active={activeTab?.type === 'environment' && activeTab.resourceId === record.id}
+                icon={<GlobalOutlined />}
+                title={record.name}
+                onClick={() => openTab('environment', record.id, record.name)}
+                action={(
+                  <Dropdown
+                    trigger={['click']}
+                    menu={{
+                      items: [
+                        { key: 'rename', label: t('common:actions.rename'), icon: <EditOutlined /> },
+                        { type: 'divider' },
+                        { key: 'delete', label: t('common:actions.delete'), icon: <DeleteOutlined />, danger: true },
+                      ],
+                      onClick: ({ key }) => {
+                        if (key === 'rename') openRenameEnvironment(record)
+                        if (key === 'delete') void confirmDeleteConfigAsset('environment', record)
+                      },
+                    }}
+                  >
+                    <Button
+                      aria-label={t('scenario:actions.manage', { name: record.name })}
+                      className="workbench-tree-action"
+                      icon={<MoreOutlined />}
+                      size="small"
+                      title={t('scenario:actions.manage', { name: record.name })}
+                      type="text"
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    />
+                  </Dropdown>
+                )}
+              />
             ))}
           </ResourceListSidebar>
         ) : null}
@@ -403,7 +1039,40 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
             createTitle={t('config:newProfile')}
           >
             {filteredProfiles.map((record) => (
-              <AssetRow key={record.id} icon={<KeyOutlined />} title={record.name} onClick={() => openTab('profile', record.id, record.name)} />
+              <AssetRow
+                key={record.id}
+                active={activeTab?.type === 'profile' && activeTab.resourceId === record.id}
+                icon={<KeyOutlined />}
+                title={record.name}
+                onClick={() => openTab('profile', record.id, record.name)}
+                action={(
+                  <Dropdown
+                    trigger={['click']}
+                    menu={{
+                      items: [
+                        { key: 'rename', label: t('common:actions.rename'), icon: <EditOutlined /> },
+                        { type: 'divider' },
+                        { key: 'delete', label: t('common:actions.delete'), icon: <DeleteOutlined />, danger: true },
+                      ],
+                      onClick: ({ key }) => {
+                        if (key === 'rename') openRenameProfile(record)
+                        if (key === 'delete') void confirmDeleteConfigAsset('profile', record)
+                      },
+                    }}
+                  >
+                    <Button
+                      aria-label={t('scenario:actions.manage', { name: record.name })}
+                      className="workbench-tree-action"
+                      icon={<MoreOutlined />}
+                      size="small"
+                      title={t('scenario:actions.manage', { name: record.name })}
+                      type="text"
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => event.stopPropagation()}
+                    />
+                  </Dropdown>
+                )}
+              />
             ))}
           </ResourceListSidebar>
         ) : null}
@@ -412,10 +1081,15 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
             records={projectRuns}
             suiteRecords={projectSuiteRuns}
             cases={casesQuery.data ?? []}
+            suites={suitesQuery.data ?? []}
+            activeRunId={activeTab?.type === 'run' ? activeTab.resourceId : undefined}
+            activeSuiteRunId={activeTab?.type === 'suiteRun' ? activeTab.resourceId : undefined}
             filter={runFilter}
             onFilterChange={setRunFilter}
             onOpen={(record) => openTab('run', record.id, `${t('execution:run')} ${shortId(record.id)}`)}
-            onOpenSuite={(record) => openTab('suiteRun', record.id, `${record.suiteName} · ${t('execution:execution')}`)}
+            onOpenSuiteExecution={(record) => openTab('suiteRun', record.id, `${record.suiteName} · ${t('execution:execution')}`)}
+            onOpenScenario={(record) => openTab('scenario', record.id, record.name)}
+            onOpenSuite={(record) => openTab('suite', record.id, record.name)}
           />
         ) : null}
       </aside>
@@ -508,12 +1182,44 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
       </main>
 
       <Modal
+        title={t('api:addSpec')}
+        open={isImportApiSpecOpen}
+        footer={null}
+        destroyOnHidden
+        onCancel={() => {
+          if (!importApiSpecMutation.isPending) {
+            setIsImportApiSpecOpen(false)
+          }
+        }}
+      >
+        <div className="api-import-stack">
+          <Text type="secondary">{t('api:importDescription')}</Text>
+          <Upload.Dragger
+            accept=".yaml,.yml"
+            multiple={false}
+            showUploadList={false}
+            disabled={!projectId || importApiSpecMutation.isPending}
+            beforeUpload={(file) => {
+              void importApiSpecMutation.mutateAsync(file as File)
+              return false
+            }}
+          >
+            <p className="ant-upload-drag-icon"><UploadOutlined /></p>
+            <p className="ant-upload-text">{t('api:addSpec')}</p>
+          </Upload.Dragger>
+        </div>
+      </Modal>
+
+      <Modal
         title={createDialog === 'suite' ? t('suite:newSuite') : t('scenario:newScenarioShort')}
         open={Boolean(createDialog)}
         okText={t('common:actions.create')}
         confirmLoading={createMutation.isPending}
         okButtonProps={{ disabled: !createName.trim() }}
-        onCancel={() => setCreateDialog(undefined)}
+        onCancel={() => {
+          setCreateDialog(undefined)
+          setCreateFolderId(undefined)
+        }}
         onOk={() => void createMutation.mutateAsync()}
       >
         <Input
@@ -528,6 +1234,201 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
             }
           }}
         />
+      </Modal>
+
+      <Modal
+        title={t('scenario:dialogs.rename')}
+        open={Boolean(scenarioToRename)}
+        okText={t('common:actions.rename')}
+        confirmLoading={renameScenarioMutation.isPending}
+        okButtonProps={{ disabled: !scenarioName.trim() }}
+        onCancel={() => setScenarioToRename(undefined)}
+        onOk={() => {
+          if (scenarioToRename && scenarioName.trim()) {
+            void renameScenarioMutation.mutateAsync({
+              record: scenarioToRename,
+              name: scenarioName.trim(),
+            })
+          }
+        }}
+      >
+        <Input
+          autoFocus
+          aria-label={t('common:fields.name')}
+          value={scenarioName}
+          onChange={(event) => setScenarioName(event.target.value)}
+          onPressEnter={() => {
+            if (scenarioToRename && scenarioName.trim()) {
+              void renameScenarioMutation.mutateAsync({
+                record: scenarioToRename,
+                name: scenarioName.trim(),
+              })
+            }
+          }}
+        />
+      </Modal>
+
+      <Modal
+        title={t('scenario:dialogs.move')}
+        open={Boolean(scenarioToMove)}
+        okText={t('common:actions.move')}
+        confirmLoading={moveScenarioMutation.isPending}
+        onCancel={() => setScenarioToMove(undefined)}
+        onOk={() => void moveScenarioMutation.mutateAsync()}
+      >
+        <Select
+          allowClear
+          className="scenario-folder-select"
+          placeholder={t('scenario:folders.root')}
+          value={moveFolderId}
+          options={folderOptions}
+          onChange={setMoveFolderId}
+        />
+      </Modal>
+
+      <Modal
+        title={t('suite:rename')}
+        open={Boolean(suiteToRename)}
+        okText={t('common:actions.rename')}
+        confirmLoading={renameSuiteMutation.isPending}
+        okButtonProps={{ disabled: !suiteName.trim() }}
+        onCancel={() => setSuiteToRename(undefined)}
+        onOk={() => {
+          if (suiteToRename && suiteName.trim()) {
+            void renameSuiteMutation.mutateAsync({
+              record: suiteToRename,
+              name: suiteName.trim(),
+            })
+          }
+        }}
+      >
+        <Input
+          autoFocus
+          aria-label={t('common:fields.name')}
+          value={suiteName}
+          onChange={(event) => setSuiteName(event.target.value)}
+          onPressEnter={() => {
+            if (suiteToRename && suiteName.trim()) {
+              void renameSuiteMutation.mutateAsync({
+                record: suiteToRename,
+                name: suiteName.trim(),
+              })
+            }
+          }}
+        />
+      </Modal>
+
+      <Modal
+        title={t('config:renameEnvironment')}
+        open={Boolean(environmentToRename)}
+        okText={t('common:actions.rename')}
+        confirmLoading={renameEnvironmentMutation.isPending}
+        okButtonProps={{ disabled: !environmentName.trim() }}
+        onCancel={() => setEnvironmentToRename(undefined)}
+        onOk={() => {
+          if (environmentToRename && environmentName.trim()) {
+            void renameEnvironmentMutation.mutateAsync({
+              record: environmentToRename,
+              name: environmentName.trim(),
+            })
+          }
+        }}
+      >
+        <Input
+          autoFocus
+          aria-label={t('common:fields.name')}
+          value={environmentName}
+          onChange={(event) => setEnvironmentName(event.target.value)}
+          onPressEnter={() => {
+            if (environmentToRename && environmentName.trim()) {
+              void renameEnvironmentMutation.mutateAsync({
+                record: environmentToRename,
+                name: environmentName.trim(),
+              })
+            }
+          }}
+        />
+      </Modal>
+
+      <Modal
+        title={t('config:renameProfile')}
+        open={Boolean(profileToRename)}
+        okText={t('common:actions.rename')}
+        confirmLoading={renameProfileMutation.isPending}
+        okButtonProps={{ disabled: !profileName.trim() }}
+        onCancel={() => setProfileToRename(undefined)}
+        onOk={() => {
+          if (profileToRename && profileName.trim()) {
+            void renameProfileMutation.mutateAsync({
+              record: profileToRename,
+              name: profileName.trim(),
+            })
+          }
+        }}
+      >
+        <Input
+          autoFocus
+          aria-label={t('common:fields.name')}
+          value={profileName}
+          onChange={(event) => setProfileName(event.target.value)}
+          onPressEnter={() => {
+            if (profileToRename && profileName.trim()) {
+              void renameProfileMutation.mutateAsync({
+                record: profileToRename,
+                name: profileName.trim(),
+              })
+            }
+          }}
+        />
+      </Modal>
+
+      <Modal
+        title={folderDialog?.mode === 'rename'
+          ? t('scenario:folders.rename')
+          : folderDialog?.mode === 'move'
+            ? t('scenario:folders.move')
+            : t('scenario:folders.add')}
+        open={Boolean(folderDialog)}
+        okText={t(folderDialog?.mode === 'rename'
+          ? 'common:actions.rename'
+          : folderDialog?.mode === 'move'
+            ? 'common:actions.move'
+            : 'common:actions.create')}
+        confirmLoading={saveFolderMutation.isPending}
+        okButtonProps={{ disabled: !folderName.trim() }}
+        onCancel={() => setFolderDialog(undefined)}
+        onOk={() => void saveFolderMutation.mutateAsync()}
+      >
+        <div className="scenario-dialog-stack">
+          <Input
+            autoFocus
+            aria-label={t('common:fields.name')}
+            placeholder={t('scenario:folders.namePlaceholder')}
+            value={folderName}
+            onChange={(event) => setFolderName(event.target.value)}
+            onPressEnter={() => {
+              if (folderName.trim()) {
+                void saveFolderMutation.mutateAsync()
+              }
+            }}
+          />
+          {folderDialog?.mode === 'move' ? (
+            <Select
+              allowClear
+              className="scenario-folder-select"
+              placeholder={t('scenario:folders.root')}
+              value={folderParentId}
+              options={folderOptions.filter(
+                (option) => !isFolderBlockedTarget(
+                  option.value,
+                  folderDialog.folder?.id,
+                  foldersQuery.data ?? [],
+                ),
+              )}
+              onChange={setFolderParentId}
+            />
+          ) : null}
+        </div>
       </Modal>
     </div>
   )
@@ -708,18 +1609,38 @@ function ScenariosSidebar({
   cases,
   folders,
   filter,
+  activeScenarioId,
   onFilterChange,
   onOpenScenario,
-  onCreate,
+  onCreateScenario,
+  onCreateFolder,
+  onRunScenario,
+  onRenameScenario,
+  onDuplicateScenario,
+  onMoveScenario,
+  onDeleteScenario,
+  onRenameFolder,
+  onMoveFolder,
+  onDeleteFolder,
 }: {
   cases: CaseRecord[]
   folders: FolderRecord[]
   filter: string
+  activeScenarioId?: string
   onFilterChange: (value: string) => void
   onOpenScenario: (record: CaseRecord) => void
-  onCreate: () => void
+  onCreateScenario: (folderId?: string) => void
+  onCreateFolder: (parentFolderId?: string) => void
+  onRunScenario: (record: CaseRecord) => void
+  onRenameScenario: (record: CaseRecord) => void
+  onDuplicateScenario: (record: CaseRecord) => void
+  onMoveScenario: (record: CaseRecord) => void
+  onDeleteScenario: (record: CaseRecord) => void
+  onRenameFolder: (folder: FolderRecord) => void
+  onMoveFolder: (folder: FolderRecord) => void
+  onDeleteFolder: (folder: FolderRecord) => void
 }) {
-  const { t } = useTranslation(['scenario', 'workspace'])
+  const { t } = useTranslation(['common', 'scenario', 'workspace'])
   const casesByFolder = new Map<string | undefined, CaseRecord[]>()
   cases.forEach((record) => {
     const key = record.folderId ?? undefined
@@ -730,14 +1651,126 @@ function ScenariosSidebar({
     const key = folder.parentFolderId ?? undefined
     childFolders.set(key, [...(childFolders.get(key) ?? []), folder])
   })
+  casesByFolder.forEach((records) => records.sort((left, right) => left.name.localeCompare(right.name)))
+  childFolders.forEach((records) => records.sort(
+    (left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name),
+  ))
+
+  const renderScenario = (record: CaseRecord, depth: number) => (
+    <div
+      key={record.id}
+      role="button"
+      tabIndex={0}
+      className={record.id === activeScenarioId
+        ? 'workbench-asset-row workbench-scenario-row active'
+        : 'workbench-asset-row workbench-scenario-row'}
+      style={{ paddingLeft: 10 + depth * 12 }}
+      onClick={() => onOpenScenario(record)}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onOpenScenario(record)
+        }
+      }}
+    >
+      <ExperimentOutlined />
+      <span className="workbench-tree-item-name">{record.name}</span>
+      <Dropdown
+        trigger={['click']}
+        menu={{
+          items: [
+            {
+              key: 'run',
+              label: t('common:actions.run'),
+              icon: <PlayCircleOutlined />,
+              disabled: !record.defaultEnvironmentId || !record.defaultProfileId,
+            },
+            { key: 'rename', label: t('common:actions.rename'), icon: <EditOutlined /> },
+            { key: 'duplicate', label: t('common:actions.duplicate'), icon: <CopyOutlined /> },
+            { key: 'move', label: t('common:actions.move'), icon: <FolderOutlined /> },
+            { type: 'divider' },
+            { key: 'delete', label: t('common:actions.delete'), icon: <DeleteOutlined />, danger: true },
+          ],
+          onClick: ({ key }) => {
+            if (key === 'run') onRunScenario(record)
+            if (key === 'rename') onRenameScenario(record)
+            if (key === 'duplicate') onDuplicateScenario(record)
+            if (key === 'move') onMoveScenario(record)
+            if (key === 'delete') onDeleteScenario(record)
+          },
+        }}
+      >
+        <Button
+          aria-label={t('scenario:actions.manage', { name: record.name })}
+          className="workbench-tree-action"
+          icon={<MoreOutlined />}
+          size="small"
+          title={t('scenario:actions.manage', { name: record.name })}
+          type="text"
+          onClick={(event) => event.stopPropagation()}
+          onKeyDown={(event) => event.stopPropagation()}
+        />
+      </Dropdown>
+    </div>
+  )
+
   const renderFolder = (folder: FolderRecord, depth: number): React.ReactNode => (
     <details key={folder.id} className="workbench-tree-folder" open>
       <summary style={{ paddingLeft: 8 + depth * 12 }}>
+        <RightOutlined className="workbench-tree-chevron" />
         <FolderOpenOutlined />
-        <span>{folder.name}</span>
+        <span className="workbench-tree-item-name">{folder.name}</span>
+        <span className="workbench-tree-actions" onClick={(event) => event.stopPropagation()}>
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: [
+                { key: 'scenario', label: t('scenario:addScenario'), icon: <ExperimentOutlined /> },
+                { key: 'folder', label: t('scenario:folders.add'), icon: <FolderOutlined /> },
+              ],
+              onClick: ({ key }) => key === 'scenario'
+                ? onCreateScenario(folder.id)
+                : onCreateFolder(folder.id),
+            }}
+          >
+            <Button
+              aria-label={t('scenario:actions.addTo', { name: folder.name })}
+              className="workbench-tree-action"
+              icon={<PlusOutlined />}
+              size="small"
+              title={t('scenario:actions.addTo', { name: folder.name })}
+              type="text"
+            />
+          </Dropdown>
+          <Dropdown
+            trigger={['click']}
+            menu={{
+              items: [
+                { key: 'rename', label: t('common:actions.rename'), icon: <EditOutlined /> },
+                { key: 'move', label: t('common:actions.move'), icon: <FolderOutlined /> },
+                { type: 'divider' },
+                { key: 'delete', label: t('common:actions.delete'), icon: <DeleteOutlined />, danger: true },
+              ],
+              onClick: ({ key }) => {
+                if (key === 'rename') onRenameFolder(folder)
+                if (key === 'move') onMoveFolder(folder)
+                if (key === 'delete') onDeleteFolder(folder)
+              },
+            }}
+          >
+            <Button
+              aria-label={t('scenario:actions.manage', { name: folder.name })}
+              className="workbench-tree-action"
+              icon={<MoreOutlined />}
+              size="small"
+              title={t('scenario:actions.manage', { name: folder.name })}
+              type="text"
+            />
+          </Dropdown>
+        </span>
       </summary>
       {(casesByFolder.get(folder.id) ?? []).map((record) => (
-        <AssetRow key={record.id} depth={depth + 1} icon={<ExperimentOutlined />} title={record.name} onClick={() => onOpenScenario(record)} />
+        renderScenario(record, depth + 1)
       ))}
       {(childFolders.get(folder.id) ?? []).map((child) => renderFolder(child, depth + 1))}
     </details>
@@ -746,13 +1779,25 @@ function ScenariosSidebar({
     <>
       <div className="workbench-sidebar-head">
         <Text strong>{t('scenario:title')}</Text>
-        <Button
-          type="text"
-          size="small"
-          icon={<PlusOutlined />}
-          title={t('scenario:newScenarioShort')}
-          onClick={onCreate}
-        />
+        <Dropdown
+          trigger={['click']}
+          menu={{
+            items: [
+              { key: 'scenario', label: t('scenario:addScenario'), icon: <ExperimentOutlined /> },
+              { key: 'folder', label: t('scenario:folders.add'), icon: <FolderOutlined /> },
+            ],
+            onClick: ({ key }) => key === 'scenario'
+              ? onCreateScenario()
+              : onCreateFolder(),
+          }}
+        >
+          <Button
+            type="text"
+            size="small"
+            icon={<PlusOutlined />}
+            title={t('common:actions.add')}
+          />
+        </Dropdown>
       </div>
       <Input
         allowClear
@@ -764,9 +1809,12 @@ function ScenariosSidebar({
       />
       <div className="workbench-sidebar-scroll">
         {(casesByFolder.get(undefined) ?? []).map((record) => (
-          <AssetRow key={record.id} icon={<ExperimentOutlined />} title={record.name} onClick={() => onOpenScenario(record)} />
+          renderScenario(record, 0)
         ))}
         {(childFolders.get(undefined) ?? []).map((folder) => renderFolder(folder, 0))}
+        {!cases.length && !folders.length
+          ? <Text type="secondary" className="workbench-sidebar-empty">{t('scenario:list.empty')}</Text>
+          : null}
       </div>
     </>
   )
@@ -812,21 +1860,32 @@ function RunsSidebar({
   records,
   suiteRecords,
   cases,
+  suites,
+  activeRunId,
+  activeSuiteRunId,
   filter,
   onFilterChange,
   onOpen,
+  onOpenSuiteExecution,
+  onOpenScenario,
   onOpenSuite,
 }: {
   records: RunRecord[]
   suiteRecords: SuiteRunRecord[]
   cases: CaseRecord[]
+  suites: SuiteRecord[]
+  activeRunId?: string
+  activeSuiteRunId?: string
   filter: string
   onFilterChange: (value: string) => void
   onOpen: (record: RunRecord) => void
-  onOpenSuite: (record: SuiteRunRecord) => void
+  onOpenSuiteExecution: (record: SuiteRunRecord) => void
+  onOpenScenario: (record: CaseRecord) => void
+  onOpenSuite: (record: SuiteRecord) => void
 }) {
-  const { t, i18n } = useTranslation(['execution', 'workspace'])
-  const caseNamesById = new Map(cases.map((record) => [record.id, record.name]))
+  const { t, i18n } = useTranslation(['common', 'execution', 'scenario', 'suite', 'workspace'])
+  const casesById = new Map(cases.map((record) => [record.id, record]))
+  const suitesById = new Map(suites.map((record) => [record.id, record]))
   return (
     <>
       <div className="workbench-sidebar-head"><Text strong>{t('execution:title')}</Text></div>
@@ -840,34 +1899,91 @@ function RunsSidebar({
       />
       <div className="workbench-sidebar-scroll">
         <div className="run-history-group-title">{t('execution:suiteExecutions')}</div>
-        {suiteRecords.map((record) => (
-          <button key={record.id} type="button" className="run-history-row" onClick={() => onOpenSuite(record)}>
-            <span className="run-history-row-title">
-              <span>{record.suiteName}</span>
-              <StatusPill status={record.status} />
-            </span>
-            <span>{formatDateTime(record.startedAt, i18n.resolvedLanguage)}</span>
-            <span>
-              {t('execution:scenarioCount', { count: record.runs.length })}
-              {' · '}
-              {t('execution:duration', { duration: record.durationMs })}
-            </span>
-          </button>
-        ))}
+        {suiteRecords.map((record) => {
+          const suite = suitesById.get(record.suiteId)
+          return (
+            <RunHistoryRow
+              key={record.id}
+              active={record.id === activeSuiteRunId}
+              title={record.suiteName}
+              status={record.status}
+              startedAt={formatDateTime(record.startedAt, i18n.resolvedLanguage)}
+              summary={`${t('execution:scenarioCount', { count: record.runs.length })} · ${t('execution:duration', { duration: record.durationMs })}`}
+              onOpen={() => onOpenSuiteExecution(record)}
+              action={(
+                <Dropdown
+                  trigger={['click']}
+                  menu={{
+                    items: [
+                      { key: 'execution', label: t('common:actions.open'), icon: <FileTextOutlined /> },
+                      { key: 'suite', label: t('execution:openSuite'), icon: <ProfileOutlined />, disabled: !suite },
+                    ],
+                    onClick: ({ key }) => {
+                      if (key === 'execution') onOpenSuiteExecution(record)
+                      if (key === 'suite' && suite) onOpenSuite(suite)
+                    },
+                  }}
+                >
+                  <Button
+                    aria-label={t('scenario:actions.manage', { name: record.suiteName })}
+                    className="workbench-tree-action"
+                    icon={<MoreOutlined />}
+                    size="small"
+                    title={t('scenario:actions.manage', { name: record.suiteName })}
+                    type="text"
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  />
+                </Dropdown>
+              )}
+            />
+          )
+        })}
         {!suiteRecords.length
           ? <Text type="secondary" className="workbench-sidebar-empty">{t('execution:noSuiteExecutions')}</Text>
           : null}
         <div className="run-history-group-title">{t('execution:scenarioExecutions')}</div>
-        {records.map((record) => (
-          <button key={record.id} type="button" className="run-history-row" onClick={() => onOpen(record)}>
-            <span className="run-history-row-title">
-              <span>{caseNamesById.get(record.caseId) ?? shortId(record.id)}</span>
-              <StatusPill status={record.status} />
-            </span>
-            <span>{formatDateTime(record.startedAt, i18n.resolvedLanguage)}</span>
-            <span>{t('execution:duration', { duration: record.durationMs })}</span>
-          </button>
-        ))}
+        {records.map((record) => {
+          const scenario = casesById.get(record.caseId)
+          const title = scenario?.name ?? shortId(record.id)
+          return (
+            <RunHistoryRow
+              key={record.id}
+              active={record.id === activeRunId}
+              title={title}
+              status={record.status}
+              startedAt={formatDateTime(record.startedAt, i18n.resolvedLanguage)}
+              summary={t('execution:duration', { duration: record.durationMs })}
+              onOpen={() => onOpen(record)}
+              action={(
+                <Dropdown
+                  trigger={['click']}
+                  menu={{
+                    items: [
+                      { key: 'execution', label: t('common:actions.open'), icon: <FileTextOutlined /> },
+                      { key: 'scenario', label: t('scenario:openScenario'), icon: <ExperimentOutlined />, disabled: !scenario },
+                    ],
+                    onClick: ({ key }) => {
+                      if (key === 'execution') onOpen(record)
+                      if (key === 'scenario' && scenario) onOpenScenario(scenario)
+                    },
+                  }}
+                >
+                  <Button
+                    aria-label={t('scenario:actions.manage', { name: title })}
+                    className="workbench-tree-action"
+                    icon={<MoreOutlined />}
+                    size="small"
+                    title={t('scenario:actions.manage', { name: title })}
+                    type="text"
+                    onClick={(event) => event.stopPropagation()}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  />
+                </Dropdown>
+              )}
+            />
+          )
+        })}
         {!records.length
           ? <Text type="secondary" className="workbench-sidebar-empty">{t('execution:noScenarioExecutions')}</Text>
           : null}
@@ -876,27 +1992,82 @@ function RunsSidebar({
   )
 }
 
+function RunHistoryRow({
+  title,
+  status,
+  startedAt,
+  summary,
+  active = false,
+  action,
+  onOpen,
+}: {
+  title: string
+  status: string
+  startedAt: string
+  summary: string
+  active?: boolean
+  action: React.ReactNode
+  onOpen: () => void
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      className={active ? 'run-history-row active' : 'run-history-row'}
+      onClick={onOpen}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onOpen()
+        }
+      }}
+    >
+      <span className="run-history-row-title">
+        <span className="workbench-tree-item-name">{title}</span>
+        <span className="run-history-row-actions">
+          <StatusPill status={status} />
+          {action}
+        </span>
+      </span>
+      <span>{startedAt}</span>
+      <span>{summary}</span>
+    </div>
+  )
+}
+
 function AssetRow({
   icon,
   title,
   depth = 0,
+  active = false,
+  action,
   onClick,
 }: {
   icon: React.ReactNode
   title: string
   depth?: number
+  active?: boolean
+  action?: React.ReactNode
   onClick: () => void
 }) {
   return (
-    <button
-      type="button"
-      className="workbench-asset-row"
+    <div
+      role="button"
+      tabIndex={0}
+      className={active ? 'workbench-asset-row active' : 'workbench-asset-row'}
       style={{ paddingLeft: 10 + depth * 12 }}
       onClick={onClick}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault()
+          onClick()
+        }
+      }}
     >
       {icon}
-      <span>{title}</span>
-    </button>
+      <span className="workbench-tree-item-name">{title}</span>
+      {action}
+    </div>
   )
 }
 
@@ -941,6 +2112,119 @@ function filterByName<T>(
 
 function shortId(value: string) {
   return value.slice(0, 8)
+}
+
+function caseInputFromRecord(record: CaseRecord, overrides: Partial<SaveCaseInput> = {}): SaveCaseInput {
+  return {
+    name: record.name,
+    code: record.code,
+    description: record.description ?? '',
+    folderId: record.folderId ?? undefined,
+    defaultEnvironmentId: record.defaultEnvironmentId ?? undefined,
+    defaultProfileId: record.defaultProfileId ?? undefined,
+    tags: record.tags ?? [],
+    dslVersion: record.dslVersion,
+    content: record.content,
+    status: record.status,
+    ...overrides,
+  }
+}
+
+function suiteInputFromRecord(
+  record: SuiteRecord,
+  overrides: Partial<SaveSuiteInput> = {},
+  preserveCaseIds = true,
+): SaveSuiteInput {
+  return {
+    name: record.name,
+    description: record.description ?? '',
+    status: record.status,
+    cases: record.cases.map((suiteCase) => ({
+      ...(preserveCaseIds ? { id: suiteCase.id } : {}),
+      caseId: suiteCase.caseId,
+      displayName: suiteCase.displayName ?? undefined,
+      order: suiteCase.order,
+      enabled: suiteCase.enabled,
+      variableOverrides: suiteCase.variableOverrides ?? {},
+      environmentId: suiteCase.environmentId ?? undefined,
+      profileId: suiteCase.profileId ?? undefined,
+    })),
+    ...overrides,
+  }
+}
+
+function environmentInputFromRecord(
+  record: Environment,
+  overrides: Partial<SaveEnvironmentInput> = {},
+): SaveEnvironmentInput {
+  return {
+    name: record.name,
+    baseUrl: record.baseUrl,
+    endpoints: record.endpoints ?? {},
+    variables: record.variables ?? {},
+    status: record.status,
+    ...overrides,
+  }
+}
+
+function profileInputFromRecord(
+  record: Profile,
+  overrides: Partial<SaveProfileInput> = {},
+): SaveProfileInput {
+  return {
+    name: record.name,
+    type: record.type,
+    senderPublicKey: record.senderPublicKey ?? '',
+    senderPrivateKey: record.senderPrivateKey ?? '',
+    senderPrivateKeyPassphrase: record.senderPrivateKeyPassphrase ?? '',
+    recipientPublicKey: record.recipientPublicKey ?? '',
+    recipientPrivateKey: record.recipientPrivateKey ?? '',
+    recipientPrivateKeyPassphrase: record.recipientPrivateKeyPassphrase ?? '',
+    environmentIds: record.environmentIds ?? [],
+    enabled: record.enabled,
+    ...overrides,
+  }
+}
+
+function renameScenarioInDsl(content: string, name: string) {
+  const parsed = parseDsl(content)
+  return parsed.data ? stringifyDsl({ ...parsed.data, name }) : content
+}
+
+function buildFolderOptions(folders: FolderRecord[]) {
+  const foldersByParentId = new Map<string | undefined, FolderRecord[]>()
+  folders.forEach((folder) => {
+    const parentId = folder.parentFolderId ?? undefined
+    foldersByParentId.set(parentId, [...(foldersByParentId.get(parentId) ?? []), folder])
+  })
+  foldersByParentId.forEach((siblings) => siblings.sort(
+    (left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name),
+  ))
+
+  const options: Array<{ value: string, label: string }> = []
+  const visit = (parentId: string | undefined, prefix: string) => {
+    ;(foldersByParentId.get(parentId) ?? []).forEach((folder) => {
+      options.push({ value: folder.id, label: `${prefix}${folder.name}` })
+      visit(folder.id, `${prefix}  `)
+    })
+  }
+  visit(undefined, '')
+  return options
+}
+
+function isFolderBlockedTarget(targetFolderId: string, movingFolderId: string | undefined, folders: FolderRecord[]) {
+  if (!movingFolderId || targetFolderId === movingFolderId) {
+    return targetFolderId === movingFolderId
+  }
+  const foldersById = new Map(folders.map((folder) => [folder.id, folder]))
+  let current = foldersById.get(targetFolderId)
+  while (current) {
+    if (current.id === movingFolderId) {
+      return true
+    }
+    current = current.parentFolderId ? foldersById.get(current.parentFolderId) : undefined
+  }
+  return false
 }
 
 function scenarioCode(name: string) {
