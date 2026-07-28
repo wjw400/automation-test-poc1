@@ -112,9 +112,15 @@ POC 阶段不建议做：
 
 ### Phase 4: AI 增强
 
-- AI 生成候选 case
-- AI 辅助补全 validation
-- AI 总结失败 run
+- 提供统一 Test Agent Panel 和页面内上下文入口
+- Test Agent 生成 Scenario Draft 和 Suite Draft
+- Test Agent 使用语义 Command 补全 Request、Extract 和 Assertions
+- Test Agent 生成可审阅 Diff
+- Test Agent 总结脱敏后的失败 Evidence
+
+所有 Phase 4 功能必须遵守 [Test Agent 能力边界](C:/Users/blaine/Documents/code/automation-test-poc1/design/ai-assistance-boundaries.md)、[Test Agent 产品与架构设计](C:/Users/blaine/Documents/code/automation-test-poc1/design/test-agent-architecture.md) 和 [Test Agent 工具与执行治理](C:/Users/blaine/Documents/code/automation-test-poc1/design/test-agent-runtime-governance.md)。V1 Agent 最高权限为读取上下文、修改未保存 Draft、执行确定性校验和提出可审阅 Diff，不包含自动保存、配置或执行。
+
+受审批的 Sandbox 运行和 Agent 自动迭代属于后续阶段，不纳入当前 MVP。
 
 ## 6. 主要风险
 
