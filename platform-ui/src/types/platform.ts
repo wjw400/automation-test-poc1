@@ -279,3 +279,31 @@ export type ApiOperationRecord = {
   responses: unknown
   createdAt: string
 }
+
+export type TestKnowledgeScope = 'PROJECT' | 'API_SPEC' | 'OPERATION' | 'SCENARIO' | 'SUITE'
+export type TestKnowledgeStatus = 'DRAFT' | 'PUBLISHED'
+
+export type TestKnowledgeRecord = {
+  id: string
+  projectId: string
+  name: string
+  description: string
+  scope: TestKnowledgeScope
+  targetId?: string | null
+  tags: string[]
+  content: string
+  status: TestKnowledgeStatus
+  version: number
+  createdAt: string
+  updatedAt: string
+}
+
+export type SaveTestKnowledgeInput = {
+  name: string
+  description: string
+  scope: TestKnowledgeScope
+  targetId?: string
+  tags: string[]
+  content: string
+  status: TestKnowledgeStatus
+}

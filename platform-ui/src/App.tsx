@@ -10,6 +10,7 @@ import {
   LockOutlined,
   PlusOutlined,
   ProfileOutlined,
+  ReadOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
 import { App as AntApp, Button, ConfigProvider, Input, Layout, Modal, Popover, Tooltip } from 'antd'
@@ -53,6 +54,7 @@ function AppShell() {
     { key: 'apis', icon: <ApiOutlined />, label: t('workspace:navigation.apis') },
     { key: 'environments', icon: <GlobalOutlined />, label: t('workspace:navigation.environments') },
     { key: 'profiles', icon: <KeyOutlined />, label: t('workspace:navigation.profiles') },
+    { key: 'knowledge', icon: <ReadOutlined />, label: t('workspace:navigation.knowledge') },
     { key: 'runs', icon: <ClockCircleOutlined />, label: t('workspace:navigation.executionHistory') },
   ], [t])
 

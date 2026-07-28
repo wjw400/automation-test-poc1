@@ -698,6 +698,49 @@ body {
   padding: 12px 8px;
 }
 
+.knowledge-editor-form {
+  max-width: 1120px;
+}
+
+.knowledge-editor-meta {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) repeat(2, minmax(150px, 0.7fr));
+  gap: 0 12px;
+}
+
+.knowledge-editor-meta .ant-form-item:last-child {
+  grid-column: span 3;
+}
+
+.knowledge-tag-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.knowledge-editor-content {
+  margin-bottom: 0;
+}
+
+.knowledge-markdown-input {
+  min-height: 460px !important;
+  resize: vertical;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+@media (max-width: 900px) {
+  .knowledge-editor-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .knowledge-editor-meta .ant-form-item:last-child {
+    grid-column: auto;
+  }
+}
+
 .config-asset-section {
   padding-bottom: 8px;
   border-bottom: 1px solid #e5e9f2;

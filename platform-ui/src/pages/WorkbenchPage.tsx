@@ -14,6 +14,7 @@ import {
   PlayCircleOutlined,
   PlusOutlined,
   ProfileOutlined,
+  ReadOutlined,
   RightOutlined,
   SearchOutlined,
   UploadOutlined,
@@ -32,6 +33,7 @@ import { RunDetail } from '../components/RunDetail'
 import { StatusPill } from '../components/StatusPill'
 import { StoplightApi } from '../components/StoplightApi'
 import { SuiteRunDetail } from '../components/SuiteRunDetail'
+import { TestKnowledgeEditor } from '../components/TestKnowledgeEditor'
 import type {
   ApiSpecRecord,
   ApiSpecReferenceRecord,
@@ -47,6 +49,7 @@ import type {
   SaveSuiteInput,
   SuiteRecord,
   SuiteRunRecord,
+  TestKnowledgeRecord,
 } from '../types/platform'
 import { parseDsl, stringifyDsl } from '../utils/caseDsl'
 import { formatDateTime } from '../i18n'
@@ -55,8 +58,8 @@ import { SuitesPage } from './SuitesPage'
 
 const { Text } = Typography
 
-type WorkbenchMode = 'scenarios' | 'suites' | 'apis' | 'environments' | 'profiles' | 'runs'
-type WorkbenchTabType = 'scenario' | 'suite' | 'apiSpec' | 'run' | 'suiteRun' | 'environment' | 'profile'
+type WorkbenchMode = 'scenarios' | 'suites' | 'apis' | 'environments' | 'profiles' | 'knowledge' | 'runs'
+type WorkbenchTabType = 'scenario' | 'suite' | 'apiSpec' | 'run' | 'suiteRun' | 'environment' | 'profile' | 'knowledge'
 
 type WorkbenchTab = {
   key: string
@@ -146,6 +149,11 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
   const apiSpecsQuery = useQuery({
     queryKey: ['api-specs', projectId],
     queryFn: () => platformApi.listApiSpecs(projectId!),
+    enabled: Boolean(projectId),
+  })
+  const testKnowledgeQuery = useQuery({
+    queryKey: ['test-knowledge', projectId],
+    queryFn: () => platformApi.listTestKnowledge(projectId!),
     enabled: Boolean(projectId),
   })
   const runsQuery = useQuery({
@@ -281,7 +289,7 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
 
   const replaceCreatedTab = useCallback((
     oldKey: string,
-    type: 'environment' | 'profile',
+    type: 'environment' | 'profile' | 'knowledge',
     resourceId: string,
     title: string,
   ) => {
@@ -845,6 +853,10 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
     () => filterByName(apiSpecsQuery.data ?? [], assetFilter, (record) => `${record.title ?? ''} ${record.name}`),
     [apiSpecsQuery.data, assetFilter],
   )
+  const filteredTestKnowledge = useMemo(
+    () => filterByName(testKnowledgeQuery.data ?? [], assetFilter, (record) => `${record.name} ${record.description} ${record.tags.join(' ')}`),
+    [assetFilter, testKnowledgeQuery.data],
+  )
   const folderOptions = useMemo(
     () => buildFolderOptions(foldersQuery.data ?? []),
     [foldersQuery.data],
@@ -1076,6 +1088,56 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
             ))}
           </ResourceListSidebar>
         ) : null}
+        {mode === 'knowledge' ? (
+          <ResourceListSidebar
+            title="Test Knowledge"
+            searchPlaceholder="Search test knowledge"
+            filter={assetFilter}
+            onFilterChange={setAssetFilter}
+            onCreate={() => openTab('knowledge', `new-${Date.now()}`, 'New Test Knowledge')}
+            createTitle="New Test Knowledge"
+          >
+            {filteredTestKnowledge.map((record) => (
+              <AssetRow
+                key={record.id}
+                active={activeTab?.type === 'knowledge' && activeTab.resourceId === record.id}
+                icon={<ReadOutlined />}
+                title={record.name}
+                onClick={() => openTab('knowledge', record.id, record.name)}
+                action={(
+                  <Button
+                    aria-label="Delete test knowledge"
+                    className="workbench-tree-action"
+                    danger
+                    icon={<DeleteOutlined />}
+                    size="small"
+                    title="Delete"
+                    type="text"
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      modal.confirm({
+                        title: 'Delete test knowledge?',
+                        content: `Delete "${record.name}"? This action cannot be undone.`,
+                        okText: 'Delete', okButtonProps: { danger: true },
+                        onOk: async () => {
+                          if (!projectId) return
+                          await platformApi.deleteTestKnowledge(projectId, record.id)
+                          await queryClient.invalidateQueries({ queryKey: ['test-knowledge', projectId] })
+                          closeTabNow(`knowledge:${record.id}`)
+                          void message.success('Test knowledge deleted')
+                        },
+                      })
+                    }}
+                    onKeyDown={(event) => event.stopPropagation()}
+                  />
+                )}
+              />
+            ))}
+            {!testKnowledgeQuery.isLoading && !filteredTestKnowledge.length
+              ? <Text type="secondary" className="workbench-sidebar-empty">No test knowledge yet.</Text>
+              : null}
+          </ResourceListSidebar>
+        ) : null}
         {mode === 'runs' ? (
           <RunsSidebar
             records={projectRuns}
@@ -1161,6 +1223,7 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
                 runs: runsQuery.data ?? [],
                 suiteRuns: suiteRunsQuery.data ?? [],
                 apiSpecs: apiSpecsQuery.data ?? [],
+                testKnowledge: testKnowledgeQuery.data ?? [],
                 environments: environmentsQuery.data ?? [],
                 profiles: profilesQuery.data ?? [],
                 updateTab,
@@ -1442,13 +1505,14 @@ type RenderTabOptions = {
   runs: RunRecord[]
   suiteRuns: SuiteRunRecord[]
   apiSpecs: ApiSpecRecord[]
+  testKnowledge: TestKnowledgeRecord[]
   environments: Awaited<ReturnType<typeof platformApi.listEnvironments>>
   profiles: Awaited<ReturnType<typeof platformApi.listProfiles>>
   updateTab: (key: string, patch: Partial<WorkbenchTab>) => void
   closeTab: (key: string) => void
   replaceCreatedTab: (
     oldKey: string,
-    type: 'environment' | 'profile',
+    type: 'environment' | 'profile' | 'knowledge',
     resourceId: string,
     title: string,
   ) => void
@@ -1527,6 +1591,17 @@ function renderTabContent(options: RenderTabOptions) {
         environment={environment}
         {...commonCallbacks}
         onSaved={(saved) => replaceCreatedTab(tab.key, 'environment', saved.id, saved.name)}
+      />
+    )
+  }
+  if (tab.type === 'knowledge') {
+    const knowledge = options.testKnowledge.find((record) => record.id === tab.resourceId)
+    return (
+      <TestKnowledgeEditor
+        projectId={projectId}
+        knowledge={knowledge}
+        {...commonCallbacks}
+        onSaved={(saved) => replaceCreatedTab(tab.key, 'knowledge', saved.id, saved.name)}
       />
     )
   }
@@ -2078,6 +2153,7 @@ function tabIcon(type: WorkbenchTabType) {
   if (type === 'suiteRun') return <ProfileOutlined />
   if (type === 'run') return <FileTextOutlined />
   if (type === 'environment') return <GlobalOutlined />
+  if (type === 'knowledge') return <ReadOutlined />
   return <KeyOutlined />
 }
 
@@ -2087,6 +2163,7 @@ function isWorkbenchMode(value: string | null): value is WorkbenchMode {
     || value === 'apis'
     || value === 'environments'
     || value === 'profiles'
+    || value === 'knowledge'
     || value === 'runs'
 }
 
@@ -2096,6 +2173,7 @@ function modeForTabType(type: WorkbenchTabType): WorkbenchMode | undefined {
   if (type === 'apiSpec') return 'apis'
   if (type === 'environment') return 'environments'
   if (type === 'profile') return 'profiles'
+  if (type === 'knowledge') return 'knowledge'
   return undefined
 }
 

@@ -20,6 +20,8 @@ import type {
   StartSuiteRunInput,
   SuiteRecord,
   SuiteRunRecord,
+  SaveTestKnowledgeInput,
+  TestKnowledgeRecord,
 } from '../types/platform'
 
 export const platformApi = {
@@ -226,6 +228,28 @@ export const platformApi = {
 
   async deleteApiSpec(projectId: string, apiSpecId: string) {
     await apiClient.delete(`/projects/${projectId}/api-specs/${apiSpecId}`)
+  },
+
+  async listTestKnowledge(projectId: string) {
+    const { data } = await apiClient.get<TestKnowledgeRecord[]>(`/projects/${projectId}/test-knowledge`)
+    return data
+  },
+
+  async createTestKnowledge(projectId: string, payload: SaveTestKnowledgeInput) {
+    const { data } = await apiClient.post<TestKnowledgeRecord>(`/projects/${projectId}/test-knowledge`, payload)
+    return data
+  },
+
+  async updateTestKnowledge(projectId: string, knowledgeId: string, payload: SaveTestKnowledgeInput) {
+    const { data } = await apiClient.put<TestKnowledgeRecord>(
+      `/projects/${projectId}/test-knowledge/${knowledgeId}`,
+      payload,
+    )
+    return data
+  },
+
+  async deleteTestKnowledge(projectId: string, knowledgeId: string) {
+    await apiClient.delete(`/projects/${projectId}/test-knowledge/${knowledgeId}`)
   },
 
   async listOperations(projectId: string) {
