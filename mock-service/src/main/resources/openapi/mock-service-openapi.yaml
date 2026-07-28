@@ -15,6 +15,12 @@ servers:
 tags:
   - name: Order Fulfillment
     description: Encrypted partner operations for the order fulfillment lifecycle
+  - name: Fulfillment Console
+    description: Plain JSON endpoints used by the OrderFlow demonstration UI
+  - name: Request Activity
+    description: Recorded web and secure API request activity
+  - name: Partner Access
+    description: Service public-key discovery and trusted partner profile management
 paths:
   /secure/fulfillment/orders/create:
     post:
@@ -126,6 +132,292 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '500':
           $ref: '#/components/responses/InternalError'
+  /web-api/summary:
+    get:
+      tags: [Fulfillment Console]
+      summary: Get fulfillment summary
+      operationId: getFulfillmentSummary
+      responses:
+        '200':
+          description: Current fulfillment totals.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FulfillmentSummary'
+  /web-api/products:
+    get:
+      tags: [Fulfillment Console]
+      summary: List products
+      operationId: listProducts
+      responses:
+        '200':
+          description: Available products.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Product'
+  /web-api/orders:
+    get:
+      tags: [Fulfillment Console]
+      summary: List orders
+      operationId: listWebOrders
+      responses:
+        '200':
+          description: Orders ordered by creation time.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Order'
+    post:
+      tags: [Fulfillment Console]
+      summary: Create order
+      operationId: createWebOrder
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateOrderPayload'
+      responses:
+        '201':
+          description: Order created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /web-api/orders/{orderId}:
+    get:
+      tags: [Fulfillment Console]
+      summary: Get order
+      operationId: getWebOrder
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Order details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /web-api/orders/{orderId}/reserve:
+    post:
+      tags: [Fulfillment Console]
+      summary: Reserve inventory for order
+      operationId: reserveWebOrder
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Order reserved.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /web-api/orders/{orderId}/fulfill:
+    post:
+      tags: [Fulfillment Console]
+      summary: Dispatch order shipment
+      operationId: fulfillWebOrder
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                carrier:
+                  type: string
+                  example: Northstar Logistics
+      responses:
+        '200':
+          description: Order dispatched with shipment details.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /web-api/orders/{orderId}/cancel:
+    post:
+      tags: [Fulfillment Console]
+      summary: Cancel order
+      operationId: cancelWebOrder
+      parameters:
+        - $ref: '#/components/parameters/OrderId'
+      responses:
+        '200':
+          description: Order cancelled.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Order'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /web-api/shipments:
+    get:
+      tags: [Fulfillment Console]
+      summary: List shipments
+      operationId: listShipments
+      responses:
+        '200':
+          description: Shipments ordered by creation time.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Shipment'
+  /web-api/activity:
+    get:
+      tags: [Request Activity]
+      summary: List API activity
+      operationId: listApiActivity
+      responses:
+        '200':
+          description: Request activity summaries.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApiActivitySummary'
+    delete:
+      tags: [Request Activity]
+      summary: Clear API activity
+      operationId: clearApiActivity
+      responses:
+        '204':
+          description: Activity cleared.
+  /web-api/activity/{activityId}:
+    get:
+      tags: [Request Activity]
+      summary: Get API activity detail
+      operationId: getApiActivity
+      parameters:
+        - $ref: '#/components/parameters/ActivityId'
+      responses:
+        '200':
+          description: Activity record including wire and decrypted payloads.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiActivityRecord'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /web-api/admin/reset:
+    post:
+      tags: [Fulfillment Console]
+      summary: Reset demonstration data
+      operationId: resetDemoData
+      responses:
+        '200':
+          description: Demo data restored.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ResetResponse'
+  /web-api/security/service-key:
+    get:
+      tags: [Partner Access]
+      summary: Get service public key
+      operationId: getServicePublicKey
+      responses:
+        '200':
+          description: Service PGP public key and metadata.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ServicePublicKey'
+  /web-api/security/service-key/download:
+    get:
+      tags: [Partner Access]
+      summary: Download service public key
+      operationId: downloadServicePublicKey
+      responses:
+        '200':
+          description: ASCII-armored PGP public key.
+          content:
+            text/plain:
+              schema:
+                type: string
+  /web-api/security/partners:
+    get:
+      tags: [Partner Access]
+      summary: List partner profiles
+      operationId: listPartnerProfiles
+      responses:
+        '200':
+          description: Configured partner profiles.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PartnerProfile'
+    post:
+      tags: [Partner Access]
+      summary: Create partner profile
+      operationId: createPartnerProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartnerProfileRequest'
+      responses:
+        '201':
+          description: Partner profile created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartnerProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+  /web-api/security/partners/{profileName}:
+    put:
+      tags: [Partner Access]
+      summary: Replace partner profile
+      operationId: replacePartnerProfile
+      parameters:
+        - $ref: '#/components/parameters/ProfileName'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PartnerProfileUpdateRequest'
+      responses:
+        '200':
+          description: Partner profile replaced.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PartnerProfile'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+    delete:
+      tags: [Partner Access]
+      summary: Delete partner profile
+      operationId: deletePartnerProfile
+      parameters:
+        - $ref: '#/components/parameters/ProfileName'
+      responses:
+        '204':
+          description: Partner profile deleted.
+        '400':
+          $ref: '#/components/responses/BadRequest'
 components:
   parameters:
     ProfileParam:
@@ -136,6 +428,28 @@ components:
       schema:
         type: string
         default: secureEcho
+        example: secureEcho
+    OrderId:
+      name: orderId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: O3001
+    ActivityId:
+      name: activityId
+      in: path
+      required: true
+      schema:
+        type: string
+        example: 4c66af65-836a-4fe6-95d3-f5c3d5cd0012
+    ProfileName:
+      name: profileName
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[A-Za-z0-9._-]{1,80}$'
         example: secureEcho
   requestBodies:
     EncryptedRequest:
@@ -335,6 +649,7 @@ components:
       type: object
       required:
         - id
+        - orderId
         - trackingNumber
         - carrier
         - status
@@ -343,6 +658,9 @@ components:
         id:
           type: string
           example: S5001
+        orderId:
+          type: string
+          example: O3001
         trackingNumber:
           type: string
           example: OF-20260724-1001
@@ -365,3 +683,178 @@ components:
         - DISPATCHED
         - CANCELLED
       example: CREATED
+    Product:
+      type: object
+      required:
+        - id
+        - sku
+        - name
+        - category
+        - unitPrice
+        - availableQuantity
+        - status
+        - imageKey
+      properties:
+        id:
+          type: string
+          example: P100
+        sku:
+          type: string
+          example: WH-KEY-84
+        name:
+          type: string
+          example: Wireless Mechanical Keyboard
+        category:
+          type: string
+          example: Workspace
+        unitPrice:
+          type: number
+          format: double
+          example: 129.00
+        availableQuantity:
+          type: integer
+          example: 38
+        status:
+          type: string
+          enum: [ACTIVE]
+        imageKey:
+          type: string
+          example: keyboard
+    FulfillmentSummary:
+      type: object
+      required: [products, orders, shipments, pendingOrders]
+      properties:
+        products:
+          type: integer
+        orders:
+          type: integer
+        shipments:
+          type: integer
+        pendingOrders:
+          type: integer
+    ResetResponse:
+      type: object
+      required: [status, message]
+      properties:
+        status:
+          type: string
+          example: RESET
+        message:
+          type: string
+          example: Demo data restored
+    PartnerProfileRequest:
+      type: object
+      required: [profileName, displayName, publicKey]
+      properties:
+        profileName:
+          type: string
+          pattern: '^[A-Za-z0-9._-]{1,80}$'
+          example: secureEcho
+        displayName:
+          type: string
+          example: Secure Echo Partner
+        publicKey:
+          type: string
+          description: ASCII-armored PGP public key with an encryption-capable key.
+    PartnerProfileUpdateRequest:
+      type: object
+      required: [displayName, publicKey]
+      properties:
+        displayName:
+          type: string
+          example: Secure Echo Partner
+        publicKey:
+          type: string
+          description: ASCII-armored PGP public key with an encryption-capable key.
+    PartnerProfile:
+      type: object
+      required: [profileName, displayName, keyId, fingerprint, algorithm, updatedAt, defaultProfile]
+      properties:
+        profileName:
+          type: string
+        displayName:
+          type: string
+        keyId:
+          type: string
+        fingerprint:
+          type: string
+        algorithm:
+          type: string
+        userId:
+          type: string
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+        defaultProfile:
+          type: boolean
+    ServicePublicKey:
+      type: object
+      required: [keyId, fingerprint, algorithm, createdAt, publicKey]
+      properties:
+        keyId:
+          type: string
+        fingerprint:
+          type: string
+        algorithm:
+          type: string
+        userId:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        publicKey:
+          type: string
+          description: ASCII-armored PGP public key.
+    ApiActivitySummary:
+      type: object
+      required: [id, startedAt, channel, operation, method, path, outcome, statusCode, durationMs]
+      properties:
+        id:
+          type: string
+        startedAt:
+          type: string
+          format: date-time
+        channel:
+          type: string
+          enum: [WEB, SECURE_API]
+        operation:
+          type: string
+        method:
+          type: string
+        path:
+          type: string
+        profile:
+          type: string
+          nullable: true
+        outcome:
+          type: string
+        statusCode:
+          type: integer
+        durationMs:
+          type: integer
+          format: int64
+        errorMessage:
+          type: string
+          nullable: true
+    ApiActivityRecord:
+      allOf:
+        - $ref: '#/components/schemas/ApiActivitySummary'
+        - type: object
+          properties:
+            wireRequest: {}
+            decryptedRequest: {}
+            businessResult: {}
+            wireResponse: {}
+            errorMessage:
+              type: string
+              nullable: true
