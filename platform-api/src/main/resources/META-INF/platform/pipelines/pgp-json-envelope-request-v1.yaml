@@ -1,0 +1,38 @@
+apiVersion: platform.example.com/v1
+kind: Pipeline
+metadata:
+  id: system/pgp-json-envelope-request
+  version: 1
+  displayName: PGP JSON request envelope
+  description: Serializes a business payload, signs and encrypts it, then creates a JSON request envelope.
+spec:
+  direction: REQUEST
+  requiresRuntimeProfile: true
+  inputs:
+    payload:
+      type: object
+      defaultLocation: business.body
+      description: The business request payload.
+  outputs:
+    message:
+      type: object
+      defaultLocation: wire.body
+      description: The JSON envelope sent on the wire.
+  parameters:
+    armored:
+      type: boolean
+      default: true
+      description: Emit an ASCII-armored PGP message.
+    envelopePointer:
+      type: string
+      default: /payload
+      description: JSON Pointer where the encrypted message is written.
+  steps:
+    - id: encrypt
+      uses: crypto.pgp.signAndEncrypt@1
+      displayName: Sign and encrypt payload
+      description: Serializes the payload as JSON, signs it, and encrypts it with the runtime profile.
+    - id: envelope
+      uses: body.buildJson@1
+      displayName: Build JSON envelope
+      description: Writes the encrypted message into the configured JSON envelope field.

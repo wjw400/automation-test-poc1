@@ -280,6 +280,119 @@ export type ApiOperationRecord = {
   createdAt: string
 }
 
+export type ContractDiagnosticRecord = {
+  severity: 'INFO' | 'WARNING' | 'ERROR' | string
+  code: string
+  message: string
+  location: string
+}
+
+export type ContentContractRecord = {
+  mediaType?: string | null
+  schema?: Record<string, unknown> | null
+  schemaRef?: string | null
+  example?: unknown
+}
+
+export type PipelinePortRecord = {
+  type: string
+  defaultLocation?: string | null
+  description?: string | null
+}
+
+export type PipelineParameterRecord = {
+  type: string
+  defaultValue?: unknown
+  enumValues: unknown[]
+  description?: string | null
+}
+
+export type PipelineStepRecord = {
+  id: string
+  uses: string
+  displayName: string
+  description?: string | null
+}
+
+export type PipelineCatalogRecord = {
+  id: string
+  version: number
+  displayName: string
+  description?: string | null
+  direction: string
+  requiresRuntimeProfile: boolean
+  inputs: Record<string, PipelinePortRecord>
+  outputs: Record<string, PipelinePortRecord>
+  parameters: Record<string, PipelineParameterRecord>
+  steps: PipelineStepRecord[]
+  reference: string
+}
+
+export type ProcessingContractRecord = {
+  pipelineReference: string
+  pipeline?: PipelineCatalogRecord | null
+  inputs: Record<string, unknown>
+  outputs: Record<string, unknown>
+  parameters: Record<string, unknown>
+}
+
+export type PayloadContractRecord = {
+  business?: ContentContractRecord | null
+  wire?: ContentContractRecord | null
+  processing?: ProcessingContractRecord | null
+}
+
+export type ResponseContractRecord = {
+  status: string
+  description?: string | null
+  business?: ContentContractRecord | null
+  wire?: ContentContractRecord | null
+  processing?: ProcessingContractRecord | null
+}
+
+export type ParameterContractRecord = {
+  name?: string | null
+  location?: string | null
+  required: boolean
+  schema?: Record<string, unknown> | null
+  example?: unknown
+  description?: string | null
+}
+
+export type OperationCapabilitiesRecord = {
+  hasBusinessRequest: boolean
+  hasBusinessResponse: boolean
+  hasRequestProcessing: boolean
+  hasResponseProcessing: boolean
+  encrypted: boolean
+  canGenerateScenario: boolean
+}
+
+export type OperationContractRecord = {
+  id?: string | null
+  method: string
+  path: string
+  operationId?: string | null
+  summary?: string | null
+  description?: string | null
+  tags: string[]
+  parameters: ParameterContractRecord[]
+  request: PayloadContractRecord
+  responses: ResponseContractRecord[]
+  capabilities: OperationCapabilitiesRecord
+  rawOperation: Record<string, unknown>
+  diagnostics: ContractDiagnosticRecord[]
+}
+
+export type ApiSpecContractRecord = {
+  apiSpecId: string
+  title?: string | null
+  version?: string | null
+  operations: OperationContractRecord[]
+  schemaRegistry: Record<string, Record<string, unknown>>
+  diagnostics: ContractDiagnosticRecord[]
+}
+
 export type TestKnowledgeScope = 'PROJECT' | 'API_SPEC' | 'OPERATION' | 'SCENARIO' | 'SUITE'
 export type TestKnowledgeStatus = 'DRAFT' | 'PUBLISHED'
 

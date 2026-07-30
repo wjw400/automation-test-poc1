@@ -1,5 +1,6 @@
 import {
   ApiOutlined,
+  ApartmentOutlined,
   CloseOutlined,
   CopyOutlined,
   DeleteOutlined,
@@ -31,7 +32,8 @@ import {
 } from '../components/ConfigAssetEditors'
 import { RunDetail } from '../components/RunDetail'
 import { StatusPill } from '../components/StatusPill'
-import { StoplightApi } from '../components/StoplightApi'
+import { ApiReference } from '../components/ApiReference'
+import { PipelineCatalog } from '../components/PipelineCatalog'
 import { SuiteRunDetail } from '../components/SuiteRunDetail'
 import { TestKnowledgeEditor } from '../components/TestKnowledgeEditor'
 import type {
@@ -58,8 +60,8 @@ import { SuitesPage } from './SuitesPage'
 
 const { Text } = Typography
 
-type WorkbenchMode = 'scenarios' | 'suites' | 'apis' | 'environments' | 'profiles' | 'knowledge' | 'runs'
-type WorkbenchTabType = 'scenario' | 'suite' | 'apiSpec' | 'run' | 'suiteRun' | 'environment' | 'profile' | 'knowledge'
+type WorkbenchMode = 'scenarios' | 'suites' | 'apis' | 'processing' | 'environments' | 'profiles' | 'knowledge' | 'runs'
+type WorkbenchTabType = 'scenario' | 'suite' | 'apiSpec' | 'pipelineCatalog' | 'run' | 'suiteRun' | 'environment' | 'profile' | 'knowledge'
 
 type WorkbenchTab = {
   key: string
@@ -994,6 +996,21 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
             ))}
           </ResourceListSidebar>
         ) : null}
+        {mode === 'processing' ? (
+          <ResourceListSidebar
+            title="Processing"
+            searchPlaceholder="Search built-in processing"
+            filter=""
+            onFilterChange={() => undefined}
+          >
+            <AssetRow
+              active={activeTab?.type === 'pipelineCatalog'}
+              icon={<ApartmentOutlined />}
+              title="Built-in pipeline catalog"
+              onClick={() => openTab('pipelineCatalog', 'builtin', 'Processing pipelines')}
+            />
+          </ResourceListSidebar>
+        ) : null}
         {mode === 'environments' ? (
           <ResourceListSidebar
             title={t('config:environments')}
@@ -1583,6 +1600,9 @@ function renderTabContent(options: RenderTabOptions) {
       />
     )
   }
+  if (tab.type === 'pipelineCatalog') {
+    return <PipelineCatalog />
+  }
   if (tab.type === 'environment') {
     const environment = options.environments.find((record) => record.id === tab.resourceId)
     return (
@@ -1674,7 +1694,7 @@ function ApiSpecTabPane({ projectId, spec }: { projectId: string, spec?: ApiSpec
         </div>
       </header>
       <div className="api-spec-tab-content">
-        <StoplightApi apiDescriptionUrl={platformApi.getApiSpecContentUrl(projectId, spec.id)} />
+        <ApiReference projectId={projectId} apiSpecId={spec.id} />
       </div>
     </div>
   )
@@ -1908,7 +1928,7 @@ function ResourceListSidebar({
   searchPlaceholder: string
   filter: string
   onFilterChange: (value: string) => void
-  onCreate: () => void
+  onCreate?: () => void
   createTitle?: string
   children: React.ReactNode
 }) {
@@ -1916,7 +1936,7 @@ function ResourceListSidebar({
     <>
       <div className="workbench-sidebar-head">
         <Text strong>{title}</Text>
-        <Button type="text" size="small" icon={<PlusOutlined />} title={createTitle} onClick={onCreate} />
+        {onCreate ? <Button type="text" size="small" icon={<PlusOutlined />} title={createTitle} onClick={onCreate} /> : null}
       </div>
       <Input
         allowClear
@@ -2150,6 +2170,7 @@ function tabIcon(type: WorkbenchTabType) {
   if (type === 'scenario') return <ExperimentOutlined />
   if (type === 'suite') return <ProfileOutlined />
   if (type === 'apiSpec') return <ApiOutlined />
+  if (type === 'pipelineCatalog') return <ApartmentOutlined />
   if (type === 'suiteRun') return <ProfileOutlined />
   if (type === 'run') return <FileTextOutlined />
   if (type === 'environment') return <GlobalOutlined />
@@ -2161,6 +2182,7 @@ function isWorkbenchMode(value: string | null): value is WorkbenchMode {
   return value === 'scenarios'
     || value === 'suites'
     || value === 'apis'
+    || value === 'processing'
     || value === 'environments'
     || value === 'profiles'
     || value === 'knowledge'
@@ -2171,6 +2193,7 @@ function modeForTabType(type: WorkbenchTabType): WorkbenchMode | undefined {
   if (type === 'scenario') return 'scenarios'
   if (type === 'suite') return 'suites'
   if (type === 'apiSpec') return 'apis'
+  if (type === 'pipelineCatalog') return 'processing'
   if (type === 'environment') return 'environments'
   if (type === 'profile') return 'profiles'
   if (type === 'knowledge') return 'knowledge'

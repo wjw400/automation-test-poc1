@@ -7,8 +7,8 @@ info:
 
     Every request payload is signed and encrypted as an ASCII-armored PGP message
     inside the JSON `payload` field. Successful responses use the same encrypted
-    envelope. The `x-plaintext-request-schema` and `x-plaintext-response-schema`
-    extensions describe the business JSON before encryption and after decryption.
+    envelope. The `x-platform-processing` extension references the platform's
+    built-in pipelines and exposes the business JSON before encryption and after decryption.
 servers:
   - url: http://localhost:8081
     description: Local OrderFlow service
@@ -31,10 +31,16 @@ paths:
       operationId: createFulfillmentOrder
       parameters:
         - $ref: '#/components/parameters/ProfileParam'
-      x-plaintext-request-schema:
-        $ref: '#/components/schemas/CreateOrderPayload'
-      x-plaintext-response-schema:
-        $ref: '#/components/schemas/Order'
+      x-platform-processing:
+        request:
+          businessSchema:
+            $ref: '#/components/schemas/CreateOrderPayload'
+          pipeline: system/pgp-json-envelope-request@1
+        response:
+          '200':
+            businessSchema:
+              $ref: '#/components/schemas/Order'
+            pipeline: system/pgp-json-envelope-response@1
       requestBody:
         $ref: '#/components/requestBodies/EncryptedRequest'
       responses:
@@ -53,10 +59,16 @@ paths:
       operationId: queryFulfillmentOrder
       parameters:
         - $ref: '#/components/parameters/ProfileParam'
-      x-plaintext-request-schema:
-        $ref: '#/components/schemas/OrderReferencePayload'
-      x-plaintext-response-schema:
-        $ref: '#/components/schemas/Order'
+      x-platform-processing:
+        request:
+          businessSchema:
+            $ref: '#/components/schemas/OrderReferencePayload'
+          pipeline: system/pgp-json-envelope-request@1
+        response:
+          '200':
+            businessSchema:
+              $ref: '#/components/schemas/Order'
+            pipeline: system/pgp-json-envelope-response@1
       requestBody:
         $ref: '#/components/requestBodies/EncryptedRequest'
       responses:
@@ -75,10 +87,16 @@ paths:
       operationId: reserveFulfillmentOrder
       parameters:
         - $ref: '#/components/parameters/ProfileParam'
-      x-plaintext-request-schema:
-        $ref: '#/components/schemas/OrderReferencePayload'
-      x-plaintext-response-schema:
-        $ref: '#/components/schemas/Order'
+      x-platform-processing:
+        request:
+          businessSchema:
+            $ref: '#/components/schemas/OrderReferencePayload'
+          pipeline: system/pgp-json-envelope-request@1
+        response:
+          '200':
+            businessSchema:
+              $ref: '#/components/schemas/Order'
+            pipeline: system/pgp-json-envelope-response@1
       requestBody:
         $ref: '#/components/requestBodies/EncryptedRequest'
       responses:
@@ -97,10 +115,16 @@ paths:
       operationId: fulfillFulfillmentOrder
       parameters:
         - $ref: '#/components/parameters/ProfileParam'
-      x-plaintext-request-schema:
-        $ref: '#/components/schemas/FulfillOrderPayload'
-      x-plaintext-response-schema:
-        $ref: '#/components/schemas/Order'
+      x-platform-processing:
+        request:
+          businessSchema:
+            $ref: '#/components/schemas/FulfillOrderPayload'
+          pipeline: system/pgp-json-envelope-request@1
+        response:
+          '200':
+            businessSchema:
+              $ref: '#/components/schemas/Order'
+            pipeline: system/pgp-json-envelope-response@1
       requestBody:
         $ref: '#/components/requestBodies/EncryptedRequest'
       responses:
@@ -119,10 +143,16 @@ paths:
       operationId: cancelFulfillmentOrder
       parameters:
         - $ref: '#/components/parameters/ProfileParam'
-      x-plaintext-request-schema:
-        $ref: '#/components/schemas/OrderReferencePayload'
-      x-plaintext-response-schema:
-        $ref: '#/components/schemas/Order'
+      x-platform-processing:
+        request:
+          businessSchema:
+            $ref: '#/components/schemas/OrderReferencePayload'
+          pipeline: system/pgp-json-envelope-request@1
+        response:
+          '200':
+            businessSchema:
+              $ref: '#/components/schemas/Order'
+            pipeline: system/pgp-json-envelope-response@1
       requestBody:
         $ref: '#/components/requestBodies/EncryptedRequest'
       responses:

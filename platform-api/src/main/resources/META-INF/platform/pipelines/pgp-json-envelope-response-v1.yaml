@@ -1,0 +1,30 @@
+apiVersion: platform.example.com/v1
+kind: Pipeline
+metadata:
+  id: system/pgp-json-envelope-response
+  version: 1
+  displayName: PGP JSON response envelope
+  description: Reads an encrypted message from a JSON response envelope, then decrypts and verifies it.
+spec:
+  direction: RESPONSE
+  requiresRuntimeProfile: true
+  inputs:
+    message:
+      type: string
+      defaultLocation: wire.body.payload
+      description: The encrypted message extracted from the wire response.
+  outputs:
+    payload:
+      type: object
+      defaultLocation: business.body
+      description: The decrypted business response payload.
+  parameters:
+    payloadPointer:
+      type: string
+      default: /payload
+      description: JSON Pointer where the encrypted message is read from.
+  steps:
+    - id: decrypt
+      uses: crypto.pgp.decryptAndVerify@1
+      displayName: Decrypt and verify message
+      description: Verifies the PGP signature and parses the decrypted payload as JSON.

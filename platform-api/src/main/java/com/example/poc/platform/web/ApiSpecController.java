@@ -4,6 +4,9 @@ import com.example.poc.platform.api.ApiSpecService;
 import com.example.poc.platform.api.ApiSpecService.ApiOperationRecord;
 import com.example.poc.platform.api.ApiSpecService.ApiSpecReferenceRecord;
 import com.example.poc.platform.api.ApiSpecService.ApiSpecRecord;
+import com.example.poc.platform.openapi.OpenApiContractService;
+import com.example.poc.platform.openapi.OpenApiContractService.ApiSpecContractRecord;
+import com.example.poc.platform.openapi.OpenApiContractService.OperationContractRecord;
 import java.util.List;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -21,9 +24,11 @@ import org.springframework.web.multipart.MultipartFile;
 @RequestMapping("/api")
 public class ApiSpecController {
     private final ApiSpecService apiSpecService;
+    private final OpenApiContractService openApiContractService;
 
-    public ApiSpecController(ApiSpecService apiSpecService) {
+    public ApiSpecController(ApiSpecService apiSpecService, OpenApiContractService openApiContractService) {
         this.apiSpecService = apiSpecService;
+        this.openApiContractService = openApiContractService;
     }
 
     @GetMapping("/projects/{projectId}/api-specs")
@@ -57,6 +62,20 @@ public class ApiSpecController {
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_TYPE, "application/yaml; charset=UTF-8")
                 .body(apiSpecService.getSpecContent(projectId, apiSpecId));
+    }
+
+    @GetMapping("/projects/{projectId}/api-specs/{apiSpecId}/contract")
+    public ApiSpecContractRecord getSpecContract(
+            @PathVariable("projectId") String projectId,
+            @PathVariable("apiSpecId") String apiSpecId) {
+        return openApiContractService.getSpecContract(projectId, apiSpecId);
+    }
+
+    @GetMapping("/projects/{projectId}/operations/{operationId}/contract")
+    public OperationContractRecord getOperationContract(
+            @PathVariable("projectId") String projectId,
+            @PathVariable("operationId") String operationId) {
+        return openApiContractService.getOperationContract(projectId, operationId);
     }
 
     @GetMapping("/projects/{projectId}/api-specs/{apiSpecId}/references")

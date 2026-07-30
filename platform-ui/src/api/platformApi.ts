@@ -1,11 +1,13 @@
 import { apiClient } from './client'
 import type {
   ApiOperationRecord,
+  ApiSpecContractRecord,
   ApiSpecRecord,
   ApiSpecReferenceRecord,
   CaseRecord,
   Environment,
   FolderRecord,
+  PipelineCatalogRecord,
   Profile,
   Project,
   RunRecord,
@@ -254,6 +256,26 @@ export const platformApi = {
 
   async listOperations(projectId: string) {
     const { data } = await apiClient.get<ApiOperationRecord[]>(`/projects/${projectId}/operations`)
+    return data
+  },
+
+  async getApiSpecContract(projectId: string, apiSpecId: string) {
+    const { data } = await apiClient.get<ApiSpecContractRecord>(
+      `/projects/${projectId}/api-specs/${apiSpecId}/contract`,
+    )
+    return data
+  },
+
+  async listPipelineCatalog() {
+    const { data } = await apiClient.get<PipelineCatalogRecord[]>('/pipeline-catalog')
+    return data
+  },
+
+  async getApiSpecSource(projectId: string, apiSpecId: string) {
+    const { data } = await apiClient.get<string>(
+      `/projects/${projectId}/api-specs/${apiSpecId}/content`,
+      { responseType: 'text' },
+    )
     return data
   },
 

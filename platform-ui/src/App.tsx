@@ -1,5 +1,6 @@
 import {
   ApiOutlined,
+  ApartmentOutlined,
   AppstoreOutlined,
   ClockCircleOutlined,
   DownOutlined,
@@ -52,6 +53,7 @@ function AppShell() {
     { key: 'scenarios', icon: <ExperimentOutlined />, label: t('workspace:navigation.scenarios') },
     { key: 'suites', icon: <ProfileOutlined />, label: t('workspace:navigation.suites') },
     { key: 'apis', icon: <ApiOutlined />, label: t('workspace:navigation.apis') },
+    { key: 'processing', icon: <ApartmentOutlined />, label: t('workspace:navigation.processing', 'Processing') },
     { key: 'environments', icon: <GlobalOutlined />, label: t('workspace:navigation.environments') },
     { key: 'profiles', icon: <KeyOutlined />, label: t('workspace:navigation.profiles') },
     { key: 'knowledge', icon: <ReadOutlined />, label: t('workspace:navigation.knowledge') },
