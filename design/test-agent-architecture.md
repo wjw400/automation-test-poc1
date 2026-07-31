@@ -4,6 +4,8 @@
 
 本文定义平台中 Test Agent 的长期产品定位、任务模型、交互形态和分阶段路线。
 
+更高层的产品目标、核心体验和成功标准见 [Test Agent 产品愿景](C:/Users/blaine/Documents/code/automation-test-poc1/design/test-agent-vision.md)。
+
 它回答以下问题：
 
 - Test Agent 与普通 Chatbot 有什么区别
@@ -12,6 +14,8 @@
 - 当前受限 Agent 如何演进为受控 Sandbox Agent
 
 工具、语义 Command、权限审批、执行循环和停止规则见 [Test Agent 工具与执行治理](C:/Users/blaine/Documents/code/automation-test-poc1/design/test-agent-runtime-governance.md)。
+
+Agent Runtime 技术选型及 Spring AI、OpenCode、Skill 和 MCP 的边界见 [Test Agent Runtime 技术选型决策](C:/Users/blaine/Documents/code/automation-test-poc1/design/test-agent-runtime-technology-decision.md)。
 
 本文描述目标架构，不表示所有能力都会在 V1 开放。
 

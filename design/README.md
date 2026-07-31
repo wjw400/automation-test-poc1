@@ -8,11 +8,14 @@
 2. [领域模型](C:/Users/blaine/Documents/code/automation-test-poc1/design/domain-model.md)
 3. [系统架构](C:/Users/blaine/Documents/code/automation-test-poc1/design/system-architecture.md)
 4. [MVP 范围与路线](C:/Users/blaine/Documents/code/automation-test-poc1/design/mvp-scope.md)
-5. [Test Agent 能力边界](C:/Users/blaine/Documents/code/automation-test-poc1/design/ai-assistance-boundaries.md)
-6. [Test Agent 产品与架构设计](C:/Users/blaine/Documents/code/automation-test-poc1/design/test-agent-architecture.md)
-7. [Test Agent 工具与执行治理](C:/Users/blaine/Documents/code/automation-test-poc1/design/test-agent-runtime-governance.md)
-8. [AI 上下文与安全规范](C:/Users/blaine/Documents/code/automation-test-poc1/design/ai-context-and-security.md)
-9. [AI 产品交付规范](C:/Users/blaine/Documents/code/automation-test-poc1/design/ai-product-delivery-guidelines.md)
+5. [Test Agent 产品愿景](C:/Users/blaine/Documents/code/automation-test-poc1/design/test-agent-vision.md)
+6. [Test Agent 能力边界](C:/Users/blaine/Documents/code/automation-test-poc1/design/ai-assistance-boundaries.md)
+7. [Test Agent 产品与架构设计](C:/Users/blaine/Documents/code/automation-test-poc1/design/test-agent-architecture.md)
+8. [Test Agent 工具与执行治理](C:/Users/blaine/Documents/code/automation-test-poc1/design/test-agent-runtime-governance.md)
+9. [Test Agent Runtime 技术选型决策](C:/Users/blaine/Documents/code/automation-test-poc1/design/test-agent-runtime-technology-decision.md)
+10. [Test Agent 分阶段实施计划](C:/Users/blaine/Documents/code/automation-test-poc1/design/test-agent-implementation/README.md)
+11. [AI 上下文与安全规范](C:/Users/blaine/Documents/code/automation-test-poc1/design/ai-context-and-security.md)
+12. [AI 产品交付规范](C:/Users/blaine/Documents/code/automation-test-poc1/design/ai-product-delivery-guidelines.md)
 
 ## 文档拆分原则
 
@@ -26,10 +29,16 @@
   第一版做什么、不做什么、交付顺序和主要风险。
 - `ai-assistance-boundaries.md`
   Test Agent 可以读取、规划、生成和建议什么，以及不可跨越的数据、安全、权限和执行边界。
+- `test-agent-vision.md`
+  Test Agent 的目标用户、核心体验、产品原则、能力演进、成功标准和非目标。
 - `test-agent-architecture.md`
   Test Agent 产品定位、Agent Task、统一交互入口、总体架构和分阶段路线。
 - `test-agent-runtime-governance.md`
   语义 Command、工具副作用分级、授权审批、受控执行循环和停止条件。
+- `test-agent-runtime-technology-decision.md`
+  Agent Runtime 技术选型，Spring AI 与 OpenCode 的取舍，以及 Skill、MCP 和可替换运行时边界。
+- `test-agent-implementation/`
+  Test Agent 五阶段实施计划、各阶段任务清单、验收标准和完成门槛。
 - `ai-context-and-security.md`
   AI Context Builder、数据分级、脱敏、工具白名单和审计要求。
 - `ai-product-delivery-guidelines.md`
