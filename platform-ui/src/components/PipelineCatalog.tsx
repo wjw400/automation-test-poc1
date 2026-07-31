@@ -1,9 +1,10 @@
-import { LockOutlined } from '@ant-design/icons'
+import { ArrowRightOutlined, LockOutlined } from '@ant-design/icons'
 import { useQuery } from '@tanstack/react-query'
 import { Alert, Empty, Spin, Tag, Typography } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import { platformApi } from '../api/platformApi'
 import type { PipelineCatalogRecord } from '../types/platform'
+import { PipelineStepBindings } from './PipelineFlowBindings'
 
 const { Text, Paragraph } = Typography
 
@@ -62,63 +63,112 @@ export function PipelineCatalog() {
             <h1>{selected.displayName}</h1>
           </div>
           <div className="pipeline-catalog-tags">
+            <Tag>Built-in · Read-only</Tag>
             <Tag color="blue">{selected.reference}</Tag>
             {selected.requiresRuntimeProfile ? <Tag icon={<LockOutlined />}>Runtime profile required</Tag> : null}
           </div>
         </header>
         {selected.description ? <Paragraph type="secondary">{selected.description}</Paragraph> : null}
-        <section className="pipeline-catalog-section">
-          <h2>Processing steps</h2>
-          <ol className="pipeline-catalog-steps">
-            {selected.steps.map((step) => (
-              <li key={step.id}>
-                <strong>{step.displayName}</strong>
-                <code>{step.uses}</code>
-                {step.description ? <Text type="secondary">{step.description}</Text> : null}
-              </li>
-            ))}
-          </ol>
-        </section>
-        <div className="pipeline-catalog-grid">
-          <PortList title="Inputs" ports={selected.inputs} />
-          <PortList title="Outputs" ports={selected.outputs} />
-        </div>
-        <ParameterList pipeline={selected} />
+        <PipelineDefinitionFlow pipeline={selected} />
       </main>
     </div>
   )
 }
 
-function PortList({ title, ports }: { title: string, ports: PipelineCatalogRecord['inputs'] }) {
+function PipelineDefinitionFlow({ pipeline }: { pipeline: PipelineCatalogRecord }) {
   return (
-    <section className="pipeline-catalog-section">
-      <h2>{title}</h2>
-      <dl className="pipeline-catalog-definition-list">
-        {Object.entries(ports).map(([name, port]) => (
-          <div key={name}>
-            <dt><code>{name}</code><Tag>{port.type}</Tag></dt>
-            <dd>{port.defaultLocation || '-'}{port.description ? ` · ${port.description}` : ''}</dd>
-          </div>
-        ))}
-      </dl>
+    <section className="pipeline-catalog-flow-section">
+      <div className="pipeline-catalog-section-heading">
+        <div>
+          <h2>Data flow</h2>
+          <Text type="secondary">Every input and option is traced to the step port that consumes it</Text>
+        </div>
+        <Tag>{pipeline.direction}</Tag>
+      </div>
+      <div className="pipeline-catalog-flow">
+        <div className="pipeline-catalog-source-column">
+          <span className="pipeline-catalog-column-label">Sources</span>
+          <EndpointGroup pipeline={pipeline} title="Inputs" group="inputs" records={pipeline.inputs} />
+          <EndpointGroup pipeline={pipeline} title="Options" group="parameters" records={pipeline.parameters} />
+        </div>
+        <ArrowRightOutlined className="pipeline-catalog-flow-arrow" />
+        <div className="pipeline-catalog-step-column">
+          <span className="pipeline-catalog-column-label">Processing steps</span>
+          {pipeline.steps.map((step, index) => (
+            <div className="pipeline-catalog-step-card" key={step.id}>
+              <b>{index + 1}</b>
+              <div>
+                <strong>{step.displayName}</strong>
+                <code>{step.uses}</code>
+                {step.description ? <Text type="secondary">{step.description}</Text> : null}
+                <PipelineStepBindings pipeline={pipeline} stepId={step.id} />
+              </div>
+            </div>
+          ))}
+        </div>
+        <ArrowRightOutlined className="pipeline-catalog-flow-arrow" />
+        <EndpointGroup pipeline={pipeline} title="Outputs" group="outputs" records={pipeline.outputs} />
+      </div>
     </section>
   )
 }
 
-function ParameterList({ pipeline }: { pipeline: PipelineCatalogRecord }) {
-  const entries = Object.entries(pipeline.parameters)
-  if (!entries.length) return null
+function EndpointGroup({
+  pipeline,
+  title,
+  group,
+  records,
+}: {
+  pipeline: PipelineCatalogRecord
+  title: string
+  group: 'inputs' | 'outputs' | 'parameters'
+  records: PipelineCatalogRecord['inputs'] | PipelineCatalogRecord['parameters']
+}) {
+  const direction = group === 'outputs' ? 'to' : 'from'
   return (
-    <section className="pipeline-catalog-section">
-      <h2>Parameters</h2>
-      <dl className="pipeline-catalog-definition-list">
-        {entries.map(([name, parameter]) => (
-          <div key={name}>
-            <dt><code>{name}</code><Tag>{parameter.type}</Tag></dt>
-            <dd>Default: {String(parameter.defaultValue ?? '-')} {parameter.description ? `· ${parameter.description}` : ''}</dd>
-          </div>
-        ))}
-      </dl>
-    </section>
+    <div className="pipeline-catalog-port-column">
+      <span className="pipeline-catalog-source-label">{title}</span>
+      {Object.entries(records).map(([name, record]) => {
+        const isParameter = group === 'parameters'
+        const defaultValue = isParameter && 'defaultValue' in record
+          ? record.defaultValue
+          : 'defaultLocation' in record
+            ? record.defaultLocation
+            : undefined
+        const usages = endpointUsage(pipeline, `${group}.${name}`, direction)
+        return (
+        <div className="pipeline-catalog-port-card" key={name}>
+          <div><code>{name}</code><Tag>{record.type}</Tag></div>
+          <strong>{formatDefault(defaultValue)}</strong>
+          {record.description ? <Text type="secondary">{record.description}</Text> : null}
+          {usages.map((usage) => <span className="pipeline-catalog-usage" key={usage}>{direction === 'from' ? 'Used by' : 'Produced by'} <b>{usage}</b></span>)}
+        </div>
+        )
+      })}
+    </div>
   )
+}
+
+function formatDefault(value: unknown) {
+  if (value === undefined || value === null || value === '') return 'No default value'
+  return typeof value === 'string' ? value : JSON.stringify(value)
+}
+
+function endpointUsage(
+  pipeline: PipelineCatalogRecord,
+  reference: string,
+  direction: 'from' | 'to',
+) {
+  return (pipeline.flow ?? [])
+    .filter((edge) => edge[direction] === reference)
+    .map((edge) => describeEndpoint(pipeline, edge[direction === 'from' ? 'to' : 'from']))
+}
+
+function describeEndpoint(pipeline: PipelineCatalogRecord, reference: string) {
+  const [group, name, port] = reference.split('.')
+  if (group === 'steps') {
+    const index = pipeline.steps.findIndex((step) => step.id === name)
+    return `Step ${index + 1} · ${name}.${port}`
+  }
+  return `${group.slice(0, -1)} · ${name}`
 }

@@ -272,7 +272,8 @@ public class OpenApiContractService {
                 Map.of(),
                 Map.of(),
                 Map.of(),
-                List.copyOf(steps));
+                List.copyOf(steps),
+                List.of());
         return new ProcessingContractRecord("legacy/inline-processing@1", pipeline, Map.of(), Map.of(), Map.of());
     }
 

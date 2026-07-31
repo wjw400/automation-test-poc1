@@ -36,3 +36,14 @@ spec:
       uses: body.buildJson@1
       displayName: Build JSON envelope
       description: Writes the encrypted message into the configured JSON envelope field.
+  flow:
+    - from: inputs.payload
+      to: steps.encrypt.payload
+    - from: parameters.armored
+      to: steps.encrypt.armored
+    - from: steps.encrypt.message
+      to: steps.envelope.encryptedMessage
+    - from: parameters.envelopePointer
+      to: steps.envelope.pointer
+    - from: steps.envelope.body
+      to: outputs.message

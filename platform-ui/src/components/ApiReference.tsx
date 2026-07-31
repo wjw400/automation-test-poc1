@@ -1,4 +1,5 @@
 import {
+  ArrowRightOutlined,
   CopyOutlined,
   LockOutlined,
   SearchOutlined,
@@ -15,6 +16,7 @@ import type {
   ProcessingContractRecord,
   ResponseContractRecord,
 } from '../types/platform'
+import { PipelineStepBindings } from './PipelineFlowBindings'
 
 const { Text, Paragraph } = Typography
 
@@ -252,6 +254,16 @@ function PayloadPanel({
   const content = view === 'business' ? payload.business : payload.wire
   return (
     <div className="api-reference-payload">
+      {payload.processing && payload.business && payload.wire ? (
+        <OperationProcessingJourney
+          business={payload.business}
+          wire={payload.wire}
+          processing={payload.processing}
+          direction="request"
+          activeView={view}
+          onSelectView={setView}
+        />
+      ) : null}
       {payload.business && payload.wire ? (
         <Segmented
           options={[
@@ -288,6 +300,16 @@ function Responses({
     <div className="api-reference-responses">
       <Segmented options={responses.map((item) => ({ label: item.status, value: item.status }))} value={response.status} onChange={(value) => setStatus(value as string)} />
       {response.description ? <Text type="secondary">{response.description}</Text> : null}
+      {response.processing && response.business && response.wire ? (
+        <OperationProcessingJourney
+          business={response.business}
+          wire={response.wire}
+          processing={response.processing}
+          direction="response"
+          activeView={view}
+          onSelectView={setView}
+        />
+      ) : null}
       {response.business && response.wire ? (
         <Segmented
           options={[
@@ -418,9 +440,24 @@ function Processing({ operation }: { operation: OperationContractRecord }) {
   }
   return (
     <div className="api-reference-protocol">
-      {operation.request.processing ? <PipelineSummary title="Request processing" start="Business request" end="Wire request" processing={operation.request.processing} /> : null}
+      {operation.request.processing ? (
+        <PipelineSummary
+          title="Request processing"
+          business={operation.request.business}
+          wire={operation.request.wire}
+          direction="request"
+          processing={operation.request.processing}
+        />
+      ) : null}
       {responseProcessing.map((response) => (
-        <PipelineSummary key={response.status} title={`Response ${response.status} processing`} start="Wire response" end="Business response" processing={response.processing!} />
+        <PipelineSummary
+          key={response.status}
+          title={`Response ${response.status} processing`}
+          business={response.business}
+          wire={response.wire}
+          direction="response"
+          processing={response.processing!}
+        />
       ))}
     </div>
   )
@@ -428,13 +465,15 @@ function Processing({ operation }: { operation: OperationContractRecord }) {
 
 function PipelineSummary({
   title,
-  start,
-  end,
+  business,
+  wire,
+  direction,
   processing,
 }: {
   title: string
-  start: string
-  end: string
+  business?: ContentContractRecord | null
+  wire?: ContentContractRecord | null
+  direction: 'request' | 'response'
   processing: ProcessingContractRecord
 }) {
   const pipeline = processing.pipeline
@@ -450,57 +489,153 @@ function PipelineSummary({
   }
   return (
     <section className="api-reference-transform">
-      <h3>{title}</h3>
-      <div className="api-reference-processing-meta">
-        <Tag color="blue">{pipeline.displayName}</Tag>
-        <code>{processing.pipelineReference}</code>
+      <div className="api-reference-transform-heading">
+        <div>
+          <h3>{title}</h3>
+          <code>{processing.pipelineReference}</code>
+        </div>
         {pipeline.requiresRuntimeProfile ? <Tag icon={<LockOutlined />}>Runtime profile required</Tag> : null}
       </div>
-      {pipeline.description ? <Text type="secondary">{pipeline.description}</Text> : null}
-      <ol>
-        <li className="api-reference-transform-endpoint">{start}</li>
-        {pipeline.steps.map((step) => <li key={step.id}>{step.displayName}</li>)}
-        <li className="api-reference-transform-endpoint">{end}</li>
-      </ol>
-      <PipelineBindings label="Inputs" declared={pipeline.inputs} overrides={processing.inputs} />
-      <PipelineBindings label="Outputs" declared={pipeline.outputs} overrides={processing.outputs} />
-      <PipelineParameters processing={processing} />
+      {business && wire ? (
+        <OperationProcessingJourney business={business} wire={wire} processing={processing} direction={direction} />
+      ) : null}
+      <EffectiveConfiguration processing={processing} />
     </section>
   )
 }
 
-function PipelineBindings({
-  label,
-  declared,
-  overrides,
+function OperationProcessingJourney({
+  business,
+  wire,
+  processing,
+  direction,
+  activeView,
+  onSelectView,
 }: {
-  label: string
-  declared: Record<string, { type: string, defaultLocation?: string | null }>
-  overrides: Record<string, unknown>
+  business: ContentContractRecord
+  wire: ContentContractRecord
+  processing: ProcessingContractRecord
+  direction: 'request' | 'response'
+  activeView?: 'business' | 'wire'
+  onSelectView?: (view: 'business' | 'wire') => void
 }) {
-  const entries = Object.entries(declared)
-  if (!entries.length) return null
+  const pipeline = processing.pipeline
+  if (!pipeline) return null
+  const left = direction === 'request'
+    ? { view: 'business' as const, label: 'Business request', content: business }
+    : { view: 'wire' as const, label: 'Wire response', content: wire }
+  const right = direction === 'request'
+    ? { view: 'wire' as const, label: 'Wire request', content: wire }
+    : { view: 'business' as const, label: 'Business response', content: business }
   return (
-    <div className="api-reference-processing-bindings">
-      <Text strong>{label}</Text>
-      {entries.map(([name, port]) => (
-        <div key={name}><code>{name}</code><span>{String(overrides[name] ?? port.defaultLocation ?? '-')}</span><Text type="secondary">{port.type}</Text></div>
-      ))}
+    <section className="operation-processing-journey" aria-label={`${direction} processing flow`}>
+      <JourneyEndpoint {...left} active={activeView === left.view} onSelect={onSelectView} />
+      <ArrowRightOutlined className="operation-processing-arrow" />
+      <div className="operation-processing-pipeline">
+        <span className="operation-processing-eyebrow">Built-in pipeline</span>
+        <strong>{pipeline.displayName}</strong>
+        <div className="operation-processing-step-summary">
+          {pipeline.steps.map((step, index) => (
+            <div className="operation-processing-step-card" key={step.id}>
+              <span><b>{index + 1}</b>{step.displayName}</span>
+              <PipelineStepBindings
+                pipeline={pipeline}
+                stepId={step.id}
+                options={{
+                  inputs: processing.inputs,
+                  outputs: processing.outputs,
+                  parameters: processing.parameters,
+                }}
+              />
+            </div>
+          ))}
+        </div>
+        <code>{processing.pipelineReference}</code>
+      </div>
+      <ArrowRightOutlined className="operation-processing-arrow" />
+      <JourneyEndpoint {...right} active={activeView === right.view} onSelect={onSelectView} />
+    </section>
+  )
+}
+
+function JourneyEndpoint({
+  view,
+  label,
+  content,
+  active,
+  onSelect,
+}: {
+  view: 'business' | 'wire'
+  label: string
+  content: ContentContractRecord
+  active: boolean
+  onSelect?: (view: 'business' | 'wire') => void
+}) {
+  return (
+    <button
+      type="button"
+      className={`operation-processing-endpoint ${active ? 'active' : ''} ${onSelect ? 'selectable' : ''}`}
+      onClick={() => onSelect?.(view)}
+    >
+      <span>{label}</span>
+      <strong>{content.schemaRef ? shortReference(content.schemaRef) : schemaType(content.schema)}</strong>
+      <small>{content.mediaType || 'application/json'}</small>
+      {onSelect ? <em>{active ? 'Showing schema' : 'View schema'}</em> : null}
+    </button>
+  )
+}
+
+function EffectiveConfiguration({ processing }: { processing: ProcessingContractRecord }) {
+  const pipeline = processing.pipeline
+  if (!pipeline) return null
+  const rows = [
+    ...effectiveRows('Input', pipeline.inputs, processing.inputs),
+    ...effectiveRows('Output', pipeline.outputs, processing.outputs),
+    ...Object.entries(pipeline.parameters).map(([name, parameter]) => ({
+      group: 'Parameter',
+      name,
+      value: processing.parameters[name] ?? parameter.defaultValue ?? '-',
+      override: hasOwn(processing.parameters, name),
+      type: parameter.type,
+    })),
+  ]
+  if (!rows.length) return null
+  return (
+    <div className="api-reference-effective-config">
+      <div className="api-reference-effective-heading">
+        <Text strong>Effective configuration</Text>
+        <Text type="secondary">Defaults merged with this operation's overrides</Text>
+      </div>
+      <div className="api-reference-effective-table">
+        <div className="api-reference-effective-head"><span>Setting</span><span>Effective value</span><span>Source</span></div>
+        {rows.map((row) => (
+          <div key={`${row.group}:${row.name}`} className="api-reference-effective-row">
+            <span><small>{row.group}</small><code>{row.name}</code><em>{row.type}</em></span>
+            <code>{String(row.value)}</code>
+            <Tag color={row.override ? 'gold' : undefined}>{row.override ? 'Operation override' : 'Pipeline default'}</Tag>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
 
-function PipelineParameters({ processing }: { processing: ProcessingContractRecord }) {
-  const parameters = processing.pipeline ? Object.entries(processing.pipeline.parameters) : []
-  if (!parameters.length) return null
-  return (
-    <div className="api-reference-processing-bindings">
-      <Text strong>Parameters</Text>
-      {parameters.map(([name, parameter]) => (
-        <div key={name}><code>{name}</code><span>{String(processing.parameters[name] ?? parameter.defaultValue ?? '-')}</span><Text type="secondary">{parameter.type}</Text></div>
-      ))}
-    </div>
-  )
+function effectiveRows(
+  group: 'Input' | 'Output',
+  declared: Record<string, { type: string, defaultLocation?: string | null }>,
+  overrides: Record<string, unknown>,
+) {
+  return Object.entries(declared).map(([name, port]) => ({
+    group,
+    name,
+    value: overrides[name] ?? port.defaultLocation ?? '-',
+    override: hasOwn(overrides, name),
+    type: port.type,
+  }))
+}
+
+function hasOwn(value: Record<string, unknown>, name: string) {
+  return Object.prototype.hasOwnProperty.call(value, name)
 }
 
 function SourceViewer({ source, loading, rawOperation, onCopy }: { source?: string, loading: boolean, rawOperation: Record<string, unknown>, onCopy: (value: string) => void }) {

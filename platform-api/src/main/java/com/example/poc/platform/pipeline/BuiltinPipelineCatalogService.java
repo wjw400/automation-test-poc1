@@ -1,6 +1,7 @@
 package com.example.poc.platform.pipeline;
 
 import com.example.poc.engine.CaseActionExecutor;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
@@ -91,9 +92,11 @@ public class BuiltinPipelineCatalogService {
         Map<String, PipelinePortRecord> outputs = ports(spec.get("outputs"), source, "outputs");
         Map<String, PipelineParameterRecord> parameters = parameters(spec.get("parameters"), source);
         List<PipelineStepRecord> steps = steps(spec.get("steps"), source);
+        List<PipelineFlowEdgeRecord> flow = flow(spec.get("flow"), source, inputs, outputs, parameters, steps);
         require(!inputs.isEmpty(), source + " must declare at least one input");
         require(!outputs.isEmpty(), source + " must declare at least one output");
         require(!steps.isEmpty(), source + " must declare at least one step");
+        require(!flow.isEmpty(), source + " must declare its parameter and data flow");
 
         return new PipelineCatalogRecord(
                 id,
@@ -105,7 +108,8 @@ public class BuiltinPipelineCatalogService {
                 Map.copyOf(inputs),
                 Map.copyOf(outputs),
                 Map.copyOf(parameters),
-                List.copyOf(steps));
+                List.copyOf(steps),
+                List.copyOf(flow));
     }
 
     private Map<String, PipelinePortRecord> ports(Object value, String source, String kind) {
@@ -147,6 +151,84 @@ public class BuiltinPipelineCatalogService {
             result.add(new PipelineStepRecord(id, uses, text(step.get("displayName"), uses), text(step.get("description"))));
         }
         return result;
+    }
+
+    private List<PipelineFlowEdgeRecord> flow(
+            Object value,
+            String source,
+            Map<String, PipelinePortRecord> inputs,
+            Map<String, PipelinePortRecord> outputs,
+            Map<String, PipelineParameterRecord> parameters,
+            List<PipelineStepRecord> steps) {
+        List<PipelineFlowEdgeRecord> result = new ArrayList<>();
+        Map<String, Integer> stepOrder = new LinkedHashMap<>();
+        for (int index = 0; index < steps.size(); index++) {
+            stepOrder.put(steps.get(index).id(), index);
+        }
+        Set<String> targets = new LinkedHashSet<>();
+        for (Object rawEdge : list(value)) {
+            Map<String, Object> edge = object(rawEdge);
+            String from = text(edge.get("from"));
+            String to = text(edge.get("to"));
+            require(from != null && to != null, source + " flow entries require from and to");
+            FlowEndpoint fromEndpoint = flowEndpoint(from, source);
+            FlowEndpoint toEndpoint = flowEndpoint(to, source);
+            require(fromEndpoint.readable(), source + " flow source is not readable: " + from);
+            require(toEndpoint.writable(), source + " flow target is not writable: " + to);
+            validateFlowReference(fromEndpoint, source, inputs, outputs, parameters, stepOrder);
+            validateFlowReference(toEndpoint, source, inputs, outputs, parameters, stepOrder);
+            require(targets.add(to), source + " flow target is bound more than once: " + to);
+            if ("steps".equals(fromEndpoint.group()) && "steps".equals(toEndpoint.group())) {
+                require(stepOrder.get(fromEndpoint.name()) < stepOrder.get(toEndpoint.name()),
+                        source + " flow must follow declared step order: " + from + " -> " + to);
+            }
+            result.add(new PipelineFlowEdgeRecord(from, to));
+        }
+        inputs.keySet().forEach(name -> requireFlowSource(result, "inputs." + name, source));
+        parameters.keySet().forEach(name -> requireFlowSource(result, "parameters." + name, source));
+        outputs.keySet().forEach(name -> requireFlowTarget(result, "outputs." + name, source));
+        return result;
+    }
+
+    private FlowEndpoint flowEndpoint(String reference, String source) {
+        String[] parts = reference.split("\\.");
+        require(parts.length == 2 || parts.length == 3, source + " has an invalid flow endpoint: " + reference);
+        String group = parts[0];
+        if ("steps".equals(group)) {
+            require(parts.length == 3, source + " step flow endpoint requires a port: " + reference);
+            return new FlowEndpoint(group, parts[1], parts[2]);
+        }
+        require(parts.length == 2, source + " top-level flow endpoint is invalid: " + reference);
+        require(Set.of("inputs", "outputs", "parameters").contains(group),
+                source + " has an unknown flow endpoint group: " + group);
+        return new FlowEndpoint(group, parts[1], null);
+    }
+
+    private void validateFlowReference(
+            FlowEndpoint endpoint,
+            String source,
+            Map<String, PipelinePortRecord> inputs,
+            Map<String, PipelinePortRecord> outputs,
+            Map<String, PipelineParameterRecord> parameters,
+            Map<String, Integer> stepOrder) {
+        boolean known = switch (endpoint.group()) {
+            case "inputs" -> inputs.containsKey(endpoint.name());
+            case "outputs" -> outputs.containsKey(endpoint.name());
+            case "parameters" -> parameters.containsKey(endpoint.name());
+            case "steps" -> stepOrder.containsKey(endpoint.name());
+            default -> false;
+        };
+        require(known, source + " flow references an unknown endpoint: " + endpoint.reference());
+    }
+
+    private void requireFlowSource(List<PipelineFlowEdgeRecord> flow, String reference, String source) {
+        require(flow.stream().anyMatch(edge -> reference.equals(edge.from())),
+                source + " does not show how " + reference + " is used");
+    }
+
+    private void requireFlowTarget(List<PipelineFlowEdgeRecord> flow, String reference, String source) {
+        require(flow.stream().anyMatch(edge -> reference.equals(edge.to())),
+                source + " does not show how " + reference + " is produced");
     }
 
     private static void require(boolean condition, String message) {
@@ -195,7 +277,9 @@ public class BuiltinPipelineCatalogService {
             Map<String, PipelinePortRecord> inputs,
             Map<String, PipelinePortRecord> outputs,
             Map<String, PipelineParameterRecord> parameters,
-            List<PipelineStepRecord> steps) {
+            List<PipelineStepRecord> steps,
+            List<PipelineFlowEdgeRecord> flow) {
+        @JsonProperty
         public String reference() {
             return id + "@" + version;
         }
@@ -206,4 +290,20 @@ public class BuiltinPipelineCatalogService {
     public record PipelineParameterRecord(String type, Object defaultValue, List<Object> enumValues, String description) { }
 
     public record PipelineStepRecord(String id, String uses, String displayName, String description) { }
+
+    public record PipelineFlowEdgeRecord(String from, String to) { }
+
+    private record FlowEndpoint(String group, String name, String port) {
+        boolean readable() {
+            return !"outputs".equals(group);
+        }
+
+        boolean writable() {
+            return "steps".equals(group) || "outputs".equals(group);
+        }
+
+        String reference() {
+            return port == null ? group + "." + name : group + "." + name + "." + port;
+        }
+    }
 }

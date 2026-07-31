@@ -314,6 +314,11 @@ export type PipelineStepRecord = {
   description?: string | null
 }
 
+export type PipelineFlowEdgeRecord = {
+  from: string
+  to: string
+}
+
 export type PipelineCatalogRecord = {
   id: string
   version: number
@@ -325,6 +330,7 @@ export type PipelineCatalogRecord = {
   outputs: Record<string, PipelinePortRecord>
   parameters: Record<string, PipelineParameterRecord>
   steps: PipelineStepRecord[]
+  flow: PipelineFlowEdgeRecord[]
   reference: string
 }
 

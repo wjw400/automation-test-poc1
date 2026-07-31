@@ -28,3 +28,10 @@ spec:
       uses: crypto.pgp.decryptAndVerify@1
       displayName: Decrypt and verify message
       description: Verifies the PGP signature and parses the decrypted payload as JSON.
+  flow:
+    - from: inputs.message
+      to: steps.decrypt.message
+    - from: parameters.payloadPointer
+      to: steps.decrypt.pointer
+    - from: steps.decrypt.payload
+      to: outputs.payload

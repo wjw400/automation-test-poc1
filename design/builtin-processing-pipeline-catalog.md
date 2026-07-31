@@ -126,18 +126,31 @@ spec:
       uses: crypto.pgp.signAndEncrypt@1
     - id: envelope
       uses: body.buildJson@1
+  flow:
+    - from: inputs.payload
+      to: steps.encrypt.payload
+    - from: parameters.armored
+      to: steps.encrypt.armored
+    - from: steps.encrypt.message
+      to: steps.envelope.encryptedMessage
+    - from: steps.envelope.body
+      to: outputs.message
 ```
 
 `uses` is an allow-listed action/operator identifier. It is not a class name and
 cannot contain executable script content. The catalog loader rejects unknown
-identifiers.
+identifiers. `flow` is descriptive, read-only data lineage used by the UI. Its
+endpoints follow `inputs.<name>`, `parameters.<name>`, `steps.<id>.<port>`, and
+`outputs.<name>`. This makes parameter and port usage explicit without putting
+step bindings into an application's OpenAPI document.
 
 ## Startup validation
 
 The application scans `classpath*:META-INF/platform/pipelines/*.yaml` during
 startup. Startup fails when a catalog entry has an invalid API version or kind,
 an invalid or duplicate `id@version`, no declared input/output/step, duplicate
-step IDs, an unknown operator, or an invalid parameter enum default.
+step IDs, an unknown operator, an invalid parameter enum default, an invalid or
+out-of-order flow edge, an unconsumed input/parameter, or an unproduced output.
 
 When an imported OpenAPI document references an unavailable pipeline or an
 unknown input, output, or parameter override, the operation contract exposes a
@@ -155,8 +168,11 @@ GET /api/pipeline-catalog
 The OpenAPI contract endpoint resolves referenced catalog entries so the API UI
 can display the pipeline name and version, required runtime profile, processing
 steps, declared ports, default locations, and effective option values. The UI
-calls this area **Processing**, not **Protocol**, because the model applies to
-any controlled message transformation.
+also traces every input and parameter to the exact step port that consumes it,
+and each step result to the next step or declared output. On an operation page,
+the same flow displays the effective default or operation override value. The
+UI calls this area **Processing**, not **Protocol**, because the model applies
+to any controlled message transformation.
 
 The UI is deliberately read-only in v1. It must not provide controls to create,
 edit, publish, reload, or execute arbitrary pipeline YAML.
