@@ -1,6 +1,6 @@
 # 阶段二：Agent Backend 与模型运行时
 
-状态：`Not Started`
+状态：`In Progress`
 
 ## 1. 目标
 
@@ -30,13 +30,31 @@
 
 ## 3. 技术基线
 
-- [ ] 将 Spring Boot 从当前 `3.3.2` 升级到与选定 Spring AI 版本兼容的 `3.5.x`
-- [ ] 引入固定版本的 Spring AI `1.1.x` BOM
-- [ ] 不使用 Snapshot 版本
-- [ ] 完成所有模块编译和测试基线对比
-- [ ] 记录升级产生的兼容性改动
+- [x] 将 Spring Boot 从 `3.3.2` 升级到 `4.1.0`
+- [ ] 引入固定版本的 Spring AI `2.0.x` BOM
+- [x] 不使用 Snapshot 版本
+- [x] 完成所有模块编译和测试基线对比
+- [x] 记录升级产生的兼容性改动
 
 若兼容性验证失败，应暂停本阶段并更新 Runtime 技术选型决策。
+
+### 3.1 Spring Boot 4 升级记录
+
+升级日期：`2026-07-31`
+
+- Java 基线保持为 `17`
+- Spring Boot 升级到 `4.1.0`，作为 Spring AI `2.0.x` 的运行基础
+- Web 模块改用 Boot 4 的 `spring-boot-starter-webmvc` 和 `spring-boot-starter-webmvc-test`
+- Flyway 改用 `spring-boot-starter-flyway`，保留 PostgreSQL 数据库扩展
+- 平台 JSON/YAML 处理迁移到 Jackson 3；Swagger Parser 的传递依赖仍使用其自带 Jackson 2，两者不共享业务对象映射器
+- Maven Surefire 升级到 `3.5.6`
+
+验证结果：
+
+- 所有 Maven 模块可完成 clean package
+- `mock-service` 5 个测试通过，`ApiCaseRunnerActionTest` 2 个测试通过
+- Cucumber 5 个场景中仍有 2 个历史基线错误，均为测试数据缺少 `$.payload`，升级前后结果一致
+- `platform-api` 已使用 PostgreSQL `16.14` 启动，Flyway 成功验证至 V17，核心查询接口返回 HTTP 200
 
 ## 4. 持久化模型
 

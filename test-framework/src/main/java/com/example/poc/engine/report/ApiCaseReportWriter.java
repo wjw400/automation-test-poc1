@@ -1,20 +1,22 @@
 package com.example.poc.engine.report;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.format.DateTimeFormatter;
 import java.util.Locale;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.SerializationFeature;
+import tools.jackson.databind.cfg.DateTimeFeature;
+import tools.jackson.databind.json.JsonMapper;
 
 public class ApiCaseReportWriter {
-    private final ObjectMapper objectMapper = new ObjectMapper()
-            .registerModule(new JavaTimeModule())
-            .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
-            .enable(SerializationFeature.INDENT_OUTPUT);
+    private final ObjectMapper objectMapper = JsonMapper.builder()
+            .disable(DateTimeFeature.WRITE_DATES_AS_TIMESTAMPS)
+            .enable(SerializationFeature.INDENT_OUTPUT)
+            .build();
     private final Path reportDir;
 
     public ApiCaseReportWriter() {
@@ -208,7 +210,7 @@ public class ApiCaseReportWriter {
                 return "";
             }
             return objectMapper.writeValueAsString(value);
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             return String.valueOf(value);
         }
     }

@@ -1,5 +1,6 @@
 package com.example.poc.platform.api;
 
+import com.example.poc.engine.ApiTestCase;
 import com.example.poc.platform.catalog.PlatformCatalogService;
 import com.example.poc.platform.persistence.JsonCodec;
 import com.example.poc.platform.persistence.entity.ApiOperationEntity;
@@ -9,9 +10,6 @@ import com.example.poc.platform.persistence.repo.ApiOperationRepository;
 import com.example.poc.platform.persistence.repo.ApiSpecRepository;
 import com.example.poc.platform.persistence.repo.CaseRepository;
 import com.example.poc.platform.persistence.repo.EnvironmentRepository;
-import com.example.poc.engine.ApiTestCase;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import io.swagger.parser.OpenAPIParser;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
@@ -29,6 +27,10 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.dataformat.yaml.YAMLMapper;
 
 @Service
 public class ApiSpecService {
@@ -38,7 +40,7 @@ public class ApiSpecService {
     private final CaseRepository caseRepository;
     private final EnvironmentRepository environmentRepository;
     private final JsonCodec jsonCodec;
-    private final ObjectMapper yamlMapper = new ObjectMapper(new YAMLFactory());
+    private final ObjectMapper yamlMapper = YAMLMapper.builder().build();
 
     public ApiSpecService(
             PlatformCatalogService catalogService,
@@ -165,7 +167,7 @@ public class ApiSpecService {
             ApiTestCase definition = yamlMapper.readValue(testCase.getContent(), ApiTestCase.class);
             return definition.getSteps().stream()
                     .anyMatch(step -> apiSpecId.equals(step.getOperation().getApiSpecId()));
-        } catch (IOException exception) {
+        } catch (JacksonException exception) {
             throw new IllegalArgumentException(
                     "Cannot verify API spec references because scenario has invalid YAML: " + testCase.getName(),
                     exception);
@@ -259,8 +261,8 @@ public class ApiSpecService {
                 entity.getOperationId(),
                 entity.getSummary(),
                 entity.getDescription(),
-                jsonCodec.read(entity.getRequestBodyJson(), new com.fasterxml.jackson.core.type.TypeReference<>() {}, null),
-                jsonCodec.read(entity.getResponsesJson(), new com.fasterxml.jackson.core.type.TypeReference<>() {}, Map.of()),
+                jsonCodec.read(entity.getRequestBodyJson(), new TypeReference<>() {}, null),
+                jsonCodec.read(entity.getResponsesJson(), new TypeReference<>() {}, Map.of()),
                 entity.getCreatedAt());
     }
 

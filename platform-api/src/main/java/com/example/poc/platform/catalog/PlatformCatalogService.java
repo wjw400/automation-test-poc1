@@ -15,7 +15,6 @@ import com.example.poc.platform.persistence.repo.ProfileRepository;
 import com.example.poc.platform.persistence.repo.ProjectRepository;
 import com.example.poc.platform.persistence.repo.SuiteCaseRepository;
 import com.example.poc.platform.persistence.repo.SuiteRepository;
-import com.fasterxml.jackson.core.type.TypeReference;
 import jakarta.annotation.PostConstruct;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
@@ -33,6 +32,7 @@ import java.util.NoSuchElementException;
 import java.util.Set;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.type.TypeReference;
 
 @Service
 public class PlatformCatalogService {

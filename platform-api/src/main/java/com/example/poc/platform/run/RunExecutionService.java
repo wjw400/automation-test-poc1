@@ -23,10 +23,6 @@ import com.example.poc.platform.persistence.entity.SuiteRunEntity;
 import com.example.poc.platform.persistence.repo.RunRepository;
 import com.example.poc.platform.persistence.repo.StepRunRepository;
 import com.example.poc.platform.persistence.repo.SuiteRunRepository;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
 import java.time.Instant;
@@ -37,6 +33,10 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.dataformat.yaml.YAMLMapper;
 
 @Service
 public class RunExecutionService {
@@ -46,7 +46,7 @@ public class RunExecutionService {
     private final SuiteRunRepository suiteRunRepository;
     private final JsonCodec jsonCodec;
     private final ApiCaseRunner apiCaseRunner = new ApiCaseRunner();
-    private final ObjectMapper yamlMapper = new ObjectMapper(new YAMLFactory());
+    private final ObjectMapper yamlMapper = YAMLMapper.builder().build();
 
     public RunExecutionService(
             PlatformCatalogService catalogService,
@@ -254,7 +254,7 @@ public class RunExecutionService {
             }
 
             return yamlMapper.writeValueAsString(testCase);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new IllegalArgumentException(
                     "Failed to prepare executable case " + managedCase.code() + ": " + e.getOriginalMessage(),
                     e);

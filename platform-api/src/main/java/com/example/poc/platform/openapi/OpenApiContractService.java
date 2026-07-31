@@ -8,10 +8,6 @@ import com.example.poc.platform.persistence.entity.ApiOperationEntity;
 import com.example.poc.platform.persistence.entity.ApiSpecEntity;
 import com.example.poc.platform.persistence.repo.ApiOperationRepository;
 import com.example.poc.platform.persistence.repo.ApiSpecRepository;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -22,6 +18,10 @@ import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Service;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.dataformat.yaml.YAMLMapper;
 
 /** Builds the platform's business and wire-level view of an imported OpenAPI spec. */
 @Service
@@ -32,7 +32,7 @@ public class OpenApiContractService {
     private final BuiltinPipelineCatalogService pipelineCatalogService;
     private final ApiSpecRepository apiSpecRepository;
     private final ApiOperationRepository apiOperationRepository;
-    private final ObjectMapper yamlMapper = new ObjectMapper(new YAMLFactory());
+    private final ObjectMapper yamlMapper = YAMLMapper.builder().build();
     private final Map<String, ApiSpecContractRecord> cache = new ConcurrentHashMap<>();
 
     public OpenApiContractService(
@@ -327,7 +327,7 @@ public class OpenApiContractService {
     private Map<String, Object> readDocument(String content) {
         try {
             return yamlMapper.readValue(content, new TypeReference<>() {});
-        } catch (IOException exception) {
+        } catch (JacksonException exception) {
             throw new IllegalArgumentException("Unable to parse stored OpenAPI document", exception);
         }
     }

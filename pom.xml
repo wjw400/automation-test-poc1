@@ -19,13 +19,12 @@
     <properties>
         <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <spring.boot.version>3.3.2</spring.boot.version>
+        <spring.boot.version>4.1.0</spring.boot.version>
         <cucumber.version>7.18.1</cucumber.version>
         <junit.version>5.10.3</junit.version>
-        <jackson.version>2.17.2</jackson.version>
         <json.path.version>2.9.0</json.path.version>
         <assertj.version>3.26.3</assertj.version>
-        <maven.surefire.version>3.2.5</maven.surefire.version>
+        <maven.surefire.version>3.5.6</maven.surefire.version>
     </properties>
 
     <dependencyManagement>
@@ -39,4 +38,16 @@
             </dependency>
         </dependencies>
     </dependencyManagement>
+
+    <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                    <version>${spring.boot.version}</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
+    </build>
 </project>

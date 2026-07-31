@@ -2,12 +2,9 @@ package com.example.poc.platform.pipeline;
 
 import com.example.poc.engine.CaseActionExecutor;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-import java.io.InputStream;
 import jakarta.annotation.PostConstruct;
 import java.io.IOException;
+import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
@@ -20,6 +17,9 @@ import java.util.regex.Pattern;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.stereotype.Service;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.dataformat.yaml.YAMLMapper;
 
 /**
  * Read-only catalog of processing pipelines bundled with the application.
@@ -38,7 +38,7 @@ public class BuiltinPipelineCatalogService {
             CaseActionExecutor.BUILD_JSON + "@1",
             CaseActionExecutor.ENCODE_BASE64 + "@1");
 
-    private final ObjectMapper yamlMapper = new ObjectMapper(new YAMLFactory());
+    private final ObjectMapper yamlMapper = YAMLMapper.builder().build();
     private final Map<String, PipelineCatalogRecord> byReference = new LinkedHashMap<>();
     private final Map<String, String> sourceByReference = new LinkedHashMap<>();
 

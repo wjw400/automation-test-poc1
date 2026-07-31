@@ -4,6 +4,7 @@
 
 - 状态：`Accepted`
 - 决策日期：`2026-07-31`
+- 技术基线：Spring Boot `4.1.0`、Java `17`、计划接入 Spring AI `2.0.x`
 - 适用阶段：Test Agent POC 与第一版受限 Agent
 - 相关文档：
   - [Test Agent 产品与架构设计](C:/Users/blaine/Documents/code/automation-test-poc1/design/test-agent-architecture.md)
@@ -64,7 +65,7 @@ Agent 需要支持：
 
 - 平台需要自行实现 Agent Task、完整消息历史、Artifact 和事件协议
 - Spring AI 没有 OpenCode 风格的一等 Skill 生命周期，需要实现轻量 `SkillRegistry`
-- 当前 Spring Boot 版本需要先升级到 Spring AI 正式支持的版本
+- Spring AI 版本升级仍需跟随其正式兼容矩阵进行回归验证
 
 结论：最符合当前平台架构，作为首选方案。
 
@@ -209,7 +210,7 @@ Agent 生成的 Draft 只能应用到现有编辑器，并将对应 Tab 标记�
 
 ## 9. 实施顺序
 
-1. 将 Spring Boot 升级到与选定 Spring AI 版本兼容的版本
+1. 将 Spring Boot 升级到与选定 Spring AI 版本兼容的版本（已完成：`4.1.0`）
 2. 实现与模型供应商无关的 `AgentRuntime`
 3. 实现后端 `ScenarioCommandService`、Draft、Diff 和确定性校验
 4. 建立 `AgentTask`、`AgentMessage`、`AgentEvent` 和 `AgentArtifact`
@@ -264,4 +265,4 @@ Agent 生成的 Draft 只能应用到现有编辑器，并将对应 Tab 标记�
 
 - 平台需要维护自己的 Agent Task 和 Artifact 模型
 - 需要实现轻量 Skill Registry 和 Agent Event 协议
-- 正式接入 Spring AI 前需要完成 Spring Boot 版本升级和回归验证
+- Spring Boot 4.1 升级已完成；正式接入 Spring AI 时仍需执行模型、Tool Calling、SSE 和 MCP 的专项回归

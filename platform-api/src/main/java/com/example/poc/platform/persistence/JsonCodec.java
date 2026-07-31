@@ -1,11 +1,11 @@
 package com.example.poc.platform.persistence;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.List;
 import java.util.Map;
 import org.springframework.stereotype.Component;
+import tools.jackson.core.JacksonException;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
 
 @Component
 public class JsonCodec {
@@ -18,7 +18,7 @@ public class JsonCodec {
     public String write(Object value) {
         try {
             return value == null ? null : objectMapper.writeValueAsString(value);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new IllegalArgumentException("Failed to serialize JSON value", e);
         }
     }
@@ -38,7 +38,7 @@ public class JsonCodec {
     public <T> T read(String json, TypeReference<T> type, T defaultValue) {
         try {
             return json == null || json.isBlank() ? defaultValue : objectMapper.readValue(json, type);
-        } catch (JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new IllegalArgumentException("Failed to deserialize JSON value", e);
         }
     }

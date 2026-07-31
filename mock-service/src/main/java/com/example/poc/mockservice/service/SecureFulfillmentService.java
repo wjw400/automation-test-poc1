@@ -3,13 +3,14 @@ package com.example.poc.mockservice.service;
 import com.example.poc.mockservice.activity.ApiActivityService;
 import com.example.poc.pgp.PgpCryptoService;
 import com.example.poc.pgp.PgpProfileMaterial;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import org.springframework.stereotype.Service;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class SecureFulfillmentService {
@@ -157,7 +158,7 @@ public class SecureFulfillmentService {
         String plaintext = pgpCryptoService.decryptAndVerify(cipherText, profile);
         try {
             return objectMapper.readValue(plaintext, Object.class);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new IllegalArgumentException("Failed to parse decrypted JSON payload", e);
         }
     }
@@ -166,7 +167,7 @@ public class SecureFulfillmentService {
         try {
             String plaintext = objectMapper.writeValueAsString(payload);
             return pgpCryptoService.signAndEncrypt(plaintext, profile);
-        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+        } catch (JacksonException e) {
             throw new IllegalArgumentException("Failed to serialize encrypted response payload", e);
         }
     }

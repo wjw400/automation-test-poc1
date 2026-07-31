@@ -2,14 +2,14 @@ package com.example.poc.engine;
 
 import com.example.poc.pgp.PgpCryptoService;
 import com.example.poc.pgp.PgpProfileMaterial;
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.jayway.jsonpath.JsonPath;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
 
 public class CaseActionExecutor {
     public static final String SIGN_AND_ENCRYPT = "crypto.pgp.signAndEncrypt";
@@ -75,7 +75,7 @@ public class CaseActionExecutor {
         } else {
             try {
                 bytes = jsonMapper.writeValueAsBytes(input);
-            } catch (JsonProcessingException e) {
+            } catch (JacksonException e) {
                 throw new IllegalArgumentException("Failed to serialize Base64 action input", e);
             }
         }
@@ -201,7 +201,7 @@ public class CaseActionExecutor {
         if ("json".equalsIgnoreCase(format)) {
             try {
                 return jsonMapper.writeValueAsString(value);
-            } catch (JsonProcessingException e) {
+            } catch (JacksonException e) {
                 throw new IllegalArgumentException("Failed to serialize action input as JSON", e);
             }
         }
@@ -215,7 +215,7 @@ public class CaseActionExecutor {
         if ("json".equalsIgnoreCase(format)) {
             try {
                 return jsonMapper.readValue(plaintext, Object.class);
-            } catch (JsonProcessingException e) {
+            } catch (JacksonException e) {
                 throw new IllegalArgumentException("Failed to parse decrypted payload as JSON", e);
             }
         }

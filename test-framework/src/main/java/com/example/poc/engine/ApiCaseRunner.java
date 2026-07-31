@@ -8,12 +8,9 @@ import com.example.poc.engine.report.ReportRequest;
 import com.example.poc.engine.report.ReportResponse;
 import com.example.poc.engine.report.ValidationReport;
 import com.example.poc.pgp.PgpCryptoService;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.jayway.jsonpath.JsonPath;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.UncheckedIOException;
 import java.net.URI;
 import java.net.URLEncoder;
 import java.net.http.HttpClient;
@@ -28,10 +25,14 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import tools.jackson.core.JacksonException;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
+import tools.jackson.dataformat.yaml.YAMLMapper;
 
 public class ApiCaseRunner {
-    private final ObjectMapper yamlMapper = new ObjectMapper(new YAMLFactory());
-    private final ObjectMapper jsonMapper = new ObjectMapper();
+    private final ObjectMapper yamlMapper = YAMLMapper.builder().build();
+    private final ObjectMapper jsonMapper = JsonMapper.builder().build();
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final VariableResolver variableResolver = new VariableResolver();
     private final ApiCaseReportWriter reportWriter = new ApiCaseReportWriter();
@@ -159,8 +160,8 @@ public class ApiCaseRunner {
             ApiTestCase testCase = yamlMapper.readValue(caseContent, ApiTestCase.class);
             validate(testCase, caseRef);
             return testCase;
-        } catch (IOException e) {
-            throw new UncheckedIOException("Failed to parse API case: " + caseRef, e);
+        } catch (JacksonException e) {
+            throw new IllegalArgumentException("Failed to parse API case: " + caseRef, e);
         }
     }
 
@@ -564,7 +565,7 @@ public class ApiCaseRunner {
     private String serializeWireBody(Object wireBody) {
         try {
             return wireBody instanceof String text ? text : jsonMapper.writeValueAsString(wireBody);
-        } catch (IOException e) {
+        } catch (JacksonException e) {
             throw new IllegalArgumentException("Failed to serialize wire request body", e);
         }
     }

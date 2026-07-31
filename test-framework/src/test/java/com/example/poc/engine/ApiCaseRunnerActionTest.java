@@ -5,8 +5,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.example.poc.engine.report.ApiCaseExecutionReport;
 import com.example.poc.pgp.PgpCryptoService;
 import com.example.poc.pgp.PgpProfileMaterial;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import java.io.IOException;
@@ -17,9 +15,12 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
+import tools.jackson.core.type.TypeReference;
+import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.json.JsonMapper;
 
 class ApiCaseRunnerActionTest {
-    private final ObjectMapper jsonMapper = new ObjectMapper();
+    private final ObjectMapper jsonMapper = JsonMapper.builder().build();
     private final PgpCryptoService pgpCryptoService = new PgpCryptoService();
 
     @Test
