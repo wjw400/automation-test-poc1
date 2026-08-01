@@ -36,6 +36,7 @@ import type {
   FolderRecord,
   RunRecord,
   SaveCaseInput,
+  ScenarioDraftRecord,
 } from '../types/platform'
 
 const { Text } = Typography
@@ -69,6 +70,8 @@ type CasesPageProps = {
   onTitleChange?: (title: string) => void
   onSaveReady?: (save?: () => Promise<void>) => void
   onDeleted?: () => void
+  agentDraft?: ScenarioDraftRecord
+  onAgentDraftApplied?: (scenarioId: string) => void
 }
 
 export function CasesPage({
@@ -79,6 +82,8 @@ export function CasesPage({
   onTitleChange,
   onSaveReady,
   onDeleted,
+  agentDraft,
+  onAgentDraftApplied,
 }: CasesPageProps = {}) {
   const { message, modal } = App.useApp()
   const { t } = useTranslation(['common', 'scenario'])
@@ -113,6 +118,10 @@ export function CasesPage({
   const [embeddedStepIndex, setEmbeddedStepIndex] = useState<number>()
   const titleBeforeEditRef = useRef('')
   const isCancellingTitleEditRef = useRef(false)
+  const appliedAgentDraftIdRef = useRef<string | undefined>(undefined)
+  const appliedAgentTaskIdRef = useRef<string | undefined>(undefined)
+  const appliedAgentContentRef = useRef<string | undefined>(undefined)
+  const pendingSaveWasManuallyModifiedRef = useRef(false)
 
   const projectsQuery = useQuery({
     queryKey: ['projects'],
@@ -221,6 +230,42 @@ export function CasesPage({
     setDraft(draftFromCase(selectedCase))
     setDraftCaseId(selectedCase.id)
   }, [draftCaseId, isCreating, selectedCase])
+
+  useEffect(() => {
+    if (
+      !agentDraft
+      || agentDraft.scenarioId !== selectedCase?.id
+      || draftCaseId !== selectedCase.id
+      || appliedAgentDraftIdRef.current === agentDraft.id
+    ) {
+      return
+    }
+    const parsed = parseDsl(agentDraft.content)
+    if (parsed.error || !parsed.data) {
+      appliedAgentDraftIdRef.current = agentDraft.id
+      void message.error(parsed.error ?? t('scenario:editor.caseYamlInvalid'))
+      return
+    }
+    const nextTags = Array.isArray(parsed.data.tags)
+      ? parsed.data.tags.filter((value): value is string => typeof value === 'string')
+      : draft.tags
+    setDraft((current) => {
+      const next = {
+        ...current,
+        name: typeof parsed.data?.name === 'string' ? parsed.data.name : current.name,
+        description: typeof parsed.data?.description === 'string' ? parsed.data.description : current.description,
+        tags: nextTags,
+        dslVersion: typeof parsed.data?.dslVersion === 'string' ? parsed.data.dslVersion : current.dslVersion,
+        content: agentDraft.content,
+      }
+      appliedAgentContentRef.current = agentControlledSnapshot(next)
+      return next
+    })
+    setVariablesJsonError(null)
+    appliedAgentDraftIdRef.current = agentDraft.id
+    appliedAgentTaskIdRef.current = agentDraft.agentTaskId ?? undefined
+    onAgentDraftApplied?.(agentDraft.scenarioId)
+  }, [agentDraft, draft.tags, draftCaseId, message, onAgentDraftApplied, selectedCase?.id, t])
 
   useEffect(() => {
     if (runResultOverride && runResultOverride.caseId !== selectedCase?.id) {
@@ -347,6 +392,10 @@ export function CasesPage({
         throw new Error(`${t('scenario:messages.fixVariablesBeforeSave')}: ${variablesJsonError}`)
       }
       const payload = normalizeDraftForSave(draft)
+      pendingSaveWasManuallyModifiedRef.current = Boolean(
+        appliedAgentTaskIdRef.current
+        && appliedAgentContentRef.current !== agentControlledSnapshot(payload),
+      )
       return isCreating || !selectedCase
         ? platformApi.createCase(selectedProjectId, payload)
         : platformApi.updateCase(selectedProjectId, selectedCase.id, payload)
@@ -362,6 +411,17 @@ export function CasesPage({
           caseId: savedCase.id,
           ...(selectedEditorView === 'step' ? { step: String(activeStepIndex) } : {}),
         })
+      }
+      const agentTaskId = appliedAgentTaskIdRef.current
+      if (agentTaskId) {
+        await platformApi.recordAgentDecision(agentTaskId, 'SCENARIO_SAVED', {
+          scenarioId: savedCase.id,
+          revision: savedCase.revision,
+          manuallyModified: pendingSaveWasManuallyModifiedRef.current,
+        }).catch(() => undefined)
+        appliedAgentTaskIdRef.current = undefined
+        appliedAgentContentRef.current = undefined
+        pendingSaveWasManuallyModifiedRef.current = false
       }
       void message.success(t('scenario:messages.caseSaved'))
     },
@@ -1273,6 +1333,16 @@ function normalizeDraftForSave(draft: SaveCaseInput): SaveCaseInput {
     dslVersion: draft.dslVersion || 'v1',
     status: draft.status || 'ACTIVE',
   }
+}
+
+function agentControlledSnapshot(draft: SaveCaseInput): string {
+  return JSON.stringify({
+    name: draft.name,
+    description: draft.description,
+    tags: draft.tags,
+    dslVersion: draft.dslVersion,
+    content: draft.content,
+  })
 }
 
 function draftFromCase(record: CaseRecord): SaveCaseInput {

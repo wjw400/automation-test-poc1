@@ -30,28 +30,30 @@ V1 只完成一条端到端闭环：
 
 1. [阶段一：Scenario Command 与 Draft 领域内核](phase-1-domain-kernel.md)
 2. [阶段二：Agent Backend 与模型运行时](phase-2-agent-backend.md)
-3. [阶段三：Context、Skill 与 Tool](phase-3-context-and-capabilities.md)
-4. [阶段四：Codex 风格 Agent Panel](phase-4-agent-panel.md)
-5. [阶段五：安全治理与端到端验收](phase-5-security-and-e2e.md)
+3. [阶段三：Context、Skill 与 Tool](phase-3-context-and-capabilities.md) - `Completed`
+4. [阶段四：Codex 风格 Agent Panel](phase-4-agent-panel.md) - `Completed`
+5. [阶段五：安全治理与端到端验收](phase-5-security-and-e2e.md) - `Completed`
+
+试用与验收：[Test Agent V1 试用指南](agent-v1-trial-guide.md)
 
 阶段必须按顺序推进。后续阶段可以提前做技术验证，但不能绕过前一阶段的完成门槛进入正式实现。
 
 ## 4. 开发前置条件
 
-- [ ] 当前愿景、架构、Runtime 选型和实施计划已经提交
-- [ ] 确认 V1 不包含 MCP、多 Agent、向量数据库和自动执行
-- [ ] 确认首个模型供应商和 OpenAI-compatible 配置方式
-- [ ] 模型密钥只通过服务端环境变量或 Secret Manager 提供
-- [ ] 记录现有构建和测试基线，包括已知的历史失败
-- [ ] 确认 Spring Boot 与 Spring AI 的兼容版本组合
+- [x] 当前愿景、架构、Runtime 选型和实施计划已经提交
+- [x] 确认 V1 不包含 MCP、多 Agent、向量数据库和自动执行
+- [x] 确认首个模型供应商为 DeepSeek，并使用 OpenAI-compatible 配置方式
+- [x] 模型密钥只通过服务端环境变量或 Secret Manager 提供
+- [x] 记录现有构建和测试基线，包括已知的历史失败
+- [x] 确认 Spring Boot `4.1.0` 与 Spring AI `2.0.0` 的兼容版本组合
 
 推荐配置名：
 
 ```text
-TEST_AGENT_ENABLED
-TEST_AGENT_BASE_URL
-TEST_AGENT_API_KEY
-TEST_AGENT_MODEL
+AGENT_DEFAULT_RUNTIME
+DEEPSEEK_BASE_URL
+DEEPSEEK_API_KEY
+DEEPSEEK_MODEL
 ```
 
 没有真实模型配置时，平台应使用 `FakeAgentRuntime` 支持后端和 UI 开发。

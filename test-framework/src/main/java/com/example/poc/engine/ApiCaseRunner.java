@@ -293,7 +293,12 @@ public class ApiCaseRunner {
 
     private URI buildUri(ApiStep step, TestContext context) {
         String baseUrl = resolveBaseUrl(step.getOperation(), context);
-        String path = variableResolver.resolveString(step.getOperation().getPath(), context);
+        String path = step.getOperation().getPath();
+        for (Map.Entry<String, Object> entry : step.getRequest().getPath().entrySet()) {
+            Object resolvedValue = variableResolver.resolveObject(entry.getValue(), context);
+            path = path.replace("{" + entry.getKey() + "}", encodePathSegment(String.valueOf(resolvedValue)));
+        }
+        path = variableResolver.resolveString(path, context);
         String normalizedPath = path.startsWith("/") ? path : "/" + path;
         String query = step.getRequest().getQuery().entrySet().stream()
                 .map(entry -> encode(entry.getKey()) + "="
@@ -588,6 +593,10 @@ public class ApiCaseRunner {
 
     private String encode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private String encodePathSegment(String value) {
+        return encode(value).replace("+", "%20");
     }
 
     private boolean isBlank(String value) {

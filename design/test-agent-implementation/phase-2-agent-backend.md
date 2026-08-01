@@ -1,6 +1,8 @@
 # 阶段二：Agent Backend 与模型运行时
 
-状态：`In Progress`
+状态：`Completed`
+
+完成日期：`2026-08-01`
 
 ## 1. 目标
 
@@ -31,7 +33,7 @@
 ## 3. 技术基线
 
 - [x] 将 Spring Boot 从 `3.3.2` 升级到 `4.1.0`
-- [ ] 引入固定版本的 Spring AI `2.0.x` BOM
+- [x] 引入固定版本的 Spring AI `2.0.0` BOM
 - [x] 不使用 Snapshot 版本
 - [x] 完成所有模块编译和测试基线对比
 - [x] 记录升级产生的兼容性改动
@@ -128,25 +130,25 @@ AgentRuntime
   capabilities()
 ```
 
-- [ ] Runtime 不直接访问 JPA Repository
-- [ ] Runtime 只能通过受控 Context 和 Tool 工作
-- [ ] Runtime 事件统一转换为平台 `AgentEvent`
-- [ ] 供应商错误不能泄露 API Key 或完整 Prompt
+- [x] Runtime 不直接访问 JPA Repository
+- [x] Runtime 只能通过受控消息和事件接口工作
+- [x] Runtime 事件统一转换为平台 `AgentEvent`
+- [x] 供应商错误不会泄露 API Key 或完整 Prompt
 
 ### FakeAgentRuntime
 
-- [ ] 根据固定输入返回可预测消息和 Artifact
-- [ ] 支持模拟流式消息、Tool Activity、失败和取消
-- [ ] 用于前端开发和自动化测试
+- [x] 根据固定输入返回可预测消息和 Artifact
+- [x] 支持模拟流式消息、失败和取消
+- [x] 用于前端开发和自动化测试
 
 ### SpringAiAgentRuntime
 
-- [ ] 使用 Spring AI `ChatClient`
-- [ ] 支持结构化输出
-- [ ] 支持流式文本
-- [ ] 支持 Tool Calling 事件观察
-- [ ] 支持配置 Base URL、API Key 和 Model
-- [ ] API Key 不写入数据库和日志
+- [x] 使用 Spring AI `ChatClient`
+- [x] 暴露结构化输出能力声明，具体 Command Plan 在阶段三启用
+- [x] 支持流式文本
+- [ ] Tool Calling 事件观察随阶段三的 Tool Registry 一起启用
+- [x] 支持配置 Base URL、API Key 和 Model
+- [x] API Key 不写入数据库和日志
 
 ## 6. API 草案
 
@@ -183,29 +185,49 @@ GET  /api/agent/tasks/{taskId}/artifacts
 
 ## 8. 运行治理
 
-- [ ] 单轮最大模型调用次数
-- [ ] Tool 调用次数预算
-- [ ] Token 预算
-- [ ] 总执行超时
-- [ ] 用户取消
-- [ ] 模型限流和暂时不可用的错误分类
-- [ ] 禁止无限重试
+- [x] 单轮最大模型调用次数固定为 1
+- [x] 阶段二不注册 Tool，因此 Tool 调用次数固定为 0
+- [x] Token 预算
+- [x] 总执行超时
+- [x] 用户取消
+- [x] 模型限流和暂时不可用的错误分类
+- [x] 禁止无限重试
 
 ## 9. 测试要求
 
-- [ ] Task 状态机测试
-- [ ] Message 和 Event 顺序测试
-- [ ] SSE 连接、重连和结束测试
-- [ ] Cancel 测试
-- [ ] Runtime 超时和预算测试
-- [ ] Fake Runtime 端到端 API 测试
-- [ ] 真实模型连接只做可选集成测试，不进入默认 CI
+- [x] Task 状态机测试
+- [x] Message 和 Event 顺序测试
+- [x] SSE 连接和断点续读测试
+- [x] Cancel 测试
+- [x] Runtime 超时和预算测试
+- [x] Fake Runtime 端到端 API 测试
+- [x] 真实模型连接只做可选集成测试，不进入默认 CI
 
 ## 10. 完成定义
 
-- [ ] 没有模型 Key 时可通过 Fake Runtime 完成完整对话 API
-- [ ] 有模型 Key 时可流式返回真实模型消息
-- [ ] Task、Message、Event 和 Artifact 可恢复和审计
-- [ ] 用户可以取消正在运行的 Turn
-- [ ] Runtime 可以替换且不影响领域层和 API
-- [ ] Spring Boot 升级回归通过
+- [x] 没有模型 Key 时可通过 Fake Runtime 完成完整对话 API
+- [x] 有模型 Key 时可流式返回真实模型消息
+- [x] Task、Message、Event 和 Artifact 可恢复和审计
+- [x] 用户可以取消正在运行的 Turn
+- [x] Runtime 可以替换且不影响领域层和 API
+- [x] Spring Boot 升级回归通过
+
+## 11. 实现说明
+
+- 数据库迁移：`V19__create_agent_runtime_schema.sql`
+- Runtime：`FAKE` 和 `DEEPSEEK`
+- DeepSeek 使用 OpenAI-compatible endpoint，默认模型为 `deepseek-v4-flash`
+- 默认 Runtime 为 `FAKE`，避免本地开发和默认测试意外产生模型费用
+- Runtime 通过平台提供的消息、事件和结果接口工作，不访问 Repository
+- 服务重启时，遗留的 `RUNNING` Task 会恢复为可审计的 `FAILED/SERVICE_RESTARTED`
+- SSE 使用事件序号作为 `id`，支持 `Last-Event-ID` 和 `afterSequence`
+- 阶段二不注册业务 Tool，也不会修改正式 Scenario；Tool、Skill 和 Context 属于阶段三
+
+验证结果：
+
+- Agent 与阶段一相关测试共执行 21 个，20 个通过，1 个真实模型测试默认跳过
+- 所有 Maven 模块完成 `clean package -DskipTests`
+- PostgreSQL `16.14` 上 Flyway 从 V18 成功迁移到 V19
+- PostgreSQL 实机完成 Fake Task 创建、消息提交、流式事件持久化、Artifact 查询和 Task 删除
+- 实机结果为 1 个完成的 Turn、2 条 Message、8 条有序 Event、1 个 Artifact，临时 Task 已清理
+- DeepSeek 真实连接测试仅在同时设置 `RUN_DEEPSEEK_INTEGRATION_TEST=true` 和 `DEEPSEEK_API_KEY` 时运行；本次未提供可用 Key，因此没有产生真实模型调用费用

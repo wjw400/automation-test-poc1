@@ -33,6 +33,7 @@ import {
 import { RunDetail } from '../components/RunDetail'
 import { StatusPill } from '../components/StatusPill'
 import { ApiReference } from '../components/ApiReference'
+import { AgentPanel } from '../components/AgentPanel'
 import { PipelineCatalog } from '../components/PipelineCatalog'
 import { SuiteRunDetail } from '../components/SuiteRunDetail'
 import { TestKnowledgeEditor } from '../components/TestKnowledgeEditor'
@@ -45,6 +46,7 @@ import type {
   Profile,
   ResourceReferenceRecord,
   RunRecord,
+  ScenarioDraftRecord,
   SaveCaseInput,
   SaveEnvironmentInput,
   SaveProfileInput,
@@ -57,6 +59,7 @@ import { parseDsl, stringifyDsl } from '../utils/caseDsl'
 import { formatDateTime } from '../i18n'
 import { CasesPage } from './CasesPage'
 import { SuitesPage } from './SuitesPage'
+import { inspectAgentDraftApply } from '../utils/agentDraft'
 
 const { Text } = Typography
 
@@ -83,11 +86,21 @@ export type WorkspaceUnsavedGuard = {
 }
 
 type WorkbenchPageProps = {
+  agentPanelOpen?: boolean
+  agentPanelPinned?: boolean
+  onAgentPanelOpenChange?: (open: boolean) => void
+  onAgentPanelPinnedChange?: (pinned: boolean) => void
   onUnsavedGuardChange?: (guard?: WorkspaceUnsavedGuard) => void
 }
 
-export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {}) {
-  const { t } = useTranslation(['common', 'workspace', 'scenario', 'suite', 'execution', 'config', 'api'])
+export function WorkbenchPage({
+  agentPanelOpen = false,
+  agentPanelPinned = false,
+  onAgentPanelOpenChange,
+  onAgentPanelPinnedChange,
+  onUnsavedGuardChange,
+}: WorkbenchPageProps = {}) {
+  const { t } = useTranslation(['common', 'workspace', 'agent', 'scenario', 'suite', 'execution', 'config', 'api'])
   const { modal, message } = App.useApp()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
@@ -113,6 +126,7 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
   const [folderDialog, setFolderDialog] = useState<FolderDialogState>()
   const [folderName, setFolderName] = useState('')
   const [folderParentId, setFolderParentId] = useState<string>()
+  const [pendingAgentDrafts, setPendingAgentDrafts] = useState<Record<string, ScenarioDraftRecord>>({})
   const saveHandlersRef = useRef(new Map<string, () => Promise<void>>())
 
   const projectsQuery = useQuery({
@@ -153,6 +167,11 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
     queryFn: () => platformApi.listApiSpecs(projectId!),
     enabled: Boolean(projectId),
   })
+  const operationsQuery = useQuery({
+    queryKey: ['operations', projectId],
+    queryFn: () => platformApi.listOperations(projectId!),
+    enabled: Boolean(projectId),
+  })
   const testKnowledgeQuery = useQuery({
     queryKey: ['test-knowledge', projectId],
     queryFn: () => platformApi.listTestKnowledge(projectId!),
@@ -182,6 +201,7 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
     setProfileToRename(undefined)
     setIsImportApiSpecOpen(false)
     setFolderDialog(undefined)
+    setPendingAgentDrafts({})
   }, [projectId])
 
   useEffect(() => {
@@ -878,9 +898,51 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
   }, [projectId, runFilter, suiteRunsQuery.data])
 
   const activeTab = tabs.find((tab) => tab.key === activeTabKey)
+  const activeScenario = activeTab?.type === 'scenario'
+    ? (casesQuery.data ?? []).find((record) => record.id === activeTab.resourceId)
+    : undefined
+
+  const openAgentScenario = useCallback((scenarioId: string) => {
+    const scenario = (casesQuery.data ?? []).find((record) => record.id === scenarioId)
+    if (!scenario) return
+    openTab('scenario', scenario.id, scenario.name)
+  }, [casesQuery.data, openTab])
+
+  const openAgentKnowledge = useCallback((knowledgeId: string) => {
+    const record = (testKnowledgeQuery.data ?? []).find((item) => item.id === knowledgeId)
+    if (!record) {
+      void message.warning(t('agent:knowledgeUnavailable'))
+      return
+    }
+    openTab('knowledge', record.id, record.name)
+  }, [message, openTab, t, testKnowledgeQuery.data])
+
+  const applyAgentDraft = useCallback(async (agentDraft: ScenarioDraftRecord) => {
+    const scenario = (casesQuery.data ?? []).find((record) => record.id === agentDraft.scenarioId)
+    const targetTab = scenario ? tabs.find((tab) => tab.key === `scenario:${scenario.id}`) : undefined
+    const inspection = inspectAgentDraftApply(scenario, agentDraft, Boolean(targetTab?.dirty))
+    if (inspection.reason === 'MISSING_SCENARIO') throw new Error(t('agent:noScenario'))
+    if (inspection.reason === 'STALE_REVISION') throw new Error(t('agent:draftStale'))
+    if (!scenario) throw new Error(t('agent:noScenario'))
+    if (inspection.requiresDiscardConfirmation) {
+      await new Promise<void>((resolve, reject) => {
+        modal.confirm({
+          title: t('agent:replaceUnsavedTitle'),
+          content: t('agent:replaceUnsavedDescription'),
+          okText: t('agent:replaceUnsaved'),
+          okButtonProps: { danger: true },
+          cancelText: t('common:actions.cancel'),
+          onOk: () => resolve(),
+          onCancel: () => reject(new Error(t('common:actions.cancel'))),
+        })
+      })
+    }
+    setPendingAgentDrafts((current) => ({ ...current, [scenario.id]: agentDraft }))
+    openTab('scenario', scenario.id, scenario.name)
+  }, [casesQuery.data, modal, openTab, t, tabs])
 
   return (
-    <div className="workbench-page">
+    <div className={agentPanelOpen ? 'workbench-page agent-open' : 'workbench-page'}>
       <aside className="workbench-context-sidebar">
         {mode === 'scenarios' ? (
           <ScenariosSidebar
@@ -1248,6 +1310,12 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
                 replaceCreatedTab,
                 registerSaveHandler,
                 openTab,
+                agentDraft: tab.type === 'scenario' ? pendingAgentDrafts[tab.resourceId] : undefined,
+                onAgentDraftApplied: (scenarioId) => setPendingAgentDrafts((current) => {
+                  const next = { ...current }
+                  delete next[scenarioId]
+                  return next
+                }),
               }) : null}
             </div>
           ))}
@@ -1260,6 +1328,24 @@ export function WorkbenchPage({ onUnsavedGuardChange }: WorkbenchPageProps = {})
           ) : null}
         </div>
       </main>
+
+      {agentPanelOpen && projectId ? (
+        <AgentPanel
+          projectId={projectId}
+          activeScenario={activeScenario}
+          scenarios={casesQuery.data ?? []}
+          suites={suitesQuery.data ?? []}
+          operations={operationsQuery.data ?? []}
+          runs={(runsQuery.data ?? []).filter((run) => run.projectId === projectId)}
+          knowledge={testKnowledgeQuery.data ?? []}
+          pinned={agentPanelPinned}
+          onPinnedChange={(pinned) => onAgentPanelPinnedChange?.(pinned)}
+          onClose={() => onAgentPanelOpenChange?.(false)}
+          onOpenScenario={openAgentScenario}
+          onOpenKnowledge={openAgentKnowledge}
+          onApplyDraft={applyAgentDraft}
+        />
+      ) : null}
 
       <Modal
         title={t('api:addSpec')}
@@ -1535,6 +1621,8 @@ type RenderTabOptions = {
   ) => void
   registerSaveHandler: (key: string, save?: () => Promise<void>) => void
   openTab: (type: WorkbenchTabType, resourceId: string, title: string) => void
+  agentDraft?: ScenarioDraftRecord
+  onAgentDraftApplied: (scenarioId: string) => void
 }
 
 function renderTabContent(options: RenderTabOptions) {
@@ -1550,6 +1638,8 @@ function renderTabContent(options: RenderTabOptions) {
         embedded
         projectId={projectId}
         caseId={tab.resourceId}
+        agentDraft={options.agentDraft}
+        onAgentDraftApplied={options.onAgentDraftApplied}
         {...commonCallbacks}
         onDeleted={() => closeTab(tab.key)}
       />

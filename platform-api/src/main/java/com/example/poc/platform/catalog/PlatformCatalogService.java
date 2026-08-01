@@ -705,6 +705,7 @@ public class PlatformCatalogService {
                 entity.getDslVersion(),
                 entity.getContent(),
                 entity.getStatus(),
+                entity.getRevision() == null ? 0 : entity.getRevision(),
                 entity.getCreatedAt(),
                 entity.getUpdatedAt());
     }
@@ -896,6 +897,7 @@ public class PlatformCatalogService {
             String dslVersion,
             String content,
             String status,
+            long revision,
             Instant createdAt,
             Instant updatedAt) {
     }

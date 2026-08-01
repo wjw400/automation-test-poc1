@@ -1094,8 +1094,8 @@ function validateCaseDslV1(dsl: DslObject) {
     if ('expect' in step || 'extract' in step || 'profile' in step || 'continueOnFailure' in step) {
       errors.push(`${prefix} contains legacy fields. Use runtime, actions, and response instead.`)
     }
-    if (step.request && ('method' in step.request || 'path' in step.request || 'baseUrl' in step.request || 'transform' in step.request)) {
-      errors.push(`${prefix}.request contains legacy method/path/baseUrl/transform fields. Use operation and actions.beforeSend.`)
+    if (step.request && ('method' in step.request || 'baseUrl' in step.request || 'transform' in step.request)) {
+      errors.push(`${prefix}.request contains legacy method/baseUrl/transform fields. Use operation and actions.beforeSend.`)
     }
     if (step.actions && typeof step.actions === 'object') {
       if (step.actions.beforeSend && !Array.isArray(step.actions.beforeSend)) {

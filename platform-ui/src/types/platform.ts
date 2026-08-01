@@ -57,6 +57,7 @@ export type CaseRecord = {
   dslVersion: string
   content: string
   status: string
+  revision: number
   createdAt: string
   updatedAt: string
 }
@@ -425,4 +426,155 @@ export type SaveTestKnowledgeInput = {
   tags: string[]
   content: string
   status: TestKnowledgeStatus
+}
+
+export type AgentRuntimeCapabilities = {
+  available: boolean
+  streaming: boolean
+  cancellation: boolean
+  tools: boolean
+  defaultModel: string
+}
+
+export type AgentRuntimeDescriptor = {
+  type: string
+  capabilities: AgentRuntimeCapabilities
+}
+
+export type AgentTaskStatus = 'READY' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
+
+export type AgentContextType = 'SCENARIO' | 'SUITE' | 'OPERATION' | 'EXECUTION' | 'TEST_KNOWLEDGE'
+
+export type AgentContextReference = {
+  type: AgentContextType
+  id: string
+}
+
+export type AgentContextSelection = {
+  included: AgentContextReference[]
+  excluded: AgentContextReference[]
+}
+
+export type AgentTaskRecord = {
+  id: string
+  projectId: string
+  title: string
+  status: AgentTaskStatus
+  targetType?: string | null
+  targetId?: string | null
+  permissionMode: string
+  runtimeType: string
+  modelId: string
+  createdBy: string
+  iterationCount: number
+  tokenBudget: number
+  context: AgentContextSelection
+  revision: number
+  createdAt: string
+  updatedAt: string
+  completedAt?: string | null
+}
+
+export type CreateAgentTaskInput = {
+  title: string
+  targetType?: 'SCENARIO' | 'SUITE'
+  targetId?: string
+  runtimeType?: string
+  modelId?: string
+  tokenBudget?: number
+  context?: AgentContextSelection
+}
+
+export type AgentMessageRecord = {
+  id: string
+  taskId: string
+  sequence: number
+  role: 'USER' | 'ASSISTANT' | 'SYSTEM'
+  content: Record<string, unknown>
+  createdAt: string
+}
+
+export type AgentEventRecord = {
+  id: string
+  taskId: string
+  sequence: number
+  eventType: string
+  payload: Record<string, unknown>
+  createdAt: string
+}
+
+export type AgentArtifactRecord = {
+  id: string
+  taskId: string
+  artifactType: string
+  targetType?: string | null
+  targetId?: string | null
+  baseRevision?: number | null
+  status: string
+  content: Record<string, unknown>
+  createdAt: string
+  updatedAt: string
+}
+
+export type AgentAuditRecord = {
+  id: string
+  taskId: string
+  projectId: string
+  actorId: string
+  eventType: string
+  payload: Record<string, unknown>
+  createdAt: string
+}
+
+export type AgentAuditSummary = {
+  taskCount: number
+  completedCount: number
+  failedCount: number
+  validationPassedCount: number
+  validationFailedCount: number
+  appliedCount: number
+  savedCount: number
+  manuallyModifiedCount: number
+  positiveFeedbackCount: number
+  negativeFeedbackCount: number
+  successRate: number
+  validationFailureRate: number
+  adoptionRate: number
+}
+
+export type ScenarioDraftValidationIssue = {
+  severity: 'ERROR' | 'WARNING' | 'INFORMATION'
+  code: string
+  path: string
+  message: string
+}
+
+export type ScenarioDraftValidation = {
+  valid: boolean
+  issues: ScenarioDraftValidationIssue[]
+}
+
+export type ScenarioDraftDiffItem = {
+  type: 'ADD' | 'REMOVE' | 'MOVE' | 'CHANGE'
+  path: string
+  stepId?: string | null
+  before?: unknown
+  after?: unknown
+}
+
+export type ScenarioDraftRecord = {
+  id: string
+  projectId: string
+  scenarioId: string
+  sourceRevision: number
+  revision: number
+  content: string
+  status: string
+  createdBy?: string | null
+  agentTaskId?: string | null
+  steps: Array<{ id: string, index: number, name: string }>
+  validation: ScenarioDraftValidation
+  diff: { items: ScenarioDraftDiffItem[] }
+  createdAt: string
+  updatedAt: string
 }

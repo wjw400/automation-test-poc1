@@ -12,6 +12,7 @@ import {
   PlusOutlined,
   ProfileOutlined,
   ReadOutlined,
+  RobotOutlined,
   SearchOutlined,
 } from '@ant-design/icons'
 import { App as AntApp, Button, ConfigProvider, Input, Layout, Modal, Popover, Tooltip } from 'antd'
@@ -38,13 +39,19 @@ const { Header, Sider, Content } = Layout
 function AppShell() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { t } = useTranslation(['common', 'workspace'])
+  const { t } = useTranslation(['common', 'workspace', 'agent'])
   const { message } = AntApp.useApp()
   const [workspaceMenuOpen, setWorkspaceMenuOpen] = useState(false)
   const [workspaceFilter, setWorkspaceFilter] = useState('')
   const [unsavedGuard, setUnsavedGuard] = useState<WorkspaceUnsavedGuard>()
   const [pendingNavigation, setPendingNavigation] = useState<{ to: string, workspaceName?: string }>()
   const [savingBeforeNavigation, setSavingBeforeNavigation] = useState(false)
+  const [agentPanelOpen, setAgentPanelOpen] = useState(
+    () => window.localStorage.getItem('test-agent-pinned') === 'true',
+  )
+  const [agentPanelPinned, setAgentPanelPinned] = useState(
+    () => window.localStorage.getItem('test-agent-pinned') === 'true',
+  )
   const projectsQuery = useQuery({
     queryKey: ['projects'],
     queryFn: platformApi.listProjects,
@@ -197,6 +204,17 @@ function AppShell() {
           placeholder={t('search')}
         />
         <div className="workspace-actions">
+          {location.pathname.startsWith('/workspace') ? (
+            <Tooltip title={t('agent:open')}>
+              <Button
+                aria-label={t('agent:open')}
+                className={agentPanelOpen ? 'workspace-agent-button active' : 'workspace-agent-button'}
+                icon={<RobotOutlined />}
+                type="text"
+                onClick={() => setAgentPanelOpen((open) => !open)}
+              />
+            </Tooltip>
+          ) : null}
           <LanguageSwitcher />
         </div>
       </Header>
@@ -220,7 +238,21 @@ function AppShell() {
           <Content className={location.pathname.startsWith('/workspace') ? 'app-content workbench-host' : 'app-content'}>
             <Routes>
               <Route path="/" element={<Navigate to="/projects" replace />} />
-              <Route path="/workspace" element={<WorkbenchPage onUnsavedGuardChange={setUnsavedGuard} />} />
+              <Route
+                path="/workspace"
+                element={(
+                  <WorkbenchPage
+                    agentPanelOpen={agentPanelOpen}
+                    agentPanelPinned={agentPanelPinned}
+                    onAgentPanelOpenChange={setAgentPanelOpen}
+                    onAgentPanelPinnedChange={(pinned) => {
+                      setAgentPanelPinned(pinned)
+                      window.localStorage.setItem('test-agent-pinned', String(pinned))
+                    }}
+                    onUnsavedGuardChange={setUnsavedGuard}
+                  />
+                )}
+              />
               <Route path="/cases" element={<CasesPage />} />
               <Route path="/suites" element={<SuitesPage />} />
               <Route path="/runs" element={<RunsPage />} />

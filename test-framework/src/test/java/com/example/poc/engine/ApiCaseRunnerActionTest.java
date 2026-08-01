@@ -106,6 +106,51 @@ class ApiCaseRunnerActionTest {
         }
     }
 
+    @Test
+    void resolvesAndEncodesOperationPathParameters() throws Exception {
+        AtomicReference<String> rawPath = new AtomicReference<>();
+        HttpServer server = HttpServer.create(new InetSocketAddress(0), 0);
+        server.createContext("/", exchange -> {
+            rawPath.set(exchange.getRequestURI().getRawPath());
+            byte[] responseBytes = "{}".getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(200, responseBytes.length);
+            exchange.getResponseBody().write(responseBytes);
+            exchange.close();
+        });
+        server.start();
+
+        try {
+            String caseYaml = """
+                    dslVersion: v1
+                    name: Path parameter binding
+                    variables:
+                      baseUrl: http://127.0.0.1:%d
+                      orderId: 42
+                    steps:
+                      - name: Read customer order
+                        type: http
+                        operation:
+                          operationId: getCustomerOrder
+                          method: GET
+                          path: /customers/{customer}/orders/{orderId}
+                        request:
+                          path:
+                            customer: A B
+                            orderId: ${orderId}
+                        response:
+                          status: 200
+                          assertions: []
+                    """.formatted(server.getAddress().getPort());
+
+            ApiCaseExecutionReport report = new ApiCaseRunner().executeInline("path-parameters.yaml", caseYaml);
+
+            assertThat(report.getStatus()).isEqualTo("PASSED");
+            assertThat(rawPath.get()).isEqualTo("/customers/A%20B/orders/42");
+        } finally {
+            server.stop(0);
+        }
+    }
+
     private void handleSecureExchange(
             HttpExchange exchange,
             AtomicReference<Map<String, Object>> wireRequest,

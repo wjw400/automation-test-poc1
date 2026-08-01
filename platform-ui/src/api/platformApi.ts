@@ -1,6 +1,11 @@
 import { apiClient } from './client'
 import type {
   ApiOperationRecord,
+  AgentArtifactRecord,
+  AgentEventRecord,
+  AgentMessageRecord,
+  AgentRuntimeDescriptor,
+  AgentTaskRecord,
   ApiSpecContractRecord,
   ApiSpecRecord,
   ApiSpecReferenceRecord,
@@ -23,6 +28,8 @@ import type {
   SuiteRecord,
   SuiteRunRecord,
   SaveTestKnowledgeInput,
+  CreateAgentTaskInput,
+  ScenarioDraftRecord,
   TestKnowledgeRecord,
 } from '../types/platform'
 
@@ -281,5 +288,75 @@ export const platformApi = {
 
   getApiSpecContentUrl(projectId: string, apiSpecId: string) {
     return `/api/projects/${encodeURIComponent(projectId)}/api-specs/${encodeURIComponent(apiSpecId)}/content`
+  },
+
+  async listAgentRuntimes() {
+    const { data } = await apiClient.get<AgentRuntimeDescriptor[]>('/agent/runtimes')
+    return data
+  },
+
+  async listAgentTasks(projectId: string) {
+    const { data } = await apiClient.get<AgentTaskRecord[]>(`/projects/${projectId}/agent/tasks`)
+    return data
+  },
+
+  async createAgentTask(projectId: string, payload: CreateAgentTaskInput) {
+    const { data } = await apiClient.post<AgentTaskRecord>(`/projects/${projectId}/agent/tasks`, payload)
+    return data
+  },
+
+  async getAgentTask(taskId: string) {
+    const { data } = await apiClient.get<AgentTaskRecord>(`/agent/tasks/${taskId}`)
+    return data
+  },
+
+  async renameAgentTask(taskId: string, title: string) {
+    const { data } = await apiClient.patch<AgentTaskRecord>(`/agent/tasks/${taskId}`, { title })
+    return data
+  },
+
+  async deleteAgentTask(taskId: string) {
+    await apiClient.delete(`/agent/tasks/${taskId}`)
+  },
+
+  async listAgentMessages(taskId: string) {
+    const { data } = await apiClient.get<AgentMessageRecord[]>(`/agent/tasks/${taskId}/messages`)
+    return data
+  },
+
+  async sendAgentMessage(taskId: string, content: string) {
+    const { data } = await apiClient.post<AgentTaskRecord>(`/agent/tasks/${taskId}/messages`, { content })
+    return data
+  },
+
+  async listAgentEvents(taskId: string, afterSequence = 0) {
+    const { data } = await apiClient.get<AgentEventRecord[]>(`/agent/tasks/${taskId}/events`, {
+      params: { afterSequence },
+      headers: { Accept: 'application/json' },
+    })
+    return data
+  },
+
+  getAgentEventStreamUrl(taskId: string, afterSequence = 0) {
+    return `/api/agent/tasks/${encodeURIComponent(taskId)}/events?afterSequence=${afterSequence}`
+  },
+
+  async cancelAgentTask(taskId: string) {
+    const { data } = await apiClient.post<AgentTaskRecord>(`/agent/tasks/${taskId}/cancel`)
+    return data
+  },
+
+  async listAgentArtifacts(taskId: string) {
+    const { data } = await apiClient.get<AgentArtifactRecord[]>(`/agent/tasks/${taskId}/artifacts`)
+    return data
+  },
+
+  async getScenarioDraft(draftId: string) {
+    const { data } = await apiClient.get<ScenarioDraftRecord>(`/scenario-drafts/${draftId}`)
+    return data
+  },
+
+  async recordAgentDecision(taskId: string, decision: string, details: Record<string, unknown> = {}) {
+    await apiClient.post(`/agent/tasks/${taskId}/decisions`, { decision, details })
   },
 }

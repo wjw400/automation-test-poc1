@@ -11,6 +11,7 @@ The application is still under development. Legacy case structures and legacy Ac
 ## 2. Core Model
 
 - `steps` contains business-level HTTP interactions.
+- `request.path` supplies values for placeholders declared by the selected Operation path.
 - `actions.beforeSend` transforms request-side data before transmission.
 - `actions.afterReceive` transforms response-side data before assertions and extraction.
 - `response.assertions` decides whether the Step passed.
@@ -19,6 +20,20 @@ The application is still under development. Legacy case structures and legacy Ac
 - `decrypted.*` contains processed response payloads while the raw response remains unchanged.
 
 Actions execute sequentially in YAML list order. The output of one Action is immediately available to the next Action.
+
+### Path Parameters
+
+Imported Operation paths may contain placeholders such as `/orders/{orderId}`. Values are declared separately from query parameters:
+
+```yaml
+request:
+  path:
+    orderId: ${orderId}
+  query:
+    expand: lines
+```
+
+The Runner resolves variables and URL-encodes each path value before replacing the matching placeholder. `request.path` keys that do not exist in the Operation path are validation warnings; missing required path values are validation errors.
 
 ## 3. Standard Example
 
@@ -53,6 +68,7 @@ steps:
     runtime: {}
 
     request:
+      path: {}
       query: {}
       headers:
         Content-Type: application/json
