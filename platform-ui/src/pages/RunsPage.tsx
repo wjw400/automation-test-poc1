@@ -44,7 +44,7 @@ export function RunsPage() {
   const runsQuery = useQuery({
     queryKey: ['runs'],
     queryFn: platformApi.listRuns,
-    refetchInterval: 15000,
+    refetchInterval: (query) => query.state.data?.some((run) => run.status === 'RUNNING') ? 3000 : false,
   })
 
   const projectsQuery = useQuery({

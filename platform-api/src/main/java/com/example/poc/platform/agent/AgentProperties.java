@@ -10,7 +10,7 @@ public class AgentProperties {
     private int maxToolCalls = 20;
     private int maxRepeatedToolCalls = 3;
     private int maxNoProgressToolCalls = 3;
-    private Duration turnTimeout = Duration.ofSeconds(60);
+    private Duration turnTimeout = Duration.ofSeconds(120);
     private final Fake fake = new Fake();
     private final DeepSeek deepseek = new DeepSeek();
 

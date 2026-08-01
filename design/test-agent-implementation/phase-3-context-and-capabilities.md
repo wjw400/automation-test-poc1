@@ -73,9 +73,12 @@ Skill 不能授予权限，只能在 `ToolPolicy` 允许范围内请求能力。
 ### READ
 
 - `getScenario`
-- `getOperationSchema`
+- `getApiOperationSchema`
 - `searchPublishedKnowledge`
 - `getSupportedActions`
+- `listProjectApiSpecs`，仅在 `openapi-analysis` Skill 被选择时开放
+- `searchProjectApiOperations`，仅在 `openapi-analysis` Skill 被选择时开放
+- `readApiSpecFragment`，仅允许读取有界 JSON Pointer，不允许读取整份 Spec
 
 ### DRAFT_WRITE
 

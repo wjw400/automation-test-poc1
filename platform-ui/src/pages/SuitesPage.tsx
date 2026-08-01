@@ -125,7 +125,7 @@ export function SuitesPage({
   const suiteRunsQuery = useQuery({
     queryKey: ['suite-runs'],
     queryFn: platformApi.listSuiteRuns,
-    refetchInterval: 15000,
+    refetchInterval: (query) => query.state.data?.some((run) => run.status === 'RUNNING') ? 3000 : false,
   })
 
   const selectedSuite = useMemo(

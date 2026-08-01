@@ -16,13 +16,20 @@ spring:
 server:
   port: 8090
 
+logging:
+  file:
+    name: ${PLATFORM_LOG_FILE:logs/platform-api.log}
+  level:
+    com.example.poc.platform.agent: ${AGENT_LOG_LEVEL:INFO}
+    com.example.poc.platform.web.ApiExceptionHandler: ${API_ERROR_LOG_LEVEL:WARN}
+
 agent:
   default-runtime: ${AGENT_DEFAULT_RUNTIME:FAKE}
   max-turns: ${AGENT_MAX_TURNS:20}
   max-tool-calls: ${AGENT_MAX_TOOL_CALLS:20}
   max-repeated-tool-calls: ${AGENT_MAX_REPEATED_TOOL_CALLS:3}
   max-no-progress-tool-calls: ${AGENT_MAX_NO_PROGRESS_TOOL_CALLS:3}
-  turn-timeout: ${AGENT_TURN_TIMEOUT:60s}
+  turn-timeout: ${AGENT_TURN_TIMEOUT:120s}
   fake:
     chunk-delay: ${AGENT_FAKE_CHUNK_DELAY:10ms}
   deepseek:

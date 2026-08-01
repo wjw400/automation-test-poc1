@@ -101,7 +101,7 @@ public class FakeAgentRuntime implements AgentRuntime {
         }
         AgentToolResult scenarioResult = invoke(request, "getScenario", Map.of(), eventSink, budget);
         String operationId = firstOperationId(scenarioResult);
-        invoke(request, "getOperationSchema", Map.of("operationId", operationId), eventSink, budget);
+        invoke(request, "getApiOperationSchema", Map.of("operationRefId", operationId), eventSink, budget);
         AgentToolResult knowledgeResult = invoke(
                 request, "searchPublishedKnowledge", Map.of(), eventSink, budget);
         AgentToolResult created = invoke(request, "createScenarioDraft", Map.of(), eventSink, budget);
@@ -148,7 +148,7 @@ public class FakeAgentRuntime implements AgentRuntime {
         }
         AgentToolResult scenarioResult = invoke(request, "getScenario", Map.of(), eventSink, budget);
         String operationId = firstOperationId(scenarioResult);
-        invoke(request, "getOperationSchema", Map.of("operationId", operationId), eventSink, budget);
+        invoke(request, "getApiOperationSchema", Map.of("operationRefId", operationId), eventSink, budget);
         invoke(request, "getSupportedActions", Map.of(), eventSink, budget);
         AgentToolResult knowledgeResult = invoke(
                 request, "searchPublishedKnowledge", Map.of(), eventSink, budget);
@@ -267,7 +267,11 @@ public class FakeAgentRuntime implements AgentRuntime {
                     "artifactCount", result.artifacts().size())));
             return result;
         } catch (RuntimeException exception) {
-            if (!(exception instanceof AgentRuntimeException)) budget.failed();
+            if (!(exception instanceof AgentRuntimeException)) {
+                budget.failed(permit, exception instanceof SecurityException
+                        ? "TOOL_PERMISSION_DENIED"
+                        : "TOOL_EXECUTION_FAILED");
+            }
             eventSink.accept(new AgentRuntimeEvent("tool.failed", Map.of(
                     "toolName", name,
                     "code", exception instanceof SecurityException ? "TOOL_PERMISSION_DENIED" : "TOOL_EXECUTION_FAILED")));

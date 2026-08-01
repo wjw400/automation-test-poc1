@@ -3,13 +3,13 @@ package com.example.poc.platform.agent.capability;
 import com.example.poc.platform.agent.AgentTaskService.AgentTaskRecord;
 import com.example.poc.platform.agent.context.AgentContextRedactor;
 import com.example.poc.platform.agent.runtime.AgentArtifactOutput;
+import com.example.poc.platform.agent.scenario.ScenarioCommandException;
 import com.example.poc.platform.agent.scenario.ScenarioDraftService;
 import com.example.poc.platform.agent.scenario.ScenarioDraftService.CommandExecutionResult;
 import com.example.poc.platform.agent.scenario.ScenarioDraftService.CreateScenarioDraftRequest;
 import com.example.poc.platform.agent.scenario.ScenarioDraftService.ScenarioDraftRecord;
 import com.example.poc.platform.agent.scenario.ScenarioDslCodec;
 import com.example.poc.platform.persistence.JsonCodec;
-import com.example.poc.platform.persistence.entity.ApiOperationEntity;
 import com.example.poc.platform.persistence.entity.CaseEntity;
 import com.example.poc.platform.persistence.entity.TestKnowledgeEntity;
 import com.example.poc.platform.persistence.repo.TestKnowledgeRepository;
@@ -18,6 +18,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.function.Function;
 import org.springframework.stereotype.Component;
 
@@ -32,6 +34,7 @@ public class AgentToolRegistry {
     private final TestKnowledgeRepository knowledgeRepository;
     private final JsonCodec jsonCodec;
     private final AgentContextRedactor redactor;
+    private final AgentApiSpecReader apiSpecReader;
 
     public AgentToolRegistry(
             AgentToolPolicy policy,
@@ -39,33 +42,50 @@ public class AgentToolRegistry {
             ScenarioDslCodec scenarioCodec,
             TestKnowledgeRepository knowledgeRepository,
             JsonCodec jsonCodec,
-            AgentContextRedactor redactor) {
+            AgentContextRedactor redactor,
+            AgentApiSpecReader apiSpecReader) {
         this.policy = policy;
         this.draftService = draftService;
         this.scenarioCodec = scenarioCodec;
         this.knowledgeRepository = knowledgeRepository;
         this.jsonCodec = jsonCodec;
         this.redactor = redactor;
+        this.apiSpecReader = apiSpecReader;
     }
 
     public List<AgentTool> toolsFor(AgentTaskRecord task) {
+        return toolsFor(task, List.of());
+    }
+
+    public List<AgentTool> toolsFor(AgentTaskRecord task, List<String> selectedSkillNames) {
         if (!"SCENARIO".equals(task.targetType())) return List.of();
-        return List.of(
+        boolean apiSpecAnalysis = selectedSkillNames.contains("openapi-analysis");
+        List<AgentTool> tools = new ArrayList<>(List.of(
                 tool(task, getScenarioDefinition(), input -> getScenario(task, input)),
-                tool(task, getOperationDefinition(), input -> getOperationSchema(task, input)),
+                tool(task, getOperationDefinition(), input -> getOperationSchema(task, input, apiSpecAnalysis)),
                 tool(task, searchKnowledgeDefinition(), input -> searchKnowledge(task, input)),
                 tool(task, supportedActionsDefinition(), input -> getSupportedActions()),
                 tool(task, createDraftDefinition(), input -> createDraft(task, input)),
                 tool(task, applyCommandsDefinition(), input -> applyCommands(task, input)),
                 tool(task, validateDraftDefinition(), input -> validateDraft(task, input)),
-                tool(task, diffDraftDefinition(), input -> diffDraft(task, input)));
+                tool(task, diffDraftDefinition(), input -> diffDraft(task, input))));
+        if (apiSpecAnalysis) {
+            tools.add(tool(task, listApiSpecsDefinition(), input ->
+                    AgentToolResult.read(apiSpecReader.listSpecs(task, input))));
+            tools.add(tool(task, searchApiOperationsDefinition(), input ->
+                    AgentToolResult.read(apiSpecReader.searchOperations(task, input))));
+            tools.add(tool(task, readApiSpecFragmentDefinition(), input ->
+                    AgentToolResult.read(apiSpecReader.readFragment(task, input))));
+        }
+        return List.copyOf(tools);
     }
 
     public List<AgentToolDefinition> definitions() {
         return List.of(
                 getScenarioDefinition(), getOperationDefinition(), searchKnowledgeDefinition(),
                 supportedActionsDefinition(), createDraftDefinition(), applyCommandsDefinition(),
-                validateDraftDefinition(), diffDraftDefinition());
+                validateDraftDefinition(), diffDraftDefinition(), listApiSpecsDefinition(),
+                searchApiOperationsDefinition(), readApiSpecFragmentDefinition());
     }
 
     private AgentTool tool(
@@ -113,19 +133,11 @@ public class AgentToolRegistry {
         return AgentToolResult.read(Map.of("scenario", value));
     }
 
-    private AgentToolResult getOperationSchema(AgentTaskRecord task, Map<String, Object> input) {
-        ApiOperationEntity operation = policy.requireLinkedOperation(task, requiredText(input, "operationId"));
-        Map<String, Object> value = new LinkedHashMap<>();
-        value.put("id", operation.getId());
-        value.put("apiSpecId", operation.getApiSpecId());
-        value.put("operationId", operation.getOperationId());
-        value.put("method", operation.getMethod());
-        value.put("path", operation.getPath());
-        value.put("summary", operation.getSummary());
-        value.put("description", operation.getDescription());
-        value.put("requestBody", redactor.redact(jsonCodec.readObjectMap(operation.getRequestBodyJson())));
-        value.put("responses", redactor.redact(jsonCodec.readObjectMap(operation.getResponsesJson())));
-        return AgentToolResult.read(Map.of("operation", value));
+    private AgentToolResult getOperationSchema(
+            AgentTaskRecord task,
+            Map<String, Object> input,
+            boolean allowProjectWide) {
+        return AgentToolResult.read(apiSpecReader.getOperation(task, input, allowProjectWide));
     }
 
     private AgentToolResult searchKnowledge(AgentTaskRecord task, Map<String, Object> input) {
@@ -228,18 +240,45 @@ public class AgentToolRegistry {
     private void validateCitations(AgentTaskRecord task, Map<String, Object> commandPlan) {
         Object value = commandPlan.get("citations");
         if (value == null) return;
-        if (!(value instanceof List<?> list)) throw new IllegalArgumentException("citations must be an array");
-        for (Object item : list) {
-            if (!(item instanceof Map<?, ?> citation)) throw new IllegalArgumentException("citation must be an object");
+        if (!(value instanceof List<?> list)) {
+            throw invalidKnowledgeCitation("plan.citations", "citations must be an array");
+        }
+        for (int index = 0; index < list.size(); index++) {
+            Object item = list.get(index);
+            String path = "plan.citations[" + index + "]";
+            if (!(item instanceof Map<?, ?> citation)) {
+                throw invalidKnowledgeCitation(path, "citation must be an object");
+            }
             Object knowledgeId = citation.get("knowledgeId");
             if (!(knowledgeId instanceof String id) || id.isBlank()) {
-                throw new IllegalArgumentException("citation.knowledgeId is required");
+                throw invalidKnowledgeCitation(path + ".knowledgeId", "citation.knowledgeId is required");
             }
-            TestKnowledgeEntity knowledge = policy.requireAllowedPublishedKnowledge(task, id);
+            TestKnowledgeEntity knowledge;
+            try {
+                knowledge = policy.requireAllowedPublishedKnowledge(task, id);
+            } catch (NoSuchElementException exception) {
+                throw invalidKnowledgeCitation(path + ".knowledgeId",
+                        "knowledgeId must be copied exactly from searchPublishedKnowledge. "
+                                + "API Spec names and references are not Knowledge citations; omit citations when "
+                                + "only API Spec or Operation data informed the plan");
+            }
             if (citation.get("scope") != null && !knowledge.getScope().equals(citation.get("scope"))) {
-                throw new IllegalArgumentException("citation scope does not match published Knowledge");
+                throw invalidKnowledgeCitation(path + ".scope",
+                        "citation scope does not match the published Knowledge entry");
+            }
+            if (citation.get("targetId") != null
+                    && !Objects.equals(knowledge.getTargetId(), citation.get("targetId"))) {
+                throw invalidKnowledgeCitation(path + ".targetId",
+                        "citation targetId does not match the published Knowledge entry");
             }
         }
+    }
+
+    private ScenarioCommandException invalidKnowledgeCitation(
+            String path,
+            String message) {
+        return new ScenarioCommandException(
+                "INVALID_KNOWLEDGE_CITATION", message, path);
     }
 
     private Map<String, Object> draftSummary(ScenarioDraftRecord draft) {
@@ -267,10 +306,31 @@ public class AgentToolRegistry {
     }
 
     private AgentToolDefinition getOperationDefinition() {
-        return definition("getOperationSchema", "Read an OpenAPI Operation already linked to the target Scenario.",
+        return definition("getApiOperationSchema", "Read an accessible OpenAPI Operation by its platform operationRefId.",
                 "READ", "NONE", """
-                {"type":"object","required":["operationId"],"properties":{"operationId":{"type":"string"}},"additionalProperties":false}
+                {"type":"object","required":["operationRefId"],"properties":{"operationRefId":{"type":"string"}},"additionalProperties":false}
                 """, "{" + q("operation") + ":" + q("OpenAPI operation schema") + "}");
+    }
+
+    private AgentToolDefinition listApiSpecsDefinition() {
+        return definition("listProjectApiSpecs", "List compact metadata for API Specs in the current Project.",
+                "READ", "NONE", """
+                {"type":"object","properties":{"query":{"type":"string"}},"additionalProperties":false}
+                """, "{" + q("specs") + ":[" + q("API Spec metadata") + "]}");
+    }
+
+    private AgentToolDefinition searchApiOperationsDefinition() {
+        return definition("searchProjectApiOperations", "Search Operations in current Project API Specs without reading full documents.",
+                "READ", "NONE", """
+                {"type":"object","properties":{"apiSpecRefId":{"type":"string"},"query":{"type":"string"},"method":{"type":"string"},"path":{"type":"string"}},"additionalProperties":false}
+                """, "{" + q("operations") + ":[" + q("compact Operation match") + "]}");
+    }
+
+    private AgentToolDefinition readApiSpecFragmentDefinition() {
+        return definition("readApiSpecFragment", "Read one bounded OpenAPI fragment by RFC 6901 JSON Pointer. Full-document reads are forbidden.",
+                "READ", "NONE", """
+                {"type":"object","required":["apiSpecRefId","pointer"],"properties":{"apiSpecRefId":{"type":"string"},"pointer":{"type":"string","pattern":"^/.+"}},"additionalProperties":false}
+                """, "{" + q("fragment") + ":" + q("bounded API Spec fragment") + "}");
     }
 
     private AgentToolDefinition searchKnowledgeDefinition() {
@@ -294,7 +354,8 @@ public class AgentToolRegistry {
     }
 
     private AgentToolDefinition applyCommandsDefinition() {
-        return definition("applyScenarioCommands", "Apply a validated typed Command Plan to the target Scenario Draft.",
+        return definition("applyScenarioCommands", "Apply a validated typed Command Plan to the target Scenario Draft. "
+                        + "citations are optional Test Knowledge provenance only, never API Spec provenance.",
                 "DRAFT_WRITE", "UPDATE_DRAFT", """
                 {
                   "type":"object",
@@ -308,10 +369,88 @@ public class AgentToolRegistry {
                         "targetType":{"const":"SCENARIO_DRAFT"},
                         "targetId":{"type":"string"},
                         "baseRevision":{"type":"integer"},
-                        "commands":{"type":"array","minItems":1,"items":{"type":"object","required":["type"],"properties":{"type":{"type":"string","enum":["SetRequestHeader","RemoveRequestHeader","SetQueryParameter","SetPathParameter","SetRequestBody","SetRequestBodyValue","AddBeforeAction","AddAfterAction","AddAssertion","RemoveAssertion","AddExtraction","RemoveExtraction","AddStep","RemoveStep","MoveStep","RenameStep","SelectOperation"]}},"additionalProperties":true}},
+                        "commands":{
+                          "type":"array",
+                          "minItems":1,
+                          "description":"Typed commands applied in array order. Required fields: SetRequestHeader(stepId,name,value); RemoveRequestHeader(stepId,name); SetQueryParameter/SetPathParameter(stepId,name,value); SetRequestBody(stepId,body); SetRequestBodyValue(stepId,path,value); AddBeforeAction/AddAfterAction(stepId,action); AddAssertion(stepId,assertion); RemoveAssertion(stepId,index); AddExtraction(stepId,name,extraction); RemoveExtraction(stepId,name); AddStep(step, optional stepId, and optional targetIndex or afterStepId); RemoveStep(stepId); MoveStep(stepId,targetIndex); RenameStep(stepId,name); SelectOperation(stepId,operationRefId).",
+                          "items":{
+                            "type":"object",
+                            "required":["type"],
+                            "properties":{
+                              "type":{"type":"string","enum":["SetRequestHeader","RemoveRequestHeader","SetQueryParameter","SetPathParameter","SetRequestBody","SetRequestBodyValue","AddBeforeAction","AddAfterAction","AddAssertion","RemoveAssertion","AddExtraction","RemoveExtraction","AddStep","RemoveStep","MoveStep","RenameStep","SelectOperation"]},
+                              "stepId":{"type":"string","description":"Stable Draft Step ID. For AddStep this optionally assigns the new stable ID; for other Step commands it identifies an existing Step."},
+                              "name":{"type":"string"},
+                              "value":{},
+                              "body":{},
+                              "path":{"type":"string","description":"JSON Pointer used only by SetRequestBodyValue."},
+                              "action":{"type":"object"},
+                              "assertion":{"type":"object"},
+                              "index":{"type":"integer","minimum":0,"description":"Zero-based assertion index used only by RemoveAssertion."},
+                              "extraction":{"type":"object"},
+                              "afterStepId":{"type":"string","description":"AddStep placement: insert after this existing stable Step ID. Mutually exclusive with targetIndex."},
+                              "targetIndex":{"type":"integer","minimum":0,"description":"Zero-based destination. AddStep inserts directly at this index; MoveStep moves an existing Step to this index."},
+                              "operationRefId":{"type":"string","description":"Platform operationRefId used only by SelectOperation; never use the OpenAPI operationId."},
+                              "step":{
+                                "type":"object",
+                                "description":"Complete HTTP Step used only by AddStep. Copy operation from getApiOperationSchema result.operation.dslOperation.",
+                                "required":["name","type","operation","request","response"],
+                                "properties":{
+                                  "name":{"type":"string"},
+                                  "type":{"const":"http"},
+                                  "operation":{
+                                    "type":"object",
+                                    "required":["id","apiSpecId","operationId","method","path"],
+                                    "properties":{
+                                      "id":{"type":"string","description":"Platform operationRefId."},
+                                      "apiSpecId":{"type":"string","description":"Platform apiSpecRefId."},
+                                      "apiSpecName":{"type":"string"},
+                                      "operationId":{"type":"string","description":"OpenAPI operationId copied from dslOperation."},
+                                      "summary":{"type":"string"},
+                                      "service":{"type":"string"},
+                                      "method":{"type":"string"},
+                                      "path":{"type":"string"}
+                                    },
+                                    "additionalProperties":false
+                                  },
+                                  "runtime":{"type":"object"},
+                                  "request":{
+                                    "type":"object",
+                                    "properties":{"headers":{"type":"object"},"path":{"type":"object"},"query":{"type":"object"},"body":{}},
+                                    "additionalProperties":false
+                                  },
+                                  "actions":{
+                                    "type":"object",
+                                    "properties":{"beforeSend":{"type":"array"},"afterReceive":{"type":"array"}},
+                                    "additionalProperties":false
+                                  },
+                                  "response":{
+                                    "type":"object",
+                                    "properties":{"status":{"type":"integer"},"assertions":{"type":"array"},"extract":{"type":"object"}},
+                                    "additionalProperties":false
+                                  }
+                                },
+                                "additionalProperties":false
+                              }
+                            },
+                            "additionalProperties":false
+                          }
+                        },
                         "assumptions":{"type":"array","items":{"type":"string"}},
                         "warnings":{"type":"array","items":{"type":"string"}},
-                        "citations":{"type":"array","items":{"type":"object","required":["knowledgeId","scope"],"properties":{"knowledgeId":{"type":"string"},"scope":{"type":"string"},"targetId":{"type":"string"}},"additionalProperties":false}}
+                        "citations":{
+                          "type":"array",
+                          "description":"Optional Test Knowledge provenance only. Each knowledgeId must be copied exactly from searchPublishedKnowledge. Omit this field or use [] when only API Specs or Operations informed the plan. Never put an API Spec name, apiSpecRefId, operationRefId, or OpenAPI operationId here.",
+                          "items":{
+                            "type":"object",
+                            "required":["knowledgeId","scope"],
+                            "properties":{
+                              "knowledgeId":{"type":"string","description":"Exact knowledgeId returned by searchPublishedKnowledge."},
+                              "scope":{"type":"string","enum":["PROJECT","API_SPEC","OPERATION","SCENARIO"]},
+                              "targetId":{"type":"string"}
+                            },
+                            "additionalProperties":false
+                          }
+                        }
                       },
                       "additionalProperties":false
                     }

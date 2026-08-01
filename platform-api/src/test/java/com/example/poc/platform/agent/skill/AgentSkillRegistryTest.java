@@ -21,6 +21,12 @@ class AgentSkillRegistryTest {
         assertThat(registry.select(task, "Encrypt and sign the XML request", "plain Scenario").stream()
                 .map(AgentSkill::name))
                 .containsExactly("scenario-authoring", "secure-payload");
+        assertThat(registry.select(task, "Check the OpenAPI schema and required fields", "plain Scenario").stream()
+                .map(AgentSkill::name))
+                .containsExactly("scenario-authoring", "openapi-analysis");
+        assertThat(registry.select(task, "Update the body", "Scenario variable named schema").stream()
+                .map(AgentSkill::name))
+                .containsExactly("scenario-authoring");
     }
 
     @Test

@@ -126,9 +126,17 @@ public class ScenarioCommandEngine {
             if (stepIds.contains(newStepId)) {
                 throw error("COMMAND_TARGET_ALREADY_EXISTS", "Step reference already exists: " + newStepId, newStepId);
             }
-            int insertIndex = value.afterStepId() == null
-                    ? scenario.getSteps().size()
-                    : indexOf(stepIds, value.afterStepId()) + 1;
+            int insertIndex;
+            if (value.targetIndex() != null) {
+                if (value.targetIndex() < 0 || value.targetIndex() > stepIds.size()) {
+                    throw error("INVALID_COMMAND_FIELD", "targetIndex is outside the Scenario insertion range", newStepId);
+                }
+                insertIndex = value.targetIndex();
+            } else {
+                insertIndex = value.afterStepId() == null
+                        ? scenario.getSteps().size()
+                        : indexOf(stepIds, value.afterStepId()) + 1;
+            }
             scenario.getSteps().add(insertIndex, value.step());
             stepIds.add(insertIndex, newStepId);
             return;

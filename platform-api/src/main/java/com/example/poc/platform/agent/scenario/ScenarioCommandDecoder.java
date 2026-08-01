@@ -149,10 +149,20 @@ public class ScenarioCommandDecoder {
                         stepId(command, path), requiredText(command, "name", path + ".name"));
             }
             case "AddStep" -> {
-                rejectUnknownFields(command, Set.of("type", "stepId", "afterStepId", "step"), path);
+                rejectUnknownFields(command, Set.of("type", "stepId", "afterStepId", "targetIndex", "step"), path);
+                String afterStepId = optionalText(command.get("afterStepId"), path + ".afterStepId");
+                Integer targetIndex = command.get("targetIndex") == null
+                        ? null
+                        : requiredInteger(command, "targetIndex", path + ".targetIndex");
+                if (afterStepId != null && targetIndex != null) {
+                    throw error("INVALID_COMMAND_FIELD",
+                            "AddStep accepts either afterStepId or targetIndex, not both",
+                            path);
+                }
                 yield new ScenarioCommand.AddStep(
                         optionalText(command.get("stepId"), path + ".stepId"),
-                        optionalText(command.get("afterStepId"), path + ".afterStepId"),
+                        afterStepId,
+                        targetIndex,
                         codec.convert(requiredValue(command, "step", path + ".step"), ApiStep.class, path + ".step"));
             }
             case "RemoveStep" -> {
@@ -170,9 +180,19 @@ public class ScenarioCommandDecoder {
                         stepId(command, path), requiredText(command, "name", path + ".name"));
             }
             case "SelectOperation" -> {
-                rejectUnknownFields(command, Set.of("type", "stepId", "operationId"), path);
+                rejectUnknownFields(command, Set.of("type", "stepId", "operationRefId", "operationId"), path);
+                String operationRefId = optionalText(command.get("operationRefId"), path + ".operationRefId");
+                String legacyOperationId = optionalText(command.get("operationId"), path + ".operationId");
+                if (operationRefId != null && legacyOperationId != null) {
+                    throw error("INVALID_COMMAND_FIELD",
+                            "SelectOperation accepts operationRefId only",
+                            path);
+                }
                 yield new ScenarioCommand.SelectOperation(
-                        stepId(command, path), requiredText(command, "operationId", path + ".operationId"));
+                        stepId(command, path),
+                        operationRefId == null
+                                ? requiredText(command, "operationId", path + ".operationId")
+                                : operationRefId);
             }
             default -> throw error("UNKNOWN_COMMAND_TYPE", "Unsupported Scenario command: " + type, path + ".type");
         };

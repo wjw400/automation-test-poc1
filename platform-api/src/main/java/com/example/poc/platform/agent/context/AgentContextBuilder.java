@@ -229,8 +229,8 @@ public class AgentContextBuilder {
 
     private AgentContextItem operationItem(ApiOperationEntity operation) {
         Map<String, Object> content = new LinkedHashMap<>();
-        content.put("id", operation.getId());
-        content.put("apiSpecId", operation.getApiSpecId());
+        content.put("operationRefId", operation.getId());
+        content.put("apiSpecRefId", operation.getApiSpecId());
         content.put("operationId", operation.getOperationId());
         content.put("method", operation.getMethod());
         content.put("path", operation.getPath());

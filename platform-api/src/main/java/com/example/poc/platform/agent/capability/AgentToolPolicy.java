@@ -6,9 +6,11 @@ import com.example.poc.platform.agent.AgentTaskService.AgentTaskRecord;
 import com.example.poc.platform.agent.scenario.ScenarioDraftService.ScenarioDraftRecord;
 import com.example.poc.platform.agent.scenario.ScenarioDslCodec;
 import com.example.poc.platform.persistence.entity.ApiOperationEntity;
+import com.example.poc.platform.persistence.entity.ApiSpecEntity;
 import com.example.poc.platform.persistence.entity.CaseEntity;
 import com.example.poc.platform.persistence.entity.TestKnowledgeEntity;
 import com.example.poc.platform.persistence.repo.ApiOperationRepository;
+import com.example.poc.platform.persistence.repo.ApiSpecRepository;
 import com.example.poc.platform.persistence.repo.CaseRepository;
 import com.example.poc.platform.persistence.repo.RunRepository;
 import com.example.poc.platform.persistence.repo.TestKnowledgeRepository;
@@ -23,6 +25,7 @@ public class AgentToolPolicy {
 
     private final CaseRepository caseRepository;
     private final ApiOperationRepository operationRepository;
+    private final ApiSpecRepository specRepository;
     private final TestKnowledgeRepository knowledgeRepository;
     private final RunRepository runRepository;
     private final ScenarioDslCodec scenarioCodec;
@@ -30,11 +33,13 @@ public class AgentToolPolicy {
     public AgentToolPolicy(
             CaseRepository caseRepository,
             ApiOperationRepository operationRepository,
+            ApiSpecRepository specRepository,
             TestKnowledgeRepository knowledgeRepository,
             RunRepository runRepository,
             ScenarioDslCodec scenarioCodec) {
         this.caseRepository = caseRepository;
         this.operationRepository = operationRepository;
+        this.specRepository = specRepository;
         this.knowledgeRepository = knowledgeRepository;
         this.runRepository = runRepository;
         this.scenarioCodec = scenarioCodec;
@@ -69,12 +74,26 @@ public class AgentToolPolicy {
         return scenario;
     }
 
-    public ApiOperationEntity requireLinkedOperation(AgentTaskRecord task, String operationId) {
-        if (!linkedOperationIds(task).contains(operationId)) {
+    public ApiOperationEntity requireLinkedOperation(AgentTaskRecord task, String operationRefId) {
+        if (!linkedOperationIds(task).contains(operationRefId)) {
             throw denied("Operation is not linked to the Agent Task target Scenario");
         }
-        ApiOperationEntity operation = operationRepository.findById(operationId)
-                .orElseThrow(() -> new NoSuchElementException("Operation not found: " + operationId));
+        ApiOperationEntity operation = operationRepository.findById(operationRefId)
+                .orElseThrow(() -> new NoSuchElementException("Operation not found: " + operationRefId));
+        if (!task.projectId().equals(operation.getProjectId())) throw denied("Operation belongs to another Project");
+        return operation;
+    }
+
+    public ApiSpecEntity requireProjectApiSpec(AgentTaskRecord task, String apiSpecRefId) {
+        ApiSpecEntity spec = specRepository.findById(apiSpecRefId)
+                .orElseThrow(() -> new NoSuchElementException("API Spec not found: " + apiSpecRefId));
+        if (!task.projectId().equals(spec.getProjectId())) throw denied("API Spec belongs to another Project");
+        return spec;
+    }
+
+    public ApiOperationEntity requireProjectOperation(AgentTaskRecord task, String operationRefId) {
+        ApiOperationEntity operation = operationRepository.findById(operationRefId)
+                .orElseThrow(() -> new NoSuchElementException("Operation not found: " + operationRefId));
         if (!task.projectId().equals(operation.getProjectId())) throw denied("Operation belongs to another Project");
         return operation;
     }

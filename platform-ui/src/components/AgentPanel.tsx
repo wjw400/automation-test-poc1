@@ -124,7 +124,6 @@ export function AgentPanel({
   const tasksQuery = useQuery({
     queryKey: ['agent-tasks', projectId],
     queryFn: () => platformApi.listAgentTasks(projectId),
-    refetchInterval: 10000,
   })
   const runtimesQuery = useQuery({
     queryKey: ['agent-runtimes'],
@@ -414,7 +413,16 @@ export function AgentPanel({
     || event.eventType === 'skill.loaded'
     || event.eventType.startsWith('tool.')
   ))
-  const failedEvent = [...events].reverse().find((event) => event.eventType === 'task.failed')
+  const latestTaskEvent = [...events].reverse().find((event) => event.eventType.startsWith('task.'))
+  const failedEvent = !sendMutation.isPending
+    && selectedTask?.status === 'FAILED'
+    && latestTaskEvent?.eventType === 'task.failed'
+    ? latestTaskEvent
+    : undefined
+  const persistedAppliedDraftIds = useMemo(() => new Set(events
+    .filter((event) => event.eventType === 'decision.draft_applied_to_editor')
+    .map((event) => event.payload.draftId)
+    .filter((draftId): draftId is string => typeof draftId === 'string')), [events])
 
   return (
     <aside className="agent-panel" style={{ width: panelWidth }} aria-label={t('title')}>
@@ -610,7 +618,13 @@ export function AgentPanel({
 
         {activityEvents.length ? <AgentActivity events={activityEvents} /> : null}
         {artifactsQuery.data?.length ? (
-          <AgentArtifacts artifacts={artifactsQuery.data} onApply={applyDraft} onOpenKnowledge={onOpenKnowledge} />
+          <AgentArtifacts
+            key={selectedTaskId}
+            artifacts={artifactsQuery.data}
+            persistedAppliedDraftIds={persistedAppliedDraftIds}
+            onApply={applyDraft}
+            onOpenKnowledge={onOpenKnowledge}
+          />
         ) : null}
 
         {selectedTask?.status === 'COMPLETED' ? (
@@ -964,10 +978,12 @@ function AgentActivity({ events }: { events: AgentEventRecord[] }) {
 
 function AgentArtifacts({
   artifacts,
+  persistedAppliedDraftIds,
   onApply,
   onOpenKnowledge,
 }: {
   artifacts: AgentArtifactRecord[]
+  persistedAppliedDraftIds: ReadonlySet<string>
   onApply: (draftId: string) => Promise<boolean>
   onOpenKnowledge: (knowledgeId: string) => void
 }) {
@@ -992,9 +1008,9 @@ function AgentArtifacts({
           : []
         const citations = Array.isArray(planArtifact?.content.citations) ? planArtifact.content.citations : []
         const canApply = validation?.valid === true
-        const applied = appliedDraftIds.has(draft.targetId!)
+        const applied = appliedDraftIds.has(draft.targetId!) || persistedAppliedDraftIds.has(draft.targetId!)
         return (
-          <div key={draft.id} className="agent-artifact">
+          <div key={draft.id} className={applied ? 'agent-artifact applied' : 'agent-artifact'}>
             <div className="agent-artifact-head">
               <div>
                 <strong>{t('draft')} {drafts.length > 1 ? index + 1 : ''}</strong>
@@ -1003,26 +1019,30 @@ function AgentArtifacts({
                   {canApply ? t('valid') : t('invalid')}
                 </span>
               </div>
-              <Button
-                size="small"
-                type="primary"
-                disabled={!canApply || applied}
-                loading={applyingId === draft.targetId}
-                onClick={async () => {
-                  setApplyingId(draft.targetId!)
-                  try {
-                    if (await onApply(draft.targetId!)) {
-                      setAppliedDraftIds((current) => new Set(current).add(draft.targetId!))
+              {applied ? (
+                <span className="agent-applied-status"><CheckCircleFilled />{t('appliedShort')}</span>
+              ) : (
+                <Button
+                  size="small"
+                  type="primary"
+                  disabled={!canApply}
+                  loading={applyingId === draft.targetId}
+                  onClick={async () => {
+                    setApplyingId(draft.targetId!)
+                    try {
+                      if (await onApply(draft.targetId!)) {
+                        setAppliedDraftIds((current) => new Set(current).add(draft.targetId!))
+                      }
+                    } finally {
+                      setApplyingId(undefined)
                     }
-                  } finally {
-                    setApplyingId(undefined)
-                  }
-                }}
-              >
-                {applied ? t('appliedShort') : t('applyToEditor')}
-              </Button>
+                  }}
+                >
+                  {t('applyToEditor')}
+                </Button>
+              )}
             </div>
-            {commands.length ? (
+            {!applied && commands.length ? (
               <details open className="agent-artifact-detail agent-plan">
                 <summary>{t('plan')} ({commands.length})</summary>
                 <ol>
@@ -1034,7 +1054,7 @@ function AgentArtifacts({
                 </ol>
               </details>
             ) : null}
-            <details open className="agent-artifact-detail">
+            {!applied ? <details open className="agent-artifact-detail">
               <summary>{t('changeCount', { count: changes.length })}</summary>
               {changes.length ? (
                 <div className="agent-diff-list">
@@ -1046,8 +1066,8 @@ function AgentArtifacts({
                   ))}
                 </div>
               ) : <Text type="secondary">{t('noChanges')}</Text>}
-            </details>
-            {validation?.issues?.length ? (
+            </details> : null}
+            {!applied && validation?.issues?.length ? (
               <details className="agent-artifact-detail">
                 <summary>{t('validation')} ({validation.issues.length})</summary>
                 {validation.issues.map((issue, issueIndex) => (
@@ -1058,7 +1078,7 @@ function AgentArtifacts({
                 ))}
               </details>
             ) : null}
-            {citations.length ? (
+            {!applied && citations.length ? (
               <details className="agent-artifact-detail">
                 <summary>{t('citations')} ({citations.length})</summary>
                 <div className="agent-citation-list">

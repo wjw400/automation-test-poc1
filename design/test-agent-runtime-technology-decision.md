@@ -177,7 +177,10 @@ Test Knowledge 不能扩大 Agent 权限，不能新增 Tool，也不能覆盖�
 第一版平台内部能力优先实现为 Java Tool：
 
 - `getScenario`
-- `getOperationSchema`
+- `getApiOperationSchema`
+- `listProjectApiSpecs`
+- `searchProjectApiOperations`
+- `readApiSpecFragment`
 - `searchPublishedKnowledge`
 - `createScenarioDraft`
 - `applyScenarioCommands`

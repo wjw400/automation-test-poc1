@@ -93,7 +93,7 @@ class ScenarioCommandEngineTest {
                 new ScenarioCommand.AddExtraction("create-order", "orderId", extraction),
                 new ScenarioCommand.RenameStep("create-order", "Create order for tenant"),
                 new ScenarioCommand.SelectOperation("create-order", "op-create-v2"),
-                new ScenarioCommand.AddStep("temporary-step", "create-order", temporaryStep),
+                new ScenarioCommand.AddStep("temporary-step", "create-order", null, temporaryStep),
                 new ScenarioCommand.MoveStep("temporary-step", 0),
                 new ScenarioCommand.RemoveStep("temporary-step"));
 
@@ -176,7 +176,7 @@ class ScenarioCommandEngineTest {
                 new ScenarioCommand.RemoveAssertion("missing", 0),
                 new ScenarioCommand.AddExtraction("missing", "id", extraction),
                 new ScenarioCommand.RemoveExtraction("missing", "id"),
-                new ScenarioCommand.AddStep("new-step", "missing", step),
+                new ScenarioCommand.AddStep("new-step", "missing", null, step),
                 new ScenarioCommand.RemoveStep("missing"),
                 new ScenarioCommand.MoveStep("missing", 0),
                 new ScenarioCommand.RenameStep("missing", "Renamed"),
@@ -222,6 +222,34 @@ class ScenarioCommandEngineTest {
                     .as(commandType)
                     .isInstanceOf(ScenarioCommandException.class);
         }
+    }
+
+    @Test
+    void addsAStepDirectlyAtTheRequestedIndex() {
+        ScenarioDocument source = sourceDocument();
+        ApiStep firstStep = codec.convert(Map.of(
+                "name", "Authenticate",
+                "type", "http",
+                "operation", Map.of(
+                        "id", "op-auth",
+                        "method", "POST",
+                        "path", "/sessions"),
+                "request", Map.of(),
+                "response", Map.of("status", 200)), ApiStep.class, "step");
+        ScenarioCommandPlan plan = decoder.decode(Map.of(
+                "targetType", "SCENARIO_DRAFT",
+                "targetId", "draft-1",
+                "baseRevision", 0,
+                "commands", List.of(Map.of(
+                        "type", "AddStep",
+                        "stepId", "authenticate",
+                        "targetIndex", 0,
+                        "step", codec.toGeneric(firstStep)))));
+
+        ScenarioDocument updated = engine.apply(source, plan.commands(), ignored -> null);
+
+        assertThat(updated.stepIds()).containsExactly("authenticate", "create-order", "get-order");
+        assertThat(updated.scenario().getSteps().get(0).getName()).isEqualTo("Authenticate");
     }
 
     @Test

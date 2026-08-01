@@ -27,4 +27,34 @@ class DeepSeekAgentRuntimeTest {
                 .withThrowableOfType(ExecutionException.class)
                 .withCauseInstanceOf(AgentRuntimeException.class);
     }
+
+    @Test
+    void preservesAgentRuntimeErrorsWrappedByTheModelClient() {
+        DeepSeekAgentRuntime runtime = runtime();
+        AgentRuntimeException noProgress = new AgentRuntimeException(
+                "NO_PROGRESS", "Agent Tool calls are no longer making progress", false);
+
+        AgentRuntimeException classified = runtime.classify(
+                new RuntimeException("model callback failed", new RuntimeException("tool failed", noProgress)));
+
+        assertThat(classified).isSameAs(noProgress);
+    }
+
+    @Test
+    void classifiesProviderErrorsFromNestedCauses() {
+        DeepSeekAgentRuntime runtime = runtime();
+
+        AgentRuntimeException classified = runtime.classify(
+                new RuntimeException("stream failed", new IllegalStateException("HTTP 429 rate limit")));
+
+        assertThat(classified.getCode()).isEqualTo("MODEL_RATE_LIMITED");
+        assertThat(classified.isRetryable()).isTrue();
+    }
+
+    private DeepSeekAgentRuntime runtime() {
+        return new DeepSeekAgentRuntime(
+                new AgentProperties(),
+                new JsonCodec(tools.jackson.databind.json.JsonMapper.builder().build()),
+                new AgentContextRedactor());
+    }
 }

@@ -195,8 +195,10 @@ describe('AgentPanel', () => {
     ])
     view.unmount()
     renderPanel()
+    expect(await screen.findByText('Timed out')).toBeInTheDocument()
     await user.click(await screen.findByRole('button', { name: 'Retry' }))
     expect(platformApi.sendAgentMessage).toHaveBeenCalledWith('task-failed', 'Try this change')
+    await waitFor(() => expect(screen.queryByText('Timed out')).not.toBeInTheDocument())
   })
 
   it('shows Plan and Citation artifacts and applies a valid Draft', async () => {
@@ -215,8 +217,22 @@ describe('AgentPanel', () => {
     const applyButton = screen.getByRole('button', { name: 'Apply to editor' })
     await user.click(applyButton)
     expect(onApplyDraft).toHaveBeenCalledWith(expect.objectContaining({ id: 'draft-1' }))
-    await waitFor(() => expect(applyButton).toHaveTextContent('Applied'))
-    expect(applyButton).toBeDisabled()
+    await waitFor(() => expect(screen.getByText('Applied')).toBeInTheDocument())
+    expect(screen.queryByText('SetRequestHeader 路 X-Correlation-Id')).not.toBeInTheDocument()
+  })
+
+  it('restores an applied Draft as a compact record from Task history', async () => {
+    tasks = [task('task-artifact', 'COMPLETED', undefined, scenarioOne.id)]
+    vi.mocked(platformApi.listAgentArtifacts).mockResolvedValue(artifacts())
+    vi.mocked(platformApi.listAgentEvents).mockResolvedValue([
+      event('applied', 1, 'decision.draft_applied_to_editor', { draftId: 'draft-1' }),
+    ])
+
+    renderPanel()
+
+    expect(await screen.findByText('Applied')).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Apply to editor' })).not.toBeInTheDocument()
+    expect(screen.queryByText('SetRequestHeader 路 X-Correlation-Id')).not.toBeInTheDocument()
   })
 })
 

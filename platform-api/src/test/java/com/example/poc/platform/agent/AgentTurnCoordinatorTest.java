@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import com.example.poc.platform.agent.AgentTaskService.AgentTaskRecord;
 import com.example.poc.platform.agent.context.AgentContextSelection;
+import com.example.poc.platform.agent.context.AgentContextRedactor;
 import com.example.poc.platform.agent.AgentTaskService.StartedTurn;
 import com.example.poc.platform.agent.runtime.AgentRuntime;
 import com.example.poc.platform.agent.runtime.AgentRuntimeCapabilities;
@@ -68,7 +69,8 @@ class AgentTurnCoordinatorTest {
                 registry,
                 properties,
                 new AgentRuntimeResources(executor, scheduler),
-                capabilityService);
+                capabilityService,
+                new AgentContextRedactor());
 
         coordinator.submit("task-1", "wait");
         Thread.sleep(100);

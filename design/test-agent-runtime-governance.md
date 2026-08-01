@@ -127,8 +127,10 @@ Agent 只能通过白名单 Tool Registry 操作平台。
 
 只读工具：
 
-- `searchOperations`
-- `getOperationSchema`
+- `listProjectApiSpecs`
+- `searchProjectApiOperations`
+- `getApiOperationSchema`
+- `readApiSpecFragment`
 - `getScenario`
 - `getSuite`
 - `listScenarioSummaries`

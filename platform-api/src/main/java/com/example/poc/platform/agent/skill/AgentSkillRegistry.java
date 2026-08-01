@@ -19,6 +19,7 @@ import tools.jackson.dataformat.yaml.YAMLMapper;
 public class AgentSkillRegistry {
     private static final List<String> TRUSTED_SKILL_PATHS = List.of(
             "agent-skills/scenario-authoring/SKILL.md",
+            "agent-skills/openapi-analysis/SKILL.md",
             "agent-skills/secure-payload/SKILL.md",
             "agent-skills/failure-analysis/SKILL.md");
 
@@ -42,11 +43,19 @@ public class AgentSkillRegistry {
     public List<AgentSkill> select(AgentTaskRecord task, String userText, String scenarioText) {
         List<AgentSkill> selected = new ArrayList<>();
         if ("SCENARIO".equals(task.targetType())) addEnabled(selected, "scenario-authoring");
+        String userSearchable = userText.toLowerCase(Locale.ROOT);
         String searchable = (userText + "\n" + scenarioText).toLowerCase(Locale.ROOT);
         AgentSkill secure = skills.get("secure-payload");
         if (secure != null && secure.enabled()
                 && secure.matchTerms().stream().map(term -> term.toLowerCase(Locale.ROOT)).anyMatch(searchable::contains)) {
             selected.add(secure);
+        }
+        AgentSkill openapi = skills.get("openapi-analysis");
+        if (openapi != null && openapi.enabled()
+                && openapi.matchTerms().stream()
+                        .map(term -> term.toLowerCase(Locale.ROOT))
+                        .anyMatch(userSearchable::contains)) {
+            selected.add(openapi);
         }
         return List.copyOf(selected);
     }

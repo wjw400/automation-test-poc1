@@ -17,7 +17,7 @@ final class AgentToolCallBudget {
     private final Map<String, Integer> signatureCounts = new HashMap<>();
     private int calls;
     private int noProgressCalls;
-    private String previousOutputFingerprint;
+    private String previousOutcomeFingerprint;
 
     AgentToolCallBudget(AgentProperties properties, JsonCodec jsonCodec) {
         this.maxCalls = properties.getMaxToolCalls();
@@ -37,23 +37,28 @@ final class AgentToolCallBudget {
         if (repeated > maxRepeatedCalls) {
             throw exceeded("REPEATED_TOOL_CALL", "Agent repeated the same Tool call without progress");
         }
-        return new Invocation(calls, signature, inputFingerprint);
+        return new Invocation(calls, toolName, signature, inputFingerprint);
     }
 
     synchronized void succeeded(Invocation invocation, Map<String, Object> output, int artifactCount) {
         String outputFingerprint = fingerprint(jsonCodec.write(output == null ? Map.of() : output));
-        boolean progressed = artifactCount > 0 || !outputFingerprint.equals(previousOutputFingerprint);
-        noProgressCalls = progressed ? 0 : noProgressCalls + 1;
-        previousOutputFingerprint = outputFingerprint;
-        if (noProgressCalls >= maxNoProgressCalls) {
-            throw exceeded("NO_PROGRESS", "Agent Tool calls are no longer making progress");
-        }
+        String outcomeFingerprint = "SUCCESS:" + invocation.signature() + ":" + outputFingerprint;
+        recordOutcome(outcomeFingerprint, artifactCount > 0, "Agent Tool calls are no longer making progress");
     }
 
-    synchronized void failed() {
-        noProgressCalls++;
+    synchronized void failed(Invocation invocation, String errorCode) {
+        recordOutcome(
+                "FAILED:" + invocation.toolName() + ":" + errorCode,
+                false,
+                "Agent Tool calls repeatedly failed without progress");
+    }
+
+    private void recordOutcome(String outcomeFingerprint, boolean explicitProgress, String message) {
+        boolean repeatedOutcome = outcomeFingerprint.equals(previousOutcomeFingerprint);
+        noProgressCalls = explicitProgress || !repeatedOutcome ? 0 : noProgressCalls + 1;
+        previousOutcomeFingerprint = outcomeFingerprint;
         if (noProgressCalls >= maxNoProgressCalls) {
-            throw exceeded("NO_PROGRESS", "Agent Tool calls repeatedly failed without progress");
+            throw exceeded("NO_PROGRESS", message);
         }
     }
 
@@ -71,5 +76,5 @@ final class AgentToolCallBudget {
         }
     }
 
-    record Invocation(int sequence, String signature, String inputFingerprint) {}
+    record Invocation(int sequence, String toolName, String signature, String inputFingerprint) {}
 }

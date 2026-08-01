@@ -100,7 +100,7 @@ Step ID 不写入 Case DSL YAML。新增、移动和删除 Step 时，Draft Serv
 | `RemoveAssertion` | `stepId`, `index` |
 | `AddExtraction` | `stepId`, `name`, `extraction` |
 | `RemoveExtraction` | `stepId`, `name` |
-| `AddStep` | `step`; optional `stepId`, `afterStepId` |
+| `AddStep` | `step`; optional `stepId`; optional mutually exclusive placement using `afterStepId` or zero-based `targetIndex` |
 | `RemoveStep` | `stepId` |
 | `MoveStep` | `stepId`, `targetIndex` |
 | `RenameStep` | `stepId`, `name` |

@@ -13,6 +13,7 @@ import com.example.poc.platform.agent.capability.AgentToolRegistry;
 import com.example.poc.platform.agent.context.AgentContextBuilder;
 import com.example.poc.platform.agent.context.AgentContextReference;
 import com.example.poc.platform.agent.context.AgentContextSelection;
+import com.example.poc.platform.agent.scenario.ScenarioCommandException;
 import com.example.poc.platform.persistence.entity.ApiOperationEntity;
 import com.example.poc.platform.persistence.entity.ApiSpecEntity;
 import com.example.poc.platform.persistence.entity.CaseEntity;
@@ -123,7 +124,7 @@ class AgentCapabilityIntegrationTest {
                 .contains("scenario-authoring")
                 .contains("tool.started")
                 .contains("applyScenarioCommands")
-                .contains("getOperationSchema")
+                .contains("getApiOperationSchema")
                 .contains("searchPublishedKnowledge")
                 .contains("tool.completed");
         JsonNode commandPlan = findArtifact(artifacts, "COMMAND_PLAN").path("content");
@@ -205,14 +206,148 @@ class AgentCapabilityIntegrationTest {
                         "Scoped task", "SCENARIO", fixture.scenario().getId(),
                         "FAKE", null, "tester", 4096L, null));
         AgentTool getOperation = toolRegistry.toolsFor(task).stream()
-                .filter(tool -> "getOperationSchema".equals(tool.definition().name()))
+                .filter(tool -> "getApiOperationSchema".equals(tool.definition().name()))
                 .findFirst()
                 .orElseThrow();
 
         String unrelatedId = unrelated.getId();
-        assertThatThrownBy(() -> getOperation.execute(Map.of("operationId", unrelatedId)))
+        assertThatThrownBy(() -> getOperation.execute(Map.of("operationRefId", unrelatedId)))
                 .isInstanceOf(SecurityException.class)
                 .hasMessageContaining("not linked");
+    }
+
+    @Test
+    void readsProjectApiSpecsOnlyThroughTheSelectedOpenApiSkill() {
+        Fixture fixture = fixture("openapi-progressive-disclosure");
+        fixture.apiSpec().setContent("""
+                openapi: 3.0.3
+                info:
+                  title: Order API
+                  version: 1.0.0
+                paths:
+                  /orders:
+                    post:
+                      operationId: createOrder
+                      responses:
+                        '200':
+                          description: Created
+                components:
+                  schemas:
+                    CreateOrderRequest:
+                      type: object
+                      description: component-only-marker
+                      required: [sku]
+                      properties:
+                        sku:
+                          type: string
+                """);
+        apiSpecRepository.saveAndFlush(fixture.apiSpec());
+        ApiOperationEntity additional = operationRepository.saveAndFlush(
+                operation(fixture.project().getId(), fixture.apiSpec().getId(), "/orders/{id}"));
+        AgentTaskRecord task = taskService.create(
+                fixture.project().getId(),
+                new CreateAgentTaskRequest(
+                        "Inspect OpenAPI schema", "SCENARIO", fixture.scenario().getId(),
+                        "FAKE", null, "tester", 4096L, null));
+
+        assertThat(toolRegistry.toolsFor(task)).extracting(tool -> tool.definition().name())
+                .doesNotContain("listProjectApiSpecs", "searchProjectApiOperations", "readApiSpecFragment");
+        assertThat(contextBuilder.build(task, "default-context").toArtifact().content().toString())
+                .doesNotContain("component-only-marker");
+
+        List<AgentTool> tools = toolRegistry.toolsFor(
+                task, List.of("scenario-authoring", "openapi-analysis"));
+        assertThat(tools).extracting(tool -> tool.definition().name())
+                .contains("listProjectApiSpecs", "searchProjectApiOperations", "readApiSpecFragment");
+        AgentTool listSpecs = tool(tools, "listProjectApiSpecs");
+        assertThat(listSpecs.execute(Map.of()).output().toString())
+                .contains(fixture.apiSpec().getId())
+                .doesNotContain("component-only-marker");
+        AgentTool searchOperations = tool(tools, "searchProjectApiOperations");
+        assertThat(searchOperations.execute(Map.of("path", "/orders/{id}")).output().toString())
+                .contains(additional.getId())
+                .contains("operationRefId");
+        AgentTool getOperation = tool(tools, "getApiOperationSchema");
+        assertThat(getOperation.execute(Map.of("operationRefId", additional.getId())).output().toString())
+                .contains(additional.getId())
+                .contains("dslOperation")
+                .contains("apiSpecId");
+        AgentTool readFragment = tool(tools, "readApiSpecFragment");
+        assertThat(readFragment.execute(Map.of(
+                        "apiSpecRefId", fixture.apiSpec().getId(),
+                        "pointer", "/components/schemas/CreateOrderRequest")).output().toString())
+                .contains("component-only-marker")
+                .contains("/components/schemas/CreateOrderRequest");
+        assertThatThrownBy(() -> readFragment.execute(Map.of(
+                        "apiSpecRefId", fixture.apiSpec().getId(), "pointer", "/")))
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessageContaining("specific API Spec fragment");
+
+        ProjectEntity otherProject = new ProjectEntity();
+        otherProject.setCode("other-spec-" + UUID.randomUUID());
+        otherProject.setName("Other Spec Project");
+        otherProject.setStatus("ACTIVE");
+        otherProject = projectRepository.saveAndFlush(otherProject);
+        ApiSpecEntity otherSpec = new ApiSpecEntity();
+        otherSpec.setProjectId(otherProject.getId());
+        otherSpec.setName("private.yaml");
+        otherSpec.setTitle("Private");
+        otherSpec.setSpecVersion("3.0.3");
+        otherSpec.setSourceFormat("yaml");
+        otherSpec.setContent("openapi: 3.0.3");
+        otherSpec = apiSpecRepository.saveAndFlush(otherSpec);
+        String otherSpecId = otherSpec.getId();
+        assertThatThrownBy(() -> readFragment.execute(Map.of(
+                        "apiSpecRefId", otherSpecId, "pointer", "/openapi")))
+                .isInstanceOf(SecurityException.class)
+                .hasMessageContaining("another Project");
+    }
+
+    @Test
+    void rejectsApiSpecReferencesAsKnowledgeCitationsWithARecoverableError() throws Exception {
+        Fixture fixture = fixture("api-spec-citation");
+        AgentTaskRecord task = taskService.create(
+                fixture.project().getId(),
+                new CreateAgentTaskRequest(
+                        "Add an operation", "SCENARIO", fixture.scenario().getId(),
+                        "FAKE", null, "tester", 4096L, null));
+        List<AgentTool> tools = toolRegistry.toolsFor(
+                task, List.of("scenario-authoring", "openapi-analysis"));
+        AgentTool createDraft = tool(tools, "createScenarioDraft");
+        Map<?, ?> draft = (Map<?, ?>) createDraft.execute(Map.of()).output().get("draft");
+        String draftId = String.valueOf(draft.get("id"));
+        AgentTool applyCommands = tool(tools, "applyScenarioCommands");
+        JsonNode applySchema = objectMapper.readTree(applyCommands.definition().inputSchema());
+        Map<String, Object> commandPlan = Map.of(
+                "targetType", "SCENARIO_DRAFT",
+                "targetId", draftId,
+                "baseRevision", 0,
+                "commands", List.of(Map.of(
+                        "type", "RenameStep",
+                        "stepId", "unused",
+                        "name", "unused")),
+                "citations", List.of(Map.of(
+                        "knowledgeId", "mock-service-openapi.yaml",
+                        "scope", "API_SPEC")));
+
+        assertThat(applyCommands.definition().inputSchema())
+                .contains("Each knowledgeId must be copied exactly from searchPublishedKnowledge")
+                .contains("Never put an API Spec name")
+                .contains("AddStep inserts directly at this index")
+                .contains("MoveStep moves an existing Step to this index")
+                .contains("\"additionalProperties\":false");
+        assertThat(applySchema.path("properties").path("commandPlan").path("properties")
+                .path("commands").path("items").path("properties").has("targetIndex")).isTrue();
+        assertThat(applySchema.path("properties").path("commandPlan").path("properties")
+                .path("commands").path("items").path("additionalProperties").asBoolean()).isFalse();
+        assertThatThrownBy(() -> applyCommands.execute(Map.of(
+                        "draftId", draftId,
+                        "commandPlan", commandPlan)))
+                .isInstanceOfSatisfying(ScenarioCommandException.class, error -> {
+                    assertThat(error.getCode()).isEqualTo("INVALID_KNOWLEDGE_CITATION");
+                    assertThat(error.getPath()).isEqualTo("plan.citations[0].knowledgeId");
+                })
+                .hasMessageContaining("API Spec names and references are not Knowledge citations");
     }
 
     @Test
@@ -247,10 +382,17 @@ class AgentCapabilityIntegrationTest {
                 .noneMatch(item -> "TEST_KNOWLEDGE".equals(item.type())
                         && excludedKnowledge.getId().equals(item.content().get("knowledgeId")));
         assertThat(toolRegistry.toolsFor(task).stream()
-                .filter(tool -> "getOperationSchema".equals(tool.definition().name()))
+                .filter(tool -> "getApiOperationSchema".equals(tool.definition().name()))
                 .findFirst().orElseThrow()
-                .execute(Map.of("operationId", additional.getId())).output().toString())
+                .execute(Map.of("operationRefId", additional.getId())).output().toString())
                 .contains(additional.getId());
+    }
+
+    private AgentTool tool(List<AgentTool> tools, String name) {
+        return tools.stream()
+                .filter(candidate -> name.equals(candidate.definition().name()))
+                .findFirst()
+                .orElseThrow();
     }
 
     private Fixture fixture(String suffix) {

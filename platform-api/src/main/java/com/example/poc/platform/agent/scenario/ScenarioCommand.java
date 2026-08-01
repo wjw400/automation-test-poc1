@@ -36,7 +36,7 @@ public sealed interface ScenarioCommand permits
     record RemoveAssertion(String stepId, int index) implements ScenarioCommand {}
     record AddExtraction(String stepId, String name, ExtractValueSpec extraction) implements ScenarioCommand {}
     record RemoveExtraction(String stepId, String name) implements ScenarioCommand {}
-    record AddStep(String stepId, String afterStepId, ApiStep step) implements ScenarioCommand {}
+    record AddStep(String stepId, String afterStepId, Integer targetIndex, ApiStep step) implements ScenarioCommand {}
     record RemoveStep(String stepId) implements ScenarioCommand {}
     record MoveStep(String stepId, int targetIndex) implements ScenarioCommand {}
     record RenameStep(String stepId, String name) implements ScenarioCommand {}

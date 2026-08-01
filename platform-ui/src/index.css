@@ -1028,6 +1028,10 @@ body {
   border-radius: 6px;
 }
 
+.agent-artifact.applied {
+  padding-block: 8px;
+}
+
 .agent-artifact-head {
   justify-content: space-between;
   gap: 10px;
@@ -1057,6 +1061,13 @@ body {
 
 .agent-artifact-head span.invalid {
   color: #b45309;
+}
+
+.agent-artifact-head .agent-applied-status {
+  flex: 0 0 auto;
+  color: #15803d;
+  font-size: 11px;
+  font-weight: 600;
 }
 
 .agent-artifact-detail {

@@ -113,8 +113,10 @@ flowchart LR
 
 允许的只读工具示例：
 
-- `searchOperations`
-- `getOperationSchema`
+- `listProjectApiSpecs`
+- `searchProjectApiOperations`
+- `getApiOperationSchema`
+- `readApiSpecFragment`
 - `listScenarioSummaries`
 - `getScenarioVersion`
 - `getRedactedExecutionEvidence`

@@ -180,12 +180,12 @@ export function WorkbenchPage({
   const runsQuery = useQuery({
     queryKey: ['runs'],
     queryFn: platformApi.listRuns,
-    refetchInterval: 15000,
+    refetchInterval: (query) => query.state.data?.some((run) => run.status === 'RUNNING') ? 3000 : false,
   })
   const suiteRunsQuery = useQuery({
     queryKey: ['suite-runs'],
     queryFn: platformApi.listSuiteRuns,
-    refetchInterval: 15000,
+    refetchInterval: (query) => query.state.data?.some((run) => run.status === 'RUNNING') ? 3000 : false,
   })
 
   useEffect(() => {
