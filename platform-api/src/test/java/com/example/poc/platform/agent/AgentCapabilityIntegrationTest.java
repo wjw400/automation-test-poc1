@@ -47,7 +47,7 @@ import tools.jackson.databind.ObjectMapper;
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.flyway.enabled=false",
         "agent.fake.chunk-delay=1ms",
-        "agent.turn-timeout=10s",
+        "agent.run-timeout=10s",
         "agent.deepseek.api-key="
 })
 @AutoConfigureMockMvc
@@ -127,6 +127,11 @@ class AgentCapabilityIntegrationTest {
                 .contains("getApiOperationSchema")
                 .contains("searchPublishedKnowledge")
                 .contains("tool.completed");
+        events.forEach(event -> {
+            if (event.path("eventType").asText().startsWith("tool.")) {
+                assertThat(event.path("payload").path("callSequence").isNumber()).isTrue();
+            }
+        });
         JsonNode commandPlan = findArtifact(artifacts, "COMMAND_PLAN").path("content");
         assertThat(commandPlan.path("citations").get(0).path("knowledgeId").asText())
                 .isEqualTo(published.getId());
@@ -196,7 +201,7 @@ class AgentCapabilityIntegrationTest {
     }
 
     @Test
-    void deniesOperationAccessOutsideTheTargetScenarioScope() {
+    void readsUnlinkedOperationsInTheCurrentProjectForScenarioAuthoring() {
         Fixture fixture = fixture("scope");
         ApiOperationEntity unrelated = operation(fixture.project().getId(), fixture.apiSpec().getId(), "/other");
         unrelated = operationRepository.saveAndFlush(unrelated);
@@ -210,10 +215,71 @@ class AgentCapabilityIntegrationTest {
                 .findFirst()
                 .orElseThrow();
 
-        String unrelatedId = unrelated.getId();
-        assertThatThrownBy(() -> getOperation.execute(Map.of("operationRefId", unrelatedId)))
-                .isInstanceOf(SecurityException.class)
-                .hasMessageContaining("not linked");
+        assertThat(getOperation.execute(Map.of("operationRefId", unrelated.getId())).output().toString())
+                .contains(unrelated.getId())
+                .contains("dslOperation");
+    }
+
+    @Test
+    void readOnlyScenarioTasksExposeOnlyReadTools() {
+        Fixture fixture = fixture("read-only");
+        AgentTaskRecord task = taskService.create(
+                fixture.project().getId(),
+                new CreateAgentTaskRequest(
+                        "Analyze only", "SCENARIO", fixture.scenario().getId(),
+                        "FAKE", null, "tester", 4096L, null, AgentPermissionMode.READ_ONLY));
+
+        assertThat(task.permissionMode()).isEqualTo(AgentPermissionMode.READ_ONLY);
+        assertThat(toolRegistry.toolsFor(task).stream().map(tool -> tool.definition().name()))
+                .contains("getScenario", "getApiOperationSchema", "searchProjectApiOperations")
+                .doesNotContain(
+                        "createScenarioDraft",
+                        "getStepDataSources",
+                        "applyScenarioCommands",
+                        "validateScenarioDraft",
+                        "getScenarioDraftDiff");
+    }
+
+    @Test
+    void changesPermissionModeAsAnAuditedTaskEpoch() {
+        Fixture fixture = fixture("permission-mode-change");
+        AgentTaskRecord created = taskService.create(
+                fixture.project().getId(),
+                new CreateAgentTaskRequest(
+                        "Review changes", "SCENARIO", fixture.scenario().getId(),
+                        "FAKE", null, "tester", 4096L, null, AgentPermissionMode.REVIEW_REQUIRED));
+
+        AgentTaskRecord changed = taskService.changePermissionMode(
+                created.id(), "tester", AgentPermissionMode.READ_ONLY);
+
+        assertThat(changed.permissionMode()).isEqualTo(AgentPermissionMode.READ_ONLY);
+        assertThat(changed.permissionModeRevision()).isEqualTo(2);
+        assertThat(taskService.events(changed.id(), "tester", 0)).anySatisfy(event -> {
+            assertThat(event.eventType()).isEqualTo("task.permission_mode.changed");
+            assertThat(event.payload()).containsEntry("fromPermissionMode", "REVIEW_REQUIRED")
+                    .containsEntry("permissionMode", "READ_ONLY")
+                    .containsEntry("permissionModeRevision", 2);
+        });
+    }
+
+    @Test
+    void changesModelAsAnAuditedTaskConfiguration() {
+        Fixture fixture = fixture("model-change");
+        AgentTaskRecord created = taskService.create(
+                fixture.project().getId(),
+                new CreateAgentTaskRequest(
+                        "Choose model", "SCENARIO", fixture.scenario().getId(),
+                        "FAKE", "fake-agent-v1", "tester", 4096L, null, AgentPermissionMode.REVIEW_REQUIRED));
+
+        AgentTaskRecord changed = taskService.changeModel(created.id(), "tester", "fake-agent-v2");
+
+        assertThat(changed.modelId()).isEqualTo("fake-agent-v2");
+        assertThat(taskService.events(changed.id(), "tester", 0)).anySatisfy(event -> {
+            assertThat(event.eventType()).isEqualTo("task.model.changed");
+            assertThat(event.payload()).containsEntry("fromModelId", "fake-agent-v1")
+                    .containsEntry("modelId", "fake-agent-v2")
+                    .containsEntry("runtimeType", "FAKE");
+        });
     }
 
     @Test
@@ -251,7 +317,8 @@ class AgentCapabilityIntegrationTest {
                         "FAKE", null, "tester", 4096L, null));
 
         assertThat(toolRegistry.toolsFor(task)).extracting(tool -> tool.definition().name())
-                .doesNotContain("listProjectApiSpecs", "searchProjectApiOperations", "readApiSpecFragment");
+                .contains("searchProjectApiOperations")
+                .doesNotContain("listProjectApiSpecs", "readApiSpecFragment");
         assertThat(contextBuilder.build(task, "default-context").toArtifact().content().toString())
                 .doesNotContain("component-only-marker");
 
@@ -267,6 +334,9 @@ class AgentCapabilityIntegrationTest {
         assertThat(searchOperations.execute(Map.of("path", "/orders/{id}")).output().toString())
                 .contains(additional.getId())
                 .contains("operationRefId");
+        assertThat(searchOperations.execute(Map.of("operationId", additional.getOperationId())).output().toString())
+                .contains(additional.getId())
+                .contains(additional.getOperationId());
         AgentTool getOperation = tool(tools, "getApiOperationSchema");
         assertThat(getOperation.execute(Map.of("operationRefId", additional.getId())).output().toString())
                 .contains(additional.getId())
@@ -336,10 +406,13 @@ class AgentCapabilityIntegrationTest {
                 .contains("AddStep inserts directly at this index")
                 .contains("MoveStep moves an existing Step to this index")
                 .contains("\"additionalProperties\":false");
-        assertThat(applySchema.path("properties").path("commandPlan").path("properties")
-                .path("commands").path("items").path("properties").has("targetIndex")).isTrue();
-        assertThat(applySchema.path("properties").path("commandPlan").path("properties")
-                .path("commands").path("items").path("additionalProperties").asBoolean()).isFalse();
+        JsonNode addStepSchema = java.util.stream.StreamSupport.stream(applySchema.path("properties")
+                        .path("commandPlan").path("properties").path("commands").path("items").path("oneOf").spliterator(), false)
+                .filter(item -> "AddStep".equals(item.path("properties").path("type").path("const").asText()))
+                .findFirst().orElseThrow();
+        assertThat(addStepSchema.path("properties").has("targetIndex")).isTrue();
+        assertThat(addStepSchema.path("required").toString()).contains("step");
+        assertThat(addStepSchema.path("additionalProperties").asBoolean()).isFalse();
         assertThatThrownBy(() -> applyCommands.execute(Map.of(
                         "draftId", draftId,
                         "commandPlan", commandPlan)))
@@ -348,6 +421,40 @@ class AgentCapabilityIntegrationTest {
                     assertThat(error.getPath()).isEqualTo("plan.citations[0].knowledgeId");
                 })
                 .hasMessageContaining("API Spec names and references are not Knowledge citations");
+    }
+
+    @Test
+    void exposesStrictExtractionSchemaAndConcreteStepDataSources() throws Exception {
+        Fixture fixture = fixture("step-data-sources");
+        AgentTaskRecord task = taskService.create(
+                fixture.project().getId(),
+                new CreateAgentTaskRequest(
+                        "Extract order id", "SCENARIO", fixture.scenario().getId(),
+                        "FAKE", null, "tester", 4096L, null));
+        List<AgentTool> tools = toolRegistry.toolsFor(task, List.of("scenario-authoring"));
+        AgentTool createDraft = tool(tools, "createScenarioDraft");
+        Map<?, ?> draft = (Map<?, ?>) createDraft.execute(Map.of()).output().get("draft");
+        @SuppressWarnings("unchecked")
+        List<com.example.poc.platform.agent.scenario.ScenarioDraftService.ScenarioStepReference> steps =
+                (List<com.example.poc.platform.agent.scenario.ScenarioDraftService.ScenarioStepReference>) draft.get("steps");
+
+        AgentTool dataSources = tool(tools, "getStepDataSources");
+        Map<String, Object> output = dataSources.execute(Map.of(
+                "draftId", String.valueOf(draft.get("id")),
+                "stepId", steps.get(0).id(),
+                "usage", "EXTRACTION")).output();
+        AgentTool applyCommands = tool(tools, "applyScenarioCommands");
+        JsonNode applySchema = objectMapper.readTree(applyCommands.definition().inputSchema());
+        JsonNode extractionSchema = applySchema.path("$defs").path("extraction");
+
+        List<String> sourceNames = ((List<?>) output.get("sources")).stream()
+                .map(source -> String.valueOf(((Map<?, ?>) source).get("name"))).toList();
+        assertThat(sourceNames).contains("response.body", "business.response.body", "wire.response.body").doesNotContain("raw");
+        assertThat(extractionSchema.path("required").toString()).contains("source").contains("path");
+        assertThat(extractionSchema.path("properties").path("source").toString())
+                .contains("response.body")
+                .contains("decrypted");
+        assertThat(extractionSchema.path("additionalProperties").asBoolean()).isFalse();
     }
 
     @Test
@@ -486,7 +593,9 @@ class AgentCapabilityIntegrationTest {
                       beforeSend: []
                       afterReceive: []
                     response:
-                      status: 200
+                      status:
+                        operator: oneOf
+                        expected: [200]
                       assertions: []
                       extract: {}
                 """.formatted(operation.getId(), operation.getApiSpecId(), operation.getOperationId());

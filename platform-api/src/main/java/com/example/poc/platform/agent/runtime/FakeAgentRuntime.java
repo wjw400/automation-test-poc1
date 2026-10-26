@@ -38,7 +38,8 @@ public class FakeAgentRuntime implements AgentRuntime {
 
     @Override
     public AgentRuntimeCapabilities capabilities() {
-        return new AgentRuntimeCapabilities(true, true, true, false, "fake-agent-v1");
+        return new AgentRuntimeCapabilities(
+                true, true, true, false, "fake-agent-v1", List.of("fake-agent-v1", "fake-agent-v2"));
     }
 
     @Override
@@ -114,6 +115,12 @@ public class FakeAgentRuntime implements AgentRuntime {
         String draftId = String.valueOf(draft.get("id"));
         long revision = ((Number) draft.get("revision")).longValue();
         String stepId = steps.get(0).id();
+        invoke(
+                request,
+                "getStepDataSources",
+                Map.of("draftId", draftId, "stepId", stepId, "usage", "EXTRACTION"),
+                eventSink,
+                budget);
         List<Map<String, Object>> commands = List.of(
                 Map.of(
                         "type", "SetRequestHeader",
@@ -124,7 +131,7 @@ public class FakeAgentRuntime implements AgentRuntime {
                         "type", "AddExtraction",
                         "stepId", stepId,
                         "name", "orderId",
-                        "extraction", Map.of("source", "raw", "path", "$.orderId")));
+                        "extraction", Map.of("source", "response.body", "path", "$.orderId")));
         Map<String, Object> plan = new LinkedHashMap<>();
         plan.put("targetType", "SCENARIO_DRAFT");
         plan.put("targetId", draftId);
@@ -264,6 +271,7 @@ public class FakeAgentRuntime implements AgentRuntime {
             result.artifacts().forEach(artifact -> eventSink.accept(AgentRuntimeEvent.artifact(artifact)));
             eventSink.accept(new AgentRuntimeEvent("tool.completed", Map.of(
                     "toolName", name,
+                    "callSequence", permit.sequence(),
                     "artifactCount", result.artifacts().size())));
             return result;
         } catch (RuntimeException exception) {
@@ -274,6 +282,7 @@ public class FakeAgentRuntime implements AgentRuntime {
             }
             eventSink.accept(new AgentRuntimeEvent("tool.failed", Map.of(
                     "toolName", name,
+                    "callSequence", permit.sequence(),
                     "code", exception instanceof SecurityException ? "TOOL_PERMISSION_DENIED" : "TOOL_EXECUTION_FAILED")));
             throw exception;
         }

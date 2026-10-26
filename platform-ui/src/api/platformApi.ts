@@ -5,6 +5,7 @@ import type {
   AgentEventRecord,
   AgentMessageRecord,
   AgentRuntimeDescriptor,
+  AgentPermissionMode,
   AgentTaskRecord,
   ApiSpecContractRecord,
   ApiSpecRecord,
@@ -15,6 +16,7 @@ import type {
   PipelineCatalogRecord,
   Profile,
   Project,
+  PublishScenarioDraftResult,
   RunRecord,
   ResourceReferenceRecord,
   SaveCaseInput,
@@ -278,6 +280,21 @@ export const platformApi = {
     return data
   },
 
+  async getOperationProcessing(projectId: string, operationId: string) {
+    const { data } = await apiClient.get<import('../types/platform').OperationProcessingSettings>(`/projects/${projectId}/operations/${operationId}/processing`)
+    return data
+  },
+
+  async saveOperationProcessing(projectId: string, operationId: string, revision: number, configuration: import('../types/platform').OperationProcessingConfiguration) {
+    const { data } = await apiClient.put<import('../types/platform').OperationProcessingSettings>(`/projects/${projectId}/operations/${operationId}/processing`, { revision, configuration })
+    return data
+  },
+
+  async useImportedProcessing(projectId: string, operationId: string, revision: number) {
+    const { data } = await apiClient.post<import('../types/platform').OperationProcessingSettings>(`/projects/${projectId}/operations/${operationId}/processing/use-imported`, { revision })
+    return data
+  },
+
   async getApiSpecSource(projectId: string, apiSpecId: string) {
     const { data } = await apiClient.get<string>(
       `/projects/${projectId}/api-specs/${apiSpecId}/content`,
@@ -315,6 +332,16 @@ export const platformApi = {
     return data
   },
 
+  async changeAgentTaskPermission(taskId: string, permissionMode: AgentPermissionMode) {
+    const { data } = await apiClient.patch<AgentTaskRecord>(`/agent/tasks/${taskId}/permission-mode`, { permissionMode })
+    return data
+  },
+
+  async changeAgentTaskModel(taskId: string, modelId: string) {
+    const { data } = await apiClient.patch<AgentTaskRecord>(`/agent/tasks/${taskId}/model`, { modelId })
+    return data
+  },
+
   async deleteAgentTask(taskId: string) {
     await apiClient.delete(`/agent/tasks/${taskId}`)
   },
@@ -346,6 +373,14 @@ export const platformApi = {
     return data
   },
 
+  async decideAgentContinuation(taskId: string, decision: 'CONTINUE' | 'STOP') {
+    const { data } = await apiClient.post<AgentTaskRecord>(
+      `/agent/tasks/${taskId}/continuation-decision`,
+      { decision },
+    )
+    return data
+  },
+
   async listAgentArtifacts(taskId: string) {
     const { data } = await apiClient.get<AgentArtifactRecord[]>(`/agent/tasks/${taskId}/artifacts`)
     return data
@@ -353,6 +388,17 @@ export const platformApi = {
 
   async getScenarioDraft(draftId: string) {
     const { data } = await apiClient.get<ScenarioDraftRecord>(`/scenario-drafts/${draftId}`)
+    return data
+  },
+
+  async publishScenarioDraft(
+    draftId: string,
+    input: { addToSuite: boolean, expectedSuiteRevision?: number },
+  ) {
+    const { data } = await apiClient.post<PublishScenarioDraftResult>(
+      `/scenario-drafts/${draftId}/publish`,
+      input,
+    )
     return data
   },
 

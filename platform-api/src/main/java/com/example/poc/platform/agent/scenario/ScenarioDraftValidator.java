@@ -4,7 +4,9 @@ import com.example.poc.engine.ApiStep;
 import com.example.poc.engine.ApiTestCase;
 import com.example.poc.engine.CaseActionExecutor;
 import com.example.poc.engine.CaseActionSpec;
+import com.example.poc.engine.CaseDslDataSources;
 import com.example.poc.engine.ExtractValueSpec;
+import com.example.poc.engine.HttpStatusSpec;
 import com.example.poc.engine.OperationSpec;
 import com.example.poc.engine.ValidationSpec;
 import com.example.poc.platform.agent.scenario.ScenarioValidationResult.Severity;
@@ -26,15 +28,18 @@ import org.springframework.stereotype.Component;
 public class ScenarioDraftValidator {
     private static final Pattern PATH_PARAMETER = Pattern.compile("\\{([^}/]+)}");
     private static final Pattern VARIABLE_REFERENCE = Pattern.compile("\\$\\{([^}]+)}");
+    private static final Pattern POSTMAN_VARIABLE_REFERENCE = Pattern.compile("\\{\\{[^{}]+}}");
     private static final Set<String> ASSERTION_OPERATORS = Set.of(
             "equals", "notequals", "exists", "notexists", "contains", "greaterthan", "lessthan");
 
     private final ApiOperationRepository operationRepository;
     private final ScenarioDslCodec codec;
+    private final ScenarioContractValidator contractValidator;
 
-    public ScenarioDraftValidator(ApiOperationRepository operationRepository, ScenarioDslCodec codec) {
+    public ScenarioDraftValidator(ApiOperationRepository operationRepository, ScenarioDslCodec codec, ScenarioContractValidator contractValidator) {
         this.operationRepository = operationRepository;
         this.codec = codec;
+        this.contractValidator = contractValidator;
     }
 
     public ScenarioValidationResult validate(String projectId, ScenarioDocument document) {
@@ -87,17 +92,41 @@ public class ScenarioDraftValidator {
             error(issues, "REQUEST_REQUIRED", path + "/request", "HTTP Step request is required");
         } else {
             validatePathParameters(step, path, issues);
+            validateVariableSyntax(codec.toGeneric(step.getRequest()), path + "/request", issues);
         }
         validateActions(step.getActions().getBeforeSend(), true, path + "/actions/beforeSend", issues);
         validateActions(step.getActions().getAfterReceive(), false, path + "/actions/afterReceive", issues);
+        validateActions(step.getActions().getAfterRequestProcessing(), true, path + "/actions/afterRequestProcessing", issues);
+        if (!java.util.List.of("automatic", "manual", "wire").contains(step.getProcessingMode())) error(issues, "PROCESSING_MODE_INVALID", path + "/processingMode", "Choose automatic, manual, or wire");
 
         if (step.getResponse() == null) {
             error(issues, "RESPONSE_REQUIRED", path + "/response", "HTTP Step response is required");
         } else {
-            validateAssertions(step.getResponse().getAssertions(), path + "/response/assertions", issues);
-            validateExtractions(step.getResponse().getExtract(), path + "/response/extract", issues);
+            validateStatus(step.getResponse().getStatus(), path + "/response/status", issues);
+            Set<String> responseSources = CaseDslDataSources.responseSourceNames(step);
+            validateAssertions(
+                    step.getResponse().getAssertions(), responseSources, path + "/response/assertions", issues);
+            validateExtractions(
+                    step.getResponse().getExtract(), responseSources, path + "/response/extract", issues);
         }
         validateVariableOrder(step, stepIndex, path, extractionStep, scenarioVariables, issues);
+        if (step.getOperation() != null && !blank(step.getOperation().getId())) {
+            operationRepository.findById(step.getOperation().getId())
+                    .filter(operation -> projectId.equals(operation.getProjectId()))
+                    .ifPresent(operation -> contractValidator.validate(operation, step, path, issues));
+        }
+    }
+
+    private void validateStatus(HttpStatusSpec status, String path, List<ValidationIssue> issues) {
+        if (status == null) {
+            error(issues, "RESPONSE_STATUS_REQUIRED", path, "Response status rule is required");
+            return;
+        }
+        try {
+            status.validate();
+        } catch (IllegalArgumentException exception) {
+            error(issues, "RESPONSE_STATUS_INVALID", path, exception.getMessage());
+        }
     }
 
     private void validateOperation(
@@ -191,13 +220,13 @@ public class ScenarioDraftValidator {
                     error(issues, "ACTION_TARGET_INVALID", actionPath + "/output/target", "Unsupported Before output target");
                 }
             }
-            if (CaseActionExecutor.DECRYPT_AND_VERIFY.equals(action.getType())
+            if ((CaseActionExecutor.DECRYPT_AND_VERIFY.equals(action.getType()) || CaseActionExecutor.DECRYPT.equals(action.getType()))
                     && (!"response.body".equals(action.getInput().getSource())
                     || blank(action.getOutput().getTarget())
                     || !action.getOutput().getTarget().startsWith("decrypted."))) {
                 error(issues, "DECRYPT_ACTION_INVALID", actionPath, "Decrypt Action must read response.body and output to decrypted.<name>");
             }
-            if (CaseActionExecutor.SIGN_AND_ENCRYPT.equals(action.getType())
+            if ((CaseActionExecutor.SIGN_AND_ENCRYPT.equals(action.getType()) || CaseActionExecutor.ENCRYPT.equals(action.getType()))
                     && !blank(action.getOutput().getFormat())
                     && !"text".equalsIgnoreCase(action.getOutput().getFormat())) {
                 error(issues, "ENCRYPT_ACTION_FORMAT_INVALID", actionPath + "/output/format", "PGP encrypted output format must be text");
@@ -205,12 +234,22 @@ public class ScenarioDraftValidator {
         }
     }
 
-    private void validateAssertions(List<ValidationSpec> assertions, String path, List<ValidationIssue> issues) {
+    private void validateAssertions(
+            List<ValidationSpec> assertions,
+            Set<String> availableSources,
+            String path,
+            List<ValidationIssue> issues) {
         for (int index = 0; index < assertions.size(); index++) {
             ValidationSpec assertion = assertions.get(index);
             String assertionPath = path + "/" + index;
             if (blank(assertion.getSource())) {
                 error(issues, "ASSERTION_SOURCE_REQUIRED", assertionPath + "/source", "Assertion source is required");
+            } else if (!availableSources.contains(assertion.getSource())) {
+                error(
+                        issues,
+                        "ASSERTION_SOURCE_INVALID",
+                        assertionPath + "/source",
+                        unavailableResponseSource(assertion.getSource(), availableSources));
             }
             if (blank(assertion.getPath())) {
                 error(issues, "ASSERTION_PATH_REQUIRED", assertionPath + "/path", "Assertion path is required");
@@ -222,7 +261,11 @@ public class ScenarioDraftValidator {
         }
     }
 
-    private void validateExtractions(Map<String, Object> extract, String path, List<ValidationIssue> issues) {
+    private void validateExtractions(
+            Map<String, Object> extract,
+            Set<String> availableSources,
+            String path,
+            List<ValidationIssue> issues) {
         for (Map.Entry<String, Object> entry : extract.entrySet()) {
             String extractionPath = path + "/" + pointer(entry.getKey());
             if (blank(entry.getKey())) {
@@ -233,6 +276,12 @@ public class ScenarioDraftValidator {
                 ExtractValueSpec spec = codec.convert(entry.getValue(), ExtractValueSpec.class, extractionPath);
                 if (blank(spec.getSource()) || blank(spec.getPath())) {
                     error(issues, "EXTRACTION_INVALID", extractionPath, "Extraction requires source and path");
+                } else if (!availableSources.contains(spec.getSource())) {
+                    error(
+                            issues,
+                            "EXTRACTION_SOURCE_INVALID",
+                            extractionPath + "/source",
+                            unavailableResponseSource(spec.getSource(), availableSources));
                 }
             } catch (ScenarioCommandException exception) {
                 error(issues, "EXTRACTION_INVALID", extractionPath, exception.getMessage());
@@ -288,12 +337,41 @@ public class ScenarioDraftValidator {
         }
     }
 
+    private void validateVariableSyntax(Object value, String path, List<ValidationIssue> issues) {
+        if (value instanceof String text) {
+            if (POSTMAN_VARIABLE_REFERENCE.matcher(text).find()) {
+                error(
+                        issues,
+                        "UNSUPPORTED_VARIABLE_SYNTAX",
+                        path,
+                        "Postman-style placeholders are not supported; use ${variableName} instead of {{variableName}}");
+            }
+            return;
+        }
+        if (value instanceof Map<?, ?> map) {
+            map.forEach((key, item) -> validateVariableSyntax(item, path + "/" + pointer(String.valueOf(key)), issues));
+            return;
+        }
+        if (value instanceof List<?> list) {
+            for (int index = 0; index < list.size(); index++) {
+                validateVariableSyntax(list.get(index), path + "/" + index, issues);
+            }
+        }
+    }
+
     private void error(List<ValidationIssue> issues, String code, String path, String message) {
         issues.add(new ValidationIssue(Severity.ERROR, code, path, message));
     }
 
     private void warning(List<ValidationIssue> issues, String code, String path, String message) {
         issues.add(new ValidationIssue(Severity.WARNING, code, path, message));
+    }
+
+    private String unavailableResponseSource(String source, Set<String> availableSources) {
+        String detail = CaseDslDataSources.isResponseSourceSyntax(source)
+                ? "is not produced by an enabled afterReceive Action"
+                : "is not supported by Case DSL v1";
+        return "Response source " + source + " " + detail + "; available sources: " + availableSources;
     }
 
     private boolean blank(String value) {

@@ -46,7 +46,7 @@ public class ScenarioDslCodec {
     public <T> T convert(Object value, Class<T> targetType, String path) {
         try {
             return jsonMapper.convertValue(value, targetType);
-        } catch (IllegalArgumentException exception) {
+        } catch (JacksonException | IllegalArgumentException exception) {
             throw new ScenarioCommandException(
                     "INVALID_COMMAND_FIELD",
                     "Invalid value at " + path + ": " + exception.getMessage(),

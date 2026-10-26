@@ -59,44 +59,72 @@ public class AgentTurnCoordinator {
     public AgentTaskRecord submit(String taskId, String actorId, String content) {
         AgentTaskRecord existing = taskService.get(taskId, actorId);
         if (existing.iterationCount() >= properties.getMaxTurns()) {
-            return taskService.exhaustTurnBudget(taskId);
+            return taskService.pauseForTurnBudget(taskId, content);
         }
-        AgentRuntime runtime = runtimeRegistry.require(existing.runtimeType());
+        if ("WAITING_FOR_USER".equals(existing.status())) {
+            throw new AgentTaskConflictException("TASK_WAITING_FOR_USER", "Agent Task is waiting for a continuation decision");
+        }
         String turnId = UUID.randomUUID().toString();
-        AgentTurnPreparation preparation = capabilityService.prepare(existing, turnId, content);
         StartedTurn started = taskService.beginTurn(taskId, turnId, content);
+        return startPreparedTurn(existing, started, content, false);
+    }
+
+    public AgentTaskRecord continueTask(String taskId, String actorId) {
+        AgentTaskRecord existing = taskService.get(taskId, actorId);
+        String turnId = UUID.randomUUID().toString();
+        StartedTurn started = taskService.beginContinuationTurn(taskId, turnId);
+        return startPreparedTurn(existing, started, started.runtimeRequest().latestUserText(), true);
+    }
+
+    private AgentTaskRecord startPreparedTurn(
+            AgentTaskRecord existing,
+            StartedTurn started,
+            String content,
+            boolean continuation) {
+        AgentRuntime runtime = runtimeRegistry.require(existing.runtimeType());
+        String turnId = started.runtimeRequest().turnId();
+        AgentTurnPreparation preparation = capabilityService.prepare(existing, turnId, content);
         taskService.recordTurnPreparation(
-                taskId, turnId, preparation.snapshot(), preparation.skillVersions());
+                started.runtimeRequest().taskId(), turnId, preparation.snapshot(), preparation.skillVersions());
         log.info(
-                "Agent turn prepared taskId={} turnId={} projectId={} runtime={} model={} iteration={} tokenBudget={} skills={} tools={}",
-                taskId,
+                "Agent turn prepared taskId={} turnId={} projectId={} runtime={} model={} iteration={} tokenBudget={} continuation={} skills={} tools={}",
+                started.runtimeRequest().taskId(),
                 turnId,
                 existing.projectId(),
                 existing.runtimeType(),
                 existing.modelId(),
                 started.task().iterationCount(),
                 started.task().tokenBudget(),
+                continuation,
                 preparation.skillNames(),
                 preparation.tools().stream().map(tool -> tool.definition().name()).toList());
 
         CompletableFuture<AgentTurnResult> future;
+        AtomicReference<ActiveTurn> activeReference = new AtomicReference<>();
         try {
             future = runtime.startTurn(
                     started.runtimeRequest().withCapabilities(
-                            preparation.systemContext(), preparation.skillNames(), preparation.tools()),
-                    event -> taskService.recordRuntimeEvent(taskId, turnId, event));
+                            withContinuationContext(preparation.systemContext(), continuation),
+                            preparation.skillNames(), preparation.tools()),
+                    event -> {
+                        ActiveTurn current = activeReference.get();
+                        if (current != null) current.touch();
+                        taskService.recordRuntimeEvent(started.runtimeRequest().taskId(), turnId, event);
+                    });
         } catch (Throwable error) {
             log.error(
                     "Agent runtime failed to start taskId={} turnId={} runtime={} diagnostic={}",
-                    taskId,
+                    started.runtimeRequest().taskId(),
                     turnId,
                     existing.runtimeType(),
                     safeDiagnostic(error));
-            taskService.failTurn(taskId, turnId, "RUNTIME_START_FAILED", "Agent runtime could not start", false);
+            taskService.failTurn(started.runtimeRequest().taskId(), turnId, "RUNTIME_START_FAILED", "Agent runtime could not start", false);
             throw error;
         }
 
         ActiveTurn active = new ActiveTurn(turnId, runtime, future, started.task().tokenBudget(), System.nanoTime());
+        activeReference.set(active);
+        String taskId = started.runtimeRequest().taskId();
         ActiveTurn previous = activeTurns.putIfAbsent(taskId, active);
         if (previous != null) {
             log.warn("Agent turn scheduling conflict taskId={} turnId={}", taskId, turnId);
@@ -105,9 +133,14 @@ public class AgentTurnCoordinator {
             taskService.failTurn(taskId, turnId, "COORDINATOR_CONFLICT", "Agent turn could not be scheduled", true);
             throw new AgentTaskConflictException("TASK_ALREADY_RUNNING", "Agent Task already has a running turn");
         }
-        active.timeout = resources.scheduler().schedule(
-                () -> timeout(taskId, active),
-                properties.getTurnTimeout().toMillis(),
+        active.runTimeout = resources.scheduler().schedule(
+                () -> timeout(taskId, active, StopReason.RUN_TIMEOUT),
+                properties.getRunTimeout().toMillis(),
+                TimeUnit.MILLISECONDS);
+        active.inactivityMonitor = resources.scheduler().scheduleWithFixedDelay(
+                () -> checkInactivity(taskId, active),
+                inactivityCheckIntervalMillis(),
+                inactivityCheckIntervalMillis(),
                 TimeUnit.MILLISECONDS);
         future.whenComplete((result, error) -> finish(taskId, active, result, error));
         return started.task();
@@ -132,14 +165,27 @@ public class AgentTurnCoordinator {
         return taskService.get(taskId, actorId);
     }
 
-    private void timeout(String taskId, ActiveTurn active) {
-        if (!active.stopReason.compareAndSet(null, StopReason.TIMEOUT)) return;
+    private void checkInactivity(String taskId, ActiveTurn active) {
+        if (active.inactiveMillis() < properties.getInactivityTimeout().toMillis()) return;
+        timeout(taskId, active, StopReason.INACTIVITY_TIMEOUT);
+    }
+
+    private long inactivityCheckIntervalMillis() {
+        long timeout = properties.getInactivityTimeout().toMillis();
+        return Math.max(1, Math.min(30_000, timeout / 4));
+    }
+
+    private void timeout(String taskId, ActiveTurn active, StopReason reason) {
+        if (!active.stopReason.compareAndSet(null, reason)) return;
         log.warn(
-                "Agent turn timed out taskId={} turnId={} elapsedMs={} timeoutMs={}",
+                "Agent turn timed out taskId={} turnId={} reason={} elapsedMs={} inactiveMs={} runTimeoutMs={} inactivityTimeoutMs={}",
                 taskId,
                 active.turnId,
+                reason,
                 active.elapsedMillis(),
-                properties.getTurnTimeout().toMillis());
+                active.inactiveMillis(),
+                properties.getRunTimeout().toMillis(),
+                properties.getInactivityTimeout().toMillis());
         active.runtime.cancel(taskId);
         active.future.cancel(true);
         finish(taskId, active, null, new CancellationException("Agent turn timed out"));
@@ -147,7 +193,8 @@ public class AgentTurnCoordinator {
 
     private void finish(String taskId, ActiveTurn active, AgentTurnResult result, Throwable error) {
         if (!active.finished.compareAndSet(false, true)) return;
-        if (active.timeout != null) active.timeout.cancel(false);
+        if (active.runTimeout != null) active.runTimeout.cancel(false);
+        if (active.inactivityMonitor != null) active.inactivityMonitor.cancel(false);
         try {
             StopReason stopReason = active.stopReason.get();
             if (stopReason == StopReason.USER_CANCELLED) {
@@ -157,16 +204,17 @@ public class AgentTurnCoordinator {
                         active.turnId,
                         active.elapsedMillis());
                 taskService.cancelTurn(taskId, active.turnId);
-            } else if (stopReason == StopReason.TIMEOUT) {
-                taskService.failTurn(taskId, active.turnId, "TURN_TIMEOUT", "Agent turn timed out", true);
+            } else if (stopReason == StopReason.RUN_TIMEOUT) {
+                taskService.pauseTurn(taskId, active.turnId, AgentPauseReason.RUN_WINDOW_REACHED, "RUN_TIMEOUT");
+            } else if (stopReason == StopReason.INACTIVITY_TIMEOUT) {
+                taskService.pauseTurn(taskId, active.turnId, AgentPauseReason.INACTIVITY_DETECTED, "INACTIVITY_TIMEOUT");
             } else if (stopReason == StopReason.SERVICE_SHUTDOWN) {
                 log.warn(
                         "Agent turn stopped during shutdown taskId={} turnId={} elapsedMs={}",
                         taskId,
                         active.turnId,
                         active.elapsedMillis());
-                taskService.failTurn(
-                        taskId, active.turnId, "SERVICE_SHUTDOWN", "Agent turn stopped because the service is shutting down", true);
+                taskService.pauseTurn(taskId, active.turnId, AgentPauseReason.SERVICE_INTERRUPTED, "SERVICE_SHUTDOWN");
             } else if (error != null) {
                 Throwable cause = unwrap(error);
                 if (cause instanceof AgentRuntimeException runtimeError) {
@@ -179,8 +227,11 @@ public class AgentTurnCoordinator {
                             active.elapsedMillis(),
                             cause.getCause() == null ? cause.getClass().getName() : cause.getCause().getClass().getName(),
                             safeMessage(runtimeError));
-                    taskService.failTurn(
-                            taskId, active.turnId, runtimeError.getCode(), runtimeError.getMessage(), runtimeError.isRetryable());
+                    AgentPauseReason.fromRuntimeCode(runtimeError.getCode())
+                            .ifPresentOrElse(
+                                    reason -> taskService.pauseTurn(taskId, active.turnId, reason, runtimeError.getCode()),
+                                    () -> taskService.failTurn(
+                                            taskId, active.turnId, runtimeError.getCode(), runtimeError.getMessage(), runtimeError.isRetryable()));
                 } else {
                     log.error(
                             "Agent turn failed taskId={} turnId={} code={} retryable={} elapsedMs={} causeType={} message={}",
@@ -202,12 +253,11 @@ public class AgentTurnCoordinator {
                         active.elapsedMillis(),
                         result.completionTokens(),
                         active.tokenBudget);
-                taskService.failTurn(
+                taskService.pauseTurn(
                         taskId,
                         active.turnId,
-                        "TOKEN_BUDGET_EXCEEDED",
-                        "Agent response exceeded the configured token budget",
-                        false);
+                        AgentPauseReason.OUTPUT_ALLOWANCE_REACHED,
+                        "TOKEN_BUDGET_EXCEEDED");
             } else {
                 log.info(
                         "Agent turn completed taskId={} turnId={} elapsedMs={} promptTokens={} completionTokens={} artifacts={}",
@@ -237,6 +287,14 @@ public class AgentTurnCoordinator {
         return flattened.length() <= 1000 ? flattened : flattened.substring(0, 1000);
     }
 
+    private String withContinuationContext(String context, boolean continuation) {
+        if (!continuation) return context;
+        return context + "\n\nCONTINUATION CONTEXT (trusted platform instruction):\n"
+                + "Continue the user's interrupted request. Do not repeat completed side effects. "
+                + "Inspect and reuse existing Drafts and validate mutable resources before applying new commands. "
+                + "If the goal is already satisfied, summarize the result and stop.";
+    }
+
     private String safeDiagnostic(Throwable error) {
         StringBuilder diagnostic = new StringBuilder();
         Throwable current = error;
@@ -262,7 +320,7 @@ public class AgentTurnCoordinator {
         });
     }
 
-    private enum StopReason { USER_CANCELLED, TIMEOUT, SERVICE_SHUTDOWN }
+    private enum StopReason { USER_CANCELLED, RUN_TIMEOUT, INACTIVITY_TIMEOUT, SERVICE_SHUTDOWN }
 
     private static final class ActiveTurn {
         private final String turnId;
@@ -270,9 +328,11 @@ public class AgentTurnCoordinator {
         private final CompletableFuture<AgentTurnResult> future;
         private final long tokenBudget;
         private final long startedNanos;
+        private volatile long lastActivityNanos;
         private final AtomicReference<StopReason> stopReason = new AtomicReference<>();
         private final AtomicBoolean finished = new AtomicBoolean();
-        private volatile ScheduledFuture<?> timeout;
+        private volatile ScheduledFuture<?> runTimeout;
+        private volatile ScheduledFuture<?> inactivityMonitor;
 
         private ActiveTurn(
                 String turnId,
@@ -285,10 +345,19 @@ public class AgentTurnCoordinator {
             this.future = future;
             this.tokenBudget = tokenBudget;
             this.startedNanos = startedNanos;
+            this.lastActivityNanos = startedNanos;
         }
 
         private long elapsedMillis() {
             return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedNanos);
+        }
+
+        private long inactiveMillis() {
+            return TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - lastActivityNanos);
+        }
+
+        private void touch() {
+            lastActivityNanos = System.nanoTime();
         }
     }
 }

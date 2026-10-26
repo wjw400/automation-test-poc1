@@ -27,11 +27,14 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.json.JsonMapper;
 import tools.jackson.dataformat.yaml.YAMLMapper;
 
 public class ApiCaseRunner {
-    private final ObjectMapper yamlMapper = YAMLMapper.builder().build();
+    private final ObjectMapper yamlMapper = YAMLMapper.builder()
+            .enable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)
+            .build();
     private final ObjectMapper jsonMapper = JsonMapper.builder().build();
     private final HttpClient httpClient = HttpClient.newHttpClient();
     private final VariableResolver variableResolver = new VariableResolver();
@@ -75,6 +78,7 @@ public class ApiCaseRunner {
                 stepReport.setIndex(i + 1);
                 stepReport.setName(stepName(step, i));
                 stepReport.setProfile(resolveProfileName(testCase, step));
+                stepReport.setProcessingSnapshot(step.getProcessingSnapshot());
                 report.getSteps().add(stepReport);
 
                 try {
@@ -115,6 +119,7 @@ public class ApiCaseRunner {
         PreparedRequest prepared = prepareRequest(step, context);
         ActionExecutionState actionState = new ActionExecutionState();
         actionState.setRequestBody(prepared.body());
+        if (!"wire".equals(step.getProcessingMode())) stepReport.setBusinessRequest(OperationProcessingSpec.copy(prepared.body()));
 
         executeActions(
                 "beforeSend",
@@ -124,9 +129,25 @@ public class ApiCaseRunner {
                 profile,
                 stepReport);
 
+        OperationProcessingSpec processing = "manual".equals(step.getProcessingMode()) ? null : step.getProcessing();
+        if (!"wire".equals(step.getProcessingMode()) && !hasCryptoAction(step)) stepReport.setBusinessRequest(OperationProcessingSpec.copy(actionState.getRequestBody()));
+        if (processing != null && !"wire".equals(step.getProcessingMode())) {
+            executeActions("requestProcessing", OperationProcessingActions.request(processing.getRequest()), actionState, context, profile, stepReport);
+        }
+        executeActions("afterRequestProcessing", step.getActions().getAfterRequestProcessing(), actionState, context, profile, stepReport);
+
         HttpResponse<String> response = send(prepared, actionState.getRequestBody(), stepReport);
         stepReport.setResponse(toReportResponse(response));
         actionState.setResponseBody(response.body());
+
+        if (processing != null) {
+            OperationProcessingSpec.MessageRule rule = processing.responseRule(response.statusCode());
+            if ("none".equals(rule.getProtection())) {
+                actionState.getDecryptedPayloads().put("business", response.body().isBlank() ? null : jsonMapper.readValue(response.body(), Object.class));
+            } else {
+                executeActions("responseProcessing", OperationProcessingActions.response(rule), actionState, context, profile, stepReport);
+            }
+        }
 
         executeActions(
                 "afterReceive",
@@ -190,8 +211,20 @@ public class ApiCaseRunner {
             if (step.getResponse() == null) {
                 throw new IllegalArgumentException(prefix + " is missing response");
             }
+            validateStatus(step.getResponse().getStatus(), prefix);
             validateActions(step.getActions().getBeforeSend(), "beforeSend", prefix);
             validateActions(step.getActions().getAfterReceive(), "afterReceive", prefix);
+            validateActions(step.getActions().getAfterRequestProcessing(), "beforeSend", prefix);
+            if (!List.of("automatic", "manual", "wire").contains(step.getProcessingMode())) throw new IllegalArgumentException(prefix + " has invalid processingMode");
+            if (step.getProcessing() != null && !"manual".equals(step.getProcessingMode())) {
+                step.getProcessing().validate();
+                boolean requestConflict = !"wire".equals(step.getProcessingMode()) && !"none".equals(step.getProcessing().getRequest().getProtection())
+                        && java.util.stream.Stream.concat(step.getActions().getBeforeSend().stream(), step.getActions().getAfterRequestProcessing().stream()).anyMatch(this::isCryptoAction);
+                boolean responseConflict = step.getProcessing().getResponses().values().stream().anyMatch(rule -> !"none".equals(rule.getProtection()))
+                        && step.getActions().getAfterReceive().stream().anyMatch(this::isCryptoAction);
+                if (requestConflict || responseConflict) throw new IllegalArgumentException(prefix + " duplicates API PGP processing; remove manual crypto actions or select manual processing mode");
+                if (step.getProcessing().requiresProfile() && isBlank(resolveProfileName(testCase, step))) throw new IllegalArgumentException(prefix + " API processing requires a profile");
+            }
             validateAssertions(step.getResponse().getAssertions(), prefix);
             validateExtract(step.getResponse().getExtract(), prefix);
 
@@ -247,17 +280,28 @@ public class ApiCaseRunner {
                     throw new IllegalArgumentException(actionPrefix + " has unsupported Before output target " + target);
                 }
             }
-            if (CaseActionExecutor.DECRYPT_AND_VERIFY.equals(action.getType())
+            if ((CaseActionExecutor.DECRYPT_AND_VERIFY.equals(action.getType()) || CaseActionExecutor.DECRYPT.equals(action.getType()))
                     && (!"response.body".equals(action.getInput().getSource())
                     || !action.getOutput().getTarget().startsWith("decrypted."))) {
                 throw new IllegalArgumentException(
                         actionPrefix + " must read response.body and output to decrypted.<name>");
             }
-            if (CaseActionExecutor.SIGN_AND_ENCRYPT.equals(action.getType())
+            if ((CaseActionExecutor.SIGN_AND_ENCRYPT.equals(action.getType()) || CaseActionExecutor.ENCRYPT.equals(action.getType()))
                     && !isBlank(action.getOutput().getFormat())
                     && !"text".equalsIgnoreCase(action.getOutput().getFormat())) {
                 throw new IllegalArgumentException(actionPrefix + " only supports text output");
             }
+        }
+    }
+
+    private void validateStatus(HttpStatusSpec status, String prefix) {
+        if (status == null) {
+            throw new IllegalArgumentException(prefix + " is missing response.status");
+        }
+        try {
+            status.validate();
+        } catch (IllegalArgumentException exception) {
+            throw new IllegalArgumentException(prefix + " has invalid " + exception.getMessage(), exception);
         }
     }
 
@@ -287,6 +331,17 @@ public class ApiCaseRunner {
         Map<String, String> headers = new LinkedHashMap<>();
         step.getRequest().getHeaders().forEach(
                 (name, value) -> headers.put(name, variableResolver.resolveString(value, context)));
+        if (step.getProcessing() != null && "automatic".equals(step.getProcessingMode())
+                && !"none".equals(step.getProcessing().getRequest().getProtection())) {
+            boolean jsonBody = !"body".equals(step.getProcessing().getRequest().getCiphertext().getLocation());
+            String contentType = headers.entrySet().stream().filter(entry -> "Content-Type".equalsIgnoreCase(entry.getKey())).map(Map.Entry::getValue).findFirst().orElse(null);
+            if (contentType == null) headers.put("Content-Type", jsonBody ? "application/json" : "text/plain; charset=UTF-8");
+            else {
+                String media = contentType.split(";", 2)[0].trim().toLowerCase(java.util.Locale.ROOT);
+                boolean declaredJson = media.equals("application/json") || media.endsWith("+json");
+                if (jsonBody != declaredJson) throw new IllegalArgumentException("Content-Type conflicts with API ciphertext location; choose JSON for a field envelope or a text/binary media type for a whole-body PGP message");
+            }
+        }
         Object body = variableResolver.resolveObject(step.getRequest().getBody(), context);
         return new PreparedRequest(method, uri, headers, body);
     }
@@ -361,6 +416,7 @@ public class ApiCaseRunner {
             actionReport.setStage(stage);
             actionReport.setIndex(i + 1);
             actionReport.setType(action.getType());
+            actionReport.setOrigin(action.getOrigin());
             actionReport.setName(isBlank(action.getName()) ? action.getType() : action.getName());
             stepReport.getActions().add(actionReport);
 
@@ -393,9 +449,10 @@ public class ApiCaseRunner {
             ApiStepExecutionReport stepReport,
             Map<String, Object> decryptedPayloads) {
         boolean hasFailure = false;
-        int expectedStatus = step.getResponse().getStatus();
+        HttpStatusSpec status = step.getResponse().getStatus();
+        Object expectedStatus = status.reportExpected();
         int actualStatus = response.statusCode();
-        if (actualStatus == expectedStatus) {
+        if (status.matches(actualStatus)) {
             stepReport.getValidations().add(
                     ValidationReport.passed("status", "response.status", expectedStatus, actualStatus));
         } else {
@@ -405,7 +462,7 @@ public class ApiCaseRunner {
                     "response.status",
                     expectedStatus,
                     actualStatus,
-                    "Expected HTTP status " + expectedStatus + " but got " + actualStatus));
+                    "Expected HTTP status " + status.expectationDescription() + " but got " + actualStatus));
         }
 
         for (ValidationSpec assertion : step.getResponse().getAssertions()) {
@@ -457,10 +514,12 @@ public class ApiCaseRunner {
             String responseBody,
             Map<String, Object> decryptedPayloads) {
         Object value;
-        if ("response.body".equals(source)) {
+        if (CaseDslDataSources.BUSINESS_RESPONSE_BODY.equals(source)) {
+            value = decryptedPayloads.containsKey("business") ? decryptedPayloads.get("business") : responseBody;
+        } else if (CaseDslDataSources.RESPONSE_BODY.equals(source) || CaseDslDataSources.WIRE_RESPONSE_BODY.equals(source)) {
             value = responseBody;
-        } else if (source != null && source.startsWith("decrypted.")) {
-            String payloadName = source.substring("decrypted.".length());
+        } else if (source != null && source.startsWith(CaseDslDataSources.DECRYPTED_PREFIX)) {
+            String payloadName = source.substring(CaseDslDataSources.DECRYPTED_PREFIX.length());
             if (!decryptedPayloads.containsKey(payloadName)) {
                 throw new IllegalArgumentException("Unknown decrypted payload source: " + source);
             }
@@ -490,12 +549,12 @@ public class ApiCaseRunner {
             throw new IllegalArgumentException("Unknown profile: " + profileName);
         }
         CryptoProfile resolved = new CryptoProfile();
-        resolved.setSenderPublicKey(resolveProfileValue(source.getSenderPublicKey(), context));
-        resolved.setSenderPrivateKey(resolveProfileValue(source.getSenderPrivateKey(), context));
-        resolved.setSenderPrivateKeyPassphrase(resolveProfileValue(source.getSenderPrivateKeyPassphrase(), context));
-        resolved.setRecipientPublicKey(resolveProfileValue(source.getRecipientPublicKey(), context));
-        resolved.setRecipientPrivateKey(resolveProfileValue(source.getRecipientPrivateKey(), context));
-        resolved.setRecipientPrivateKeyPassphrase(resolveProfileValue(source.getRecipientPrivateKeyPassphrase(), context));
+        resolved.setVerificationPublicKey(resolveProfileValue(source.getVerificationPublicKey(), context));
+        resolved.setSigningPrivateKey(resolveProfileValue(source.getSigningPrivateKey(), context));
+        resolved.setSigningPrivateKeyPassphrase(resolveProfileValue(source.getSigningPrivateKeyPassphrase(), context));
+        resolved.setEncryptionPublicKey(resolveProfileValue(source.getEncryptionPublicKey(), context));
+        resolved.setDecryptionPrivateKey(resolveProfileValue(source.getDecryptionPrivateKey(), context));
+        resolved.setDecryptionPrivateKeyPassphrase(resolveProfileValue(source.getDecryptionPrivateKeyPassphrase(), context));
         return resolved;
     }
 
@@ -508,12 +567,12 @@ public class ApiCaseRunner {
 
     private boolean hasCryptoAction(ApiStep step) {
         return step.getActions().getBeforeSend().stream().anyMatch(this::isCryptoAction)
+                || step.getActions().getAfterRequestProcessing().stream().anyMatch(this::isCryptoAction)
                 || step.getActions().getAfterReceive().stream().anyMatch(this::isCryptoAction);
     }
 
     private boolean isCryptoAction(CaseActionSpec action) {
-        return CaseActionExecutor.SIGN_AND_ENCRYPT.equals(action.getType())
-                || CaseActionExecutor.DECRYPT_AND_VERIFY.equals(action.getType());
+        return action.isEnabled() && action.getType() != null && action.getType().startsWith("crypto.pgp.");
     }
 
     private boolean matches(String operator, Object actual, Object expected) {

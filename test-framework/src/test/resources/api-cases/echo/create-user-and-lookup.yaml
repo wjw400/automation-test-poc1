@@ -28,7 +28,9 @@ steps:
       beforeSend: []
       afterReceive: []
     response:
-      status: 200
+      status:
+        operator: oneOf
+        expected: [200]
       assertions:
         - source: response.body
           path: $.json.name
@@ -57,7 +59,9 @@ steps:
       beforeSend: []
       afterReceive: []
     response:
-      status: 200
+      status:
+        operator: oneOf
+        expected: [200]
       assertions:
         - source: response.body
           path: $.args.email

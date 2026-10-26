@@ -35,9 +35,10 @@ import tools.jackson.databind.ObjectMapper;
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.flyway.enabled=false",
         "agent.fake.chunk-delay=5ms",
-        "agent.turn-timeout=5s",
+        "agent.run-timeout=5s",
         "agent.max-turns=5",
-        "agent.deepseek.api-key="
+        "agent.deepseek.api-key=",
+        "agent.copilot.enabled=false"
 })
 @AutoConfigureMockMvc
 class AgentApiIntegrationTest {
@@ -48,6 +49,7 @@ class AgentApiIntegrationTest {
     @Autowired private AgentMessageRepository messageRepository;
     @Autowired private AgentEventRepository eventRepository;
     @Autowired private AgentArtifactRepository artifactRepository;
+    @Autowired private AgentProperties agentProperties;
 
     private String projectId;
 
@@ -129,16 +131,130 @@ class AgentApiIntegrationTest {
     }
 
     @Test
-    void failsTheTurnWhenRuntimeOutputExceedsItsTokenBudget() throws Exception {
+    void pausesTheTurnWhenRuntimeOutputExceedsItsTokenBudget() throws Exception {
         String taskId = createTask(5);
         send(taskId, "hello").andExpect(status().isAccepted());
 
-        JsonNode failed = awaitTask(taskId, task -> "FAILED".equals(task.path("status").asText()));
-        assertThat(failed.path("status").asText()).isEqualTo("FAILED");
+        JsonNode paused = awaitTask(taskId, task -> "WAITING_FOR_USER".equals(task.path("status").asText()));
+        assertThat(paused.path("status").asText()).isEqualTo("WAITING_FOR_USER");
         JsonNode events = json(get("/api/agent/tasks/{taskId}/events", taskId)
                 .accept(MediaType.APPLICATION_JSON));
-        assertThat(events.toString()).contains("TOKEN_BUDGET_EXCEEDED");
+        assertThat(eventTypes(events)).contains("task.paused");
         assertThat(json(get("/api/agent/tasks/{taskId}/messages", taskId)).size()).isEqualTo(1);
+    }
+
+    @Test
+    void letsTheUserStopAPausedTaskWithoutResendingTheOriginalMessage() throws Exception {
+        String taskId = createTask(5);
+        send(taskId, "hello").andExpect(status().isAccepted());
+        awaitTask(taskId, task -> "WAITING_FOR_USER".equals(task.path("status").asText()));
+
+        mockMvc.perform(post("/api/agent/tasks/{taskId}/continuation-decision", taskId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"decision\":\"STOP\"}"))
+                .andExpect(status().isOk());
+
+        JsonNode cancelled = awaitTask(taskId, task -> "CANCELLED".equals(task.path("status").asText()));
+        assertThat(cancelled.path("status").asText()).isEqualTo("CANCELLED");
+        assertThat(json(get("/api/agent/tasks/{taskId}/messages", taskId)).size()).isEqualTo(1);
+        JsonNode events = json(get("/api/agent/tasks/{taskId}/events", taskId)
+                .accept(MediaType.APPLICATION_JSON));
+        assertThat(eventTypes(events)).contains("continuation.declined", "task.cancelled");
+    }
+
+    @Test
+    void continuesFromTheExistingConversationWithoutAddingAnotherUserMessage() throws Exception {
+        String taskId = createTask(5);
+        send(taskId, "hello").andExpect(status().isAccepted());
+        awaitTask(taskId, task -> "WAITING_FOR_USER".equals(task.path("status").asText()));
+
+        mockMvc.perform(post("/api/agent/tasks/{taskId}/continuation-decision", taskId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"decision\":\"CONTINUE\"}"))
+                .andExpect(status().isAccepted());
+
+        JsonNode pausedAgain = awaitTask(taskId, task -> "WAITING_FOR_USER".equals(task.path("status").asText())
+                && task.path("iterationCount").asInt() == 2);
+        assertThat(pausedAgain.path("status").asText()).isEqualTo("WAITING_FOR_USER");
+        assertThat(json(get("/api/agent/tasks/{taskId}/messages", taskId)).size()).isEqualTo(1);
+        JsonNode events = json(get("/api/agent/tasks/{taskId}/events", taskId)
+                .accept(MediaType.APPLICATION_JSON));
+        assertThat(eventTypes(events)).contains("continuation.started");
+    }
+
+    @Test
+    void letsTheUserContinueBeyondThePreviousHardLimit() throws Exception {
+        String taskId = createTask(5);
+        send(taskId, "request requiring several continuations").andExpect(status().isAccepted());
+        awaitTask(taskId, task -> "WAITING_FOR_USER".equals(task.path("status").asText()));
+
+        for (int iteration = 2; iteration <= 6; iteration++) {
+            mockMvc.perform(post("/api/agent/tasks/{taskId}/continuation-decision", taskId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"decision\":\"CONTINUE\"}"))
+                    .andExpect(status().isAccepted());
+            int expectedIteration = iteration;
+            awaitTask(taskId, task -> "WAITING_FOR_USER".equals(task.path("status").asText())
+                    && task.path("iterationCount").asInt() == expectedIteration);
+        }
+
+        JsonNode events = json(get("/api/agent/tasks/{taskId}/events", taskId)
+                .accept(MediaType.APPLICATION_JSON));
+        long continuations = java.util.stream.StreamSupport.stream(events.spliterator(), false)
+                .filter(event -> "continuation.started".equals(event.path("eventType").asText()))
+                .count();
+        assertThat(continuations).isEqualTo(5);
+    }
+
+    @Test
+    void createsCopilotTasksWithConfiguredModelWithoutCallingTheProvider() throws Exception {
+        var config = agentProperties.getCopilot();
+        String originalModel = config.getModel();
+        String originalToken = config.getApiToken();
+        List<String> originalModels = config.getModels();
+        try {
+            config.setEnabled(true);
+            config.setModel("copilot-test-model");
+            config.setModels(List.of("copilot-second-model"));
+            config.setApiToken("copilot-test-secret");
+            JsonNode task = json(post("/api/projects/{projectId}/agent/tasks", projectId)
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content("{\"title\":\"Copilot task\",\"runtimeType\":\"COPILOT\"}"));
+            assertThat(task.path("runtimeType").asText()).isEqualTo("COPILOT");
+            assertThat(task.path("modelId").asText()).isEqualTo("copilot-test-model");
+            assertThat(task.path("status").asText()).isEqualTo("READY");
+            assertThat(task.toString()).doesNotContain("copilot-test-secret");
+            assertThat(json(get("/api/agent/runtimes")).toString()).doesNotContain("copilot-test-secret");
+            assertThat(taskRepository.findById(task.path("id").asText()).orElseThrow().getContextJson())
+                    .doesNotContain("copilot-test-secret");
+            mockMvc.perform(post("/api/projects/{projectId}/agent/tasks", projectId)
+                            .contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"runtimeType\":\"COPILOT\",\"modelId\":\"not-allowed\"}"))
+                    .andExpect(status().isBadRequest());
+        } finally {
+            config.setEnabled(false);
+            config.setModel(originalModel);
+            config.setModels(originalModels);
+            config.setApiToken(originalToken);
+        }
+    }
+
+    @Test
+    void reportsCopilotAsUnavailableUntilEnabled() throws Exception {
+        JsonNode runtimes = json(get("/api/agent/runtimes"));
+        JsonNode copilot = null;
+        for (JsonNode runtime : runtimes) {
+            if ("COPILOT".equals(runtime.path("type").asText())) copilot = runtime;
+        }
+        assertThat(copilot).isNotNull();
+        assertThat(copilot.path("capabilities").path("available").asBoolean()).isFalse();
+        assertThat(copilot.path("capabilities").path("toolCalling").asBoolean()).isTrue();
+        assertThat(copilot.toString()).doesNotContain("apiToken", "api-token");
+        mockMvc.perform(post("/api/projects/{projectId}/agent/tasks", projectId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"Copilot task\",\"runtimeType\":\"COPILOT\"}"))
+                .andExpect(status().isServiceUnavailable());
+        assertThat(taskRepository.count()).isZero();
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.example.poc.platform.web;
 
 import com.example.poc.platform.agent.AgentEventStreamService;
 import com.example.poc.platform.agent.AgentAuditService;
+import com.example.poc.platform.agent.AgentPermissionMode;
 import com.example.poc.platform.agent.AgentAuditService.AgentAuditRecord;
 import com.example.poc.platform.agent.AgentAuditService.AgentAuditSummary;
 import com.example.poc.platform.agent.AgentRequestIdentity;
@@ -19,6 +20,7 @@ import com.example.poc.platform.agent.skill.AgentSkill;
 import com.example.poc.platform.agent.skill.AgentSkillRegistry;
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.NotNull;
 import java.util.List;
 import java.util.Map;
 import org.springframework.http.MediaType;
@@ -107,6 +109,25 @@ public class AgentController {
         return taskService.rename(taskId, requestIdentity.resolve(actorHeader), request.title());
     }
 
+    @PatchMapping("/agent/tasks/{taskId}/permission-mode")
+    public AgentTaskRecord changePermissionMode(
+            @PathVariable("taskId") String taskId,
+            @RequestHeader(name = AgentRequestIdentity.HEADER_NAME, required = false) String actorHeader,
+            @Valid @RequestBody ChangeAgentPermissionModeRequest request) {
+        return taskService.changePermissionMode(
+                taskId,
+                requestIdentity.resolve(actorHeader),
+                request.permissionMode());
+    }
+
+    @PatchMapping("/agent/tasks/{taskId}/model")
+    public AgentTaskRecord changeModel(
+            @PathVariable("taskId") String taskId,
+            @RequestHeader(name = AgentRequestIdentity.HEADER_NAME, required = false) String actorHeader,
+            @Valid @RequestBody ChangeAgentModelRequest request) {
+        return taskService.changeModel(taskId, requestIdentity.resolve(actorHeader), request.modelId());
+    }
+
     @DeleteMapping("/agent/tasks/{taskId}")
     public ResponseEntity<Void> delete(
             @PathVariable("taskId") String taskId,
@@ -159,6 +180,21 @@ public class AgentController {
         return turnCoordinator.cancel(taskId, requestIdentity.resolve(actorHeader));
     }
 
+    @PostMapping("/agent/tasks/{taskId}/continuation-decision")
+    public ResponseEntity<AgentTaskRecord> continuationDecision(
+            @PathVariable("taskId") String taskId,
+            @RequestHeader(name = AgentRequestIdentity.HEADER_NAME, required = false) String actorHeader,
+            @Valid @RequestBody ContinuationDecisionRequest request) {
+        String actorId = requestIdentity.resolve(actorHeader);
+        if ("CONTINUE".equalsIgnoreCase(request.decision())) {
+            return ResponseEntity.accepted().body(turnCoordinator.continueTask(taskId, actorId));
+        }
+        if ("STOP".equalsIgnoreCase(request.decision())) {
+            return ResponseEntity.ok(taskService.declineContinuation(taskId, actorId));
+        }
+        throw new IllegalArgumentException("Unsupported continuation decision: " + request.decision());
+    }
+
     @GetMapping("/agent/tasks/{taskId}/artifacts")
     public List<AgentArtifactRecord> artifacts(
             @PathVariable("taskId") String taskId,
@@ -203,9 +239,15 @@ public class AgentController {
 
     public record RenameAgentTaskRequest(@NotBlank String title) {}
 
+    public record ChangeAgentPermissionModeRequest(@NotNull AgentPermissionMode permissionMode) {}
+
+    public record ChangeAgentModelRequest(@NotBlank String modelId) {}
+
     public record AgentDecisionRequest(
             @NotBlank String decision,
             Map<String, Object> details) {}
+
+    public record ContinuationDecisionRequest(@NotBlank String decision) {}
 
     public record AgentSkillDescriptor(
             String name, String description, String version, String riskLevel,

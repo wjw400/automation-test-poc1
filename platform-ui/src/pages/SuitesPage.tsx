@@ -5,6 +5,7 @@ import {
   DeleteOutlined,
   PlayCircleOutlined,
   PlusOutlined,
+  RobotOutlined,
   SaveOutlined,
 } from '@ant-design/icons'
 import {
@@ -22,7 +23,7 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { platformApi } from '../api/platformApi'
@@ -34,6 +35,7 @@ import type {
   CaseRecord,
   SaveSuiteCaseInput,
   SaveSuiteInput,
+  SuiteDraftRecord,
   SuiteRecord,
 } from '../types/platform'
 
@@ -62,6 +64,11 @@ type SuitesPageProps = {
   onTitleChange?: (title: string) => void
   onSaveReady?: (save?: () => Promise<void>) => void
   onDeleted?: () => void
+  agentOpen?: boolean
+  onAgentToggle?: () => void
+  agentPane?: ReactNode
+  agentDraft?: SuiteDraftRecord
+  onAgentDraftApplied?: (suiteId: string) => void
 }
 
 export function SuitesPage({
@@ -72,8 +79,13 @@ export function SuitesPage({
   onTitleChange,
   onSaveReady,
   onDeleted,
+  agentOpen = false,
+  onAgentToggle,
+  agentPane,
+  agentDraft,
+  onAgentDraftApplied,
 }: SuitesPageProps = {}) {
-  const { t } = useTranslation(['common', 'suite'])
+  const { t } = useTranslation(['common', 'suite', 'agent'])
   const { message, modal } = App.useApp()
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -148,6 +160,27 @@ export function SuitesPage({
       setDraft(toDraft(selectedSuite))
     }
   }, [isCreating, selectedSuite])
+
+  useEffect(() => {
+    if (!agentDraft || agentDraft.suiteId !== selectedSuite?.id) return
+    setDraft({
+      name: agentDraft.document.name,
+      description: agentDraft.document.description,
+      status: agentDraft.document.status,
+      cases: renumberSuiteCases(agentDraft.document.entries.map((entry) => ({
+        id: entry.id,
+        caseId: entry.scenarioId,
+        displayName: entry.displayName ?? '',
+        order: 0,
+        enabled: entry.enabled,
+        variableOverrides: entry.variableOverrides ?? {},
+        environmentId: entry.environmentId ?? undefined,
+        profileId: entry.profileId ?? undefined,
+        clientKey: entry.id,
+      }))),
+    })
+    onAgentDraftApplied?.(agentDraft.suiteId)
+  }, [agentDraft, onAgentDraftApplied, selectedSuite?.id])
 
   useEffect(() => {
     setActiveAssetView('cases')
@@ -591,10 +624,10 @@ export function SuitesPage({
           </div>
         </section>}
 
-        <section className="suite-editor-column">
+        <section className={embedded ? 'suite-editor-column embedded' : 'suite-editor-column'}>
           {canEdit ? (
             <>
-              <section className="panel-section">
+              <section className={embedded ? 'panel-section suite-tab-header' : 'panel-section'}>
                 <div className="suite-editor-head">
                   <div className="suite-title-field">
                     <Text className="designer-label">{t('suite:suiteName')}</Text>
@@ -625,6 +658,18 @@ export function SuitesPage({
                     >
                       {t('common:actions.save')}
                     </Button>
+                    {embedded ? (
+                      <Button
+                        className={agentOpen ? 'asset-agent-button active' : 'asset-agent-button'}
+                        icon={<RobotOutlined />}
+                        disabled={isCreating || !selectedSuite}
+                        aria-label={t('agent:openSuiteAgent')}
+                        title={t('agent:openSuiteAgent')}
+                        onClick={onAgentToggle}
+                      >
+                        {t('agent:shortTitle')}
+                      </Button>
+                    ) : null}
                     <Button
                       type="primary"
                       icon={<PlayCircleOutlined />}
@@ -661,25 +706,27 @@ export function SuitesPage({
                 ) : null}
               </section>
 
-              <nav className="asset-context-tabs" aria-label={t('suite:sections')}>
-                <button
-                  type="button"
-                  className={activeAssetView === 'cases' ? 'active' : ''}
-                  onClick={() => setActiveAssetView('cases')}
-                >
-                  {t('suite:cases')}
-                </button>
-                <button
-                  type="button"
-                  className={activeAssetView === 'runs' ? 'active' : ''}
-                  onClick={() => setActiveAssetView('runs')}
-                >
-                  {t('suite:executions')} <span>{selectedSuiteRuns.length}</span>
-                </button>
-              </nav>
+              <div className={agentPane ? 'asset-tab-workspace agent-visible' : 'asset-tab-workspace'}>
+                <div className="asset-tab-editor-pane suite-editor-pane">
+                  <nav className="asset-context-tabs" aria-label={t('suite:sections')}>
+                    <button
+                      type="button"
+                      className={activeAssetView === 'cases' ? 'active' : ''}
+                      onClick={() => setActiveAssetView('cases')}
+                    >
+                      {t('suite:cases')}
+                    </button>
+                    <button
+                      type="button"
+                      className={activeAssetView === 'runs' ? 'active' : ''}
+                      onClick={() => setActiveAssetView('runs')}
+                    >
+                      {t('suite:executions')} <span>{selectedSuiteRuns.length}</span>
+                    </button>
+                  </nav>
 
-              {activeAssetView === 'cases' ? (
-                <section className="panel-section">
+                  {activeAssetView === 'cases' ? (
+                    <section className="panel-section">
                   <div className="suite-description-field">
                     <Text className="designer-label">{t('common:fields.description')}</Text>
                     <Input.TextArea
@@ -727,27 +774,30 @@ export function SuitesPage({
                       emptyText: t('suite:emptyCases'),
                     }}
                   />
-                </section>
-              ) : (
-                <section className="suite-context-runs">
-                  {selectedSuiteRuns.length ? (
-                    <main className="suite-context-run-detail">
-                      <SuiteExecutionWorkspace
-                        run={selectedSuiteRun}
-                        executions={selectedSuiteRuns}
-                        onSelectExecution={setSelectedSuiteRunId}
-                        selectedRunId={selectedChildRunId}
-                        onSelectRun={setSelectedChildRunId}
-                      />
-                    </main>
+                    </section>
                   ) : (
-                    <div className="context-runs-empty">
-                      <Text strong>{t('suite:noExecutions')}</Text>
-                      <Text type="secondary">{t('suite:noExecutionsDescription')}</Text>
-                    </div>
+                    <section className="suite-context-runs">
+                      {selectedSuiteRuns.length ? (
+                        <main className="suite-context-run-detail">
+                          <SuiteExecutionWorkspace
+                            run={selectedSuiteRun}
+                            executions={selectedSuiteRuns}
+                            onSelectExecution={setSelectedSuiteRunId}
+                            selectedRunId={selectedChildRunId}
+                            onSelectRun={setSelectedChildRunId}
+                          />
+                        </main>
+                      ) : (
+                        <div className="context-runs-empty">
+                          <Text strong>{t('suite:noExecutions')}</Text>
+                          <Text type="secondary">{t('suite:noExecutionsDescription')}</Text>
+                        </div>
+                      )}
+                    </section>
                   )}
-                </section>
-              )}
+                </div>
+                {agentPane}
+              </div>
             </>
           ) : (
             <section className="panel-section">

@@ -38,7 +38,7 @@ class AgentTurnCoordinatorTest {
     }
 
     @Test
-    void cancelsTheRuntimeAndPersistsTimeoutFailure() throws Exception {
+    void cancelsTheRuntimeAndPausesForUserContinuation() throws Exception {
         AgentTaskService taskService = mock(AgentTaskService.class);
         AgentRuntimeRegistry registry = mock(AgentRuntimeRegistry.class);
         AgentRuntime runtime = mock(AgentRuntime.class);
@@ -63,7 +63,8 @@ class AgentTurnCoordinatorTest {
         when(runtime.cancel("task-1")).thenReturn(true);
 
         AgentProperties properties = new AgentProperties();
-        properties.setTurnTimeout(Duration.ofMillis(20));
+        properties.setRunTimeout(Duration.ofMillis(20));
+        properties.setInactivityTimeout(Duration.ofSeconds(5));
         AgentTurnCoordinator coordinator = new AgentTurnCoordinator(
                 taskService,
                 registry,
@@ -76,7 +77,7 @@ class AgentTurnCoordinatorTest {
         Thread.sleep(100);
 
         verify(runtime).cancel("task-1");
-        verify(taskService).failTurn(eq("task-1"), any(), eq("TURN_TIMEOUT"), any(), eq(true));
+        verify(taskService).pauseTurn(eq("task-1"), any(), eq(AgentPauseReason.RUN_WINDOW_REACHED), eq("RUN_TIMEOUT"));
         assertThat(pending).isCancelled();
     }
 
@@ -84,7 +85,7 @@ class AgentTurnCoordinatorTest {
         Instant now = Instant.now();
         return new AgentTaskRecord(
                 "task-1", "project-1", "Task", status,
-                null, null, "DRAFT_ONLY", "FAKE", "model", "tester",
+                null, null, AgentPermissionMode.READ_ONLY, 1, "FAKE", "model", "tester",
                 1, tokenBudget, AgentContextSelection.empty(), 0, now, now, null);
     }
 }

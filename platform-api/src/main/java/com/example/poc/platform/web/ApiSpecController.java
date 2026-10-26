@@ -7,6 +7,9 @@ import com.example.poc.platform.api.ApiSpecService.ApiSpecRecord;
 import com.example.poc.platform.openapi.OpenApiContractService;
 import com.example.poc.platform.openapi.OpenApiContractService.ApiSpecContractRecord;
 import com.example.poc.platform.openapi.OpenApiContractService.OperationContractRecord;
+import com.example.poc.platform.openapi.OperationProcessingService;
+import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import java.util.List;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
@@ -25,10 +28,29 @@ import org.springframework.web.multipart.MultipartFile;
 public class ApiSpecController {
     private final ApiSpecService apiSpecService;
     private final OpenApiContractService openApiContractService;
+    private final OperationProcessingService processingService;
 
-    public ApiSpecController(ApiSpecService apiSpecService, OpenApiContractService openApiContractService) {
+    public ApiSpecController(ApiSpecService apiSpecService, OpenApiContractService openApiContractService, OperationProcessingService processingService) {
         this.apiSpecService = apiSpecService;
         this.openApiContractService = openApiContractService;
+        this.processingService = processingService;
+    }
+
+    @GetMapping("/projects/{projectId}/operations/{operationId}/processing")
+    public OperationProcessingService.Settings getProcessing(@PathVariable("projectId") String projectId, @PathVariable("operationId") String operationId) {
+        return processingService.get(projectId, operationId);
+    }
+
+    @PutMapping("/projects/{projectId}/operations/{operationId}/processing")
+    public OperationProcessingService.Settings saveProcessing(@PathVariable("projectId") String projectId, @PathVariable("operationId") String operationId,
+            @RequestBody OperationProcessingService.SaveRequest request) {
+        return processingService.save(projectId, operationId, request);
+    }
+
+    @PostMapping("/projects/{projectId}/operations/{operationId}/processing/use-imported")
+    public OperationProcessingService.Settings useImported(@PathVariable("projectId") String projectId, @PathVariable("operationId") String operationId, @RequestBody java.util.Map<String, Long> request) {
+        if (!request.containsKey("revision")) throw new IllegalArgumentException("revision is required");
+        return processingService.useImported(projectId, operationId, request.get("revision"));
     }
 
     @GetMapping("/projects/{projectId}/api-specs")

@@ -10,6 +10,9 @@ public class ActionExecutionReport {
     private Object input;
     private Object output;
     private String errorMessage;
+    private String origin;
+    public String getOrigin() { return origin; }
+    public void setOrigin(String origin) { this.origin = origin; }
 
     public String getStage() { return stage; }
     public void setStage(String stage) { this.stage = stage; }

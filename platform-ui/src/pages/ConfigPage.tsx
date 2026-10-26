@@ -5,6 +5,7 @@ import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { platformApi } from '../api/platformApi'
 import { StatusPill } from '../components/StatusPill'
+import { PgpKeyFields } from '../components/PgpKeyFields'
 import type {
   Environment,
   Profile,
@@ -25,12 +26,12 @@ const emptyEnvironment: SaveEnvironmentInput = {
 const emptyProfile: SaveProfileInput = {
   name: '',
   type: 'PGP',
-  senderPublicKey: '',
-  senderPrivateKey: '',
-  senderPrivateKeyPassphrase: '',
-  recipientPublicKey: '',
-  recipientPrivateKey: '',
-  recipientPrivateKeyPassphrase: '',
+  verificationPublicKey: '',
+  signingPrivateKey: '',
+  signingPrivateKeyPassphrase: '',
+  encryptionPublicKey: '',
+  decryptionPrivateKey: '',
+  decryptionPrivateKeyPassphrase: '',
   environmentIds: [],
   enabled: true,
 }
@@ -127,12 +128,12 @@ export function ConfigPage() {
       ? {
           name: profile.name,
           type: profile.type,
-          senderPublicKey: profile.senderPublicKey ?? '',
-          senderPrivateKey: profile.senderPrivateKey ?? '',
-          senderPrivateKeyPassphrase: profile.senderPrivateKeyPassphrase ?? '',
-          recipientPublicKey: profile.recipientPublicKey ?? '',
-          recipientPrivateKey: profile.recipientPrivateKey ?? '',
-          recipientPrivateKeyPassphrase: profile.recipientPrivateKeyPassphrase ?? '',
+          verificationPublicKey: profile.verificationPublicKey ?? '',
+          signingPrivateKey: profile.signingPrivateKey ?? '',
+          signingPrivateKeyPassphrase: profile.signingPrivateKeyPassphrase ?? '',
+          encryptionPublicKey: profile.encryptionPublicKey ?? '',
+          decryptionPrivateKey: profile.decryptionPrivateKey ?? '',
+          decryptionPrivateKeyPassphrase: profile.decryptionPrivateKeyPassphrase ?? '',
           environmentIds: profile.environmentIds,
           enabled: profile.enabled,
         }
@@ -469,64 +470,7 @@ export function ConfigPage() {
               onChange={(checked) => setProfileDraft({ ...profileDraft, enabled: checked })}
             />
           </Form.Item>
-          <Form.Item label="Sender Public Key">
-            <Input.TextArea
-              rows={4}
-              value={profileDraft.senderPublicKey}
-              onChange={(event) =>
-                setProfileDraft({ ...profileDraft, senderPublicKey: event.target.value })
-              }
-            />
-          </Form.Item>
-          <Form.Item label="Sender Private Key">
-            <Input.TextArea
-              rows={4}
-              value={profileDraft.senderPrivateKey}
-              onChange={(event) =>
-                setProfileDraft({ ...profileDraft, senderPrivateKey: event.target.value })
-              }
-            />
-          </Form.Item>
-          <Form.Item label="Sender Passphrase">
-            <Input.Password
-              value={profileDraft.senderPrivateKeyPassphrase}
-              onChange={(event) =>
-                setProfileDraft({
-                  ...profileDraft,
-                  senderPrivateKeyPassphrase: event.target.value,
-                })
-              }
-            />
-          </Form.Item>
-          <Form.Item label="Recipient Public Key">
-            <Input.TextArea
-              rows={4}
-              value={profileDraft.recipientPublicKey}
-              onChange={(event) =>
-                setProfileDraft({ ...profileDraft, recipientPublicKey: event.target.value })
-              }
-            />
-          </Form.Item>
-          <Form.Item label="Recipient Private Key">
-            <Input.TextArea
-              rows={4}
-              value={profileDraft.recipientPrivateKey}
-              onChange={(event) =>
-                setProfileDraft({ ...profileDraft, recipientPrivateKey: event.target.value })
-              }
-            />
-          </Form.Item>
-          <Form.Item label="Recipient Passphrase">
-            <Input.Password
-              value={profileDraft.recipientPrivateKeyPassphrase}
-              onChange={(event) =>
-                setProfileDraft({
-                  ...profileDraft,
-                  recipientPrivateKeyPassphrase: event.target.value,
-                })
-              }
-            />
-          </Form.Item>
+          <PgpKeyFields value={profileDraft} onChange={setProfileDraft} />
         </Form>
       </Drawer>
 

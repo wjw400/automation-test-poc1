@@ -28,12 +28,12 @@ export type Profile = {
   projectId: string
   name: string
   type: string
-  senderPublicKey?: string | null
-  senderPrivateKey?: string | null
-  senderPrivateKeyPassphrase?: string | null
-  recipientPublicKey?: string | null
-  recipientPrivateKey?: string | null
-  recipientPrivateKeyPassphrase?: string | null
+  verificationPublicKey?: string | null
+  signingPrivateKey?: string | null
+  signingPrivateKeyPassphrase?: string | null
+  encryptionPublicKey?: string | null
+  decryptionPrivateKey?: string | null
+  decryptionPrivateKeyPassphrase?: string | null
   environmentIds: string[]
   enabled: boolean
 }
@@ -91,9 +91,40 @@ export type SuiteRecord = {
   name: string
   description?: string | null
   status: string
+  revision: number
   cases: SuiteCaseRecord[]
   createdAt: string
   updatedAt: string
+}
+
+export type SuiteDraftRecord = {
+  id: string
+  projectId: string
+  suiteId: string
+  sourceRevision: number
+  revision: number
+  content: string
+  status: string
+  createdBy?: string | null
+  agentTaskId?: string | null
+  document: {
+    name: string
+    description: string
+    status: string
+    entries: Array<{
+      id: string
+      scenarioId: string
+      displayName?: string | null
+      enabled: boolean
+      variableOverrides: Record<string, unknown>
+      environmentId?: string | null
+      profileId?: string | null
+    }>
+  }
+  validation: ScenarioDraftValidation
+  diff: { items: ScenarioDraftDiffItem[] }
+  createdAt?: string
+  updatedAt?: string
 }
 
 export type ReportRequest = {
@@ -119,7 +150,8 @@ export type ValidationReport = {
 }
 
 export type ActionExecutionReport = {
-  stage: 'beforeSend' | 'afterReceive'
+  stage: string
+  origin?: string
   index: number
   type: string
   name: string
@@ -131,6 +163,8 @@ export type ActionExecutionReport = {
 }
 
 export type StepRun = {
+  processingSnapshot?: Record<string, unknown>
+  businessRequest?: unknown
   index: number
   name: string
   profile: string
@@ -226,12 +260,12 @@ export type SaveEnvironmentInput = {
 export type SaveProfileInput = {
   name: string
   type: string
-  senderPublicKey: string
-  senderPrivateKey: string
-  senderPrivateKeyPassphrase: string
-  recipientPublicKey: string
-  recipientPrivateKey: string
-  recipientPrivateKeyPassphrase: string
+  verificationPublicKey: string
+  signingPrivateKey: string
+  signingPrivateKeyPassphrase: string
+  encryptionPublicKey: string
+  decryptionPrivateKey: string
+  decryptionPrivateKeyPassphrase: string
   environmentIds: string[]
   enabled: boolean
 }
@@ -376,6 +410,7 @@ export type OperationCapabilitiesRecord = {
 }
 
 export type OperationContractRecord = {
+  processingSettings?: OperationProcessingSettings | null
   id?: string | null
   method: string
   path: string
@@ -389,6 +424,28 @@ export type OperationContractRecord = {
   capabilities: OperationCapabilitiesRecord
   rawOperation: Record<string, unknown>
   diagnostics: ContractDiagnosticRecord[]
+}
+
+export type MessageProcessingRule = {
+  protection: 'none' | 'pgp-encrypt' | 'pgp-sign-encrypt' | 'pgp-decrypt' | 'pgp-decrypt-verify'
+  ciphertext?: { location: 'body' | 'json-pointer'; pointer?: string | null }
+  envelope?: unknown
+  businessSchema?: unknown
+}
+
+export type OperationProcessingConfiguration = {
+  version: number
+  request: MessageProcessingRule
+  responses: Record<string, MessageProcessingRule>
+}
+
+export type OperationProcessingSettings = {
+  configuration: OperationProcessingConfiguration | null
+  importedConfiguration: OperationProcessingConfiguration | null
+  source: string
+  revision: number
+  needsReview: boolean
+  importError?: string | null
 }
 
 export type ApiSpecContractRecord = {
@@ -434,6 +491,7 @@ export type AgentRuntimeCapabilities = {
   cancellation: boolean
   tools: boolean
   defaultModel: string
+  models: string[]
 }
 
 export type AgentRuntimeDescriptor = {
@@ -441,7 +499,7 @@ export type AgentRuntimeDescriptor = {
   capabilities: AgentRuntimeCapabilities
 }
 
-export type AgentTaskStatus = 'READY' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
+export type AgentTaskStatus = 'READY' | 'RUNNING' | 'WAITING_FOR_USER' | 'COMPLETED' | 'FAILED' | 'CANCELLED'
 
 export type AgentContextType = 'SCENARIO' | 'SUITE' | 'OPERATION' | 'EXECUTION' | 'TEST_KNOWLEDGE'
 
@@ -455,6 +513,8 @@ export type AgentContextSelection = {
   excluded: AgentContextReference[]
 }
 
+export type AgentPermissionMode = 'READ_ONLY' | 'REVIEW_REQUIRED' | 'AUTO_APPLY'
+
 export type AgentTaskRecord = {
   id: string
   projectId: string
@@ -462,7 +522,8 @@ export type AgentTaskRecord = {
   status: AgentTaskStatus
   targetType?: string | null
   targetId?: string | null
-  permissionMode: string
+  permissionMode: AgentPermissionMode
+  permissionModeRevision: number
   runtimeType: string
   modelId: string
   createdBy: string
@@ -483,6 +544,7 @@ export type CreateAgentTaskInput = {
   modelId?: string
   tokenBudget?: number
   context?: AgentContextSelection
+  permissionMode?: AgentPermissionMode
 }
 
 export type AgentMessageRecord = {
@@ -565,7 +627,7 @@ export type ScenarioDraftDiffItem = {
 export type ScenarioDraftRecord = {
   id: string
   projectId: string
-  scenarioId: string
+  scenarioId: string | null
   sourceRevision: number
   revision: number
   content: string
@@ -577,4 +639,11 @@ export type ScenarioDraftRecord = {
   diff: { items: ScenarioDraftDiffItem[] }
   createdAt: string
   updatedAt: string
+  sourceSuiteId?: string | null
+}
+
+export type PublishScenarioDraftResult = {
+  scenario: CaseRecord
+  suite?: SuiteRecord | null
+  created: boolean
 }

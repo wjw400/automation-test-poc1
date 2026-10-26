@@ -104,12 +104,12 @@ public class PartnerKeyService {
         ServiceIdentityProperties service = cryptoProperties.getService();
 
         PgpProfileMaterial material = new PgpProfileMaterial();
-        material.setSenderPublicKey(partner.getPublicKey());
-        material.setSenderPrivateKey(service.getPrivateKey());
-        material.setSenderPrivateKeyPassphrase(service.getPrivateKeyPassphrase());
-        material.setRecipientPublicKey(partner.getPublicKey());
-        material.setRecipientPrivateKey(service.getPrivateKey());
-        material.setRecipientPrivateKeyPassphrase(service.getPrivateKeyPassphrase());
+        material.setVerificationPublicKey(partner.getPublicKey());
+        material.setSigningPrivateKey(service.getPrivateKey());
+        material.setSigningPrivateKeyPassphrase(service.getPrivateKeyPassphrase());
+        material.setEncryptionPublicKey(partner.getPublicKey());
+        material.setDecryptionPrivateKey(service.getPrivateKey());
+        material.setDecryptionPrivateKeyPassphrase(service.getPrivateKeyPassphrase());
         return material;
     }
 

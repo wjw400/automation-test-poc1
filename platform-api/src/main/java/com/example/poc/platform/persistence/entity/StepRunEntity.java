@@ -48,6 +48,14 @@ public class StepRunEntity {
 
     @Column(columnDefinition = "text")
     private String extractedValuesJson;
+    @Column(columnDefinition = "text")
+    private String processingSnapshotJson;
+    @Column(columnDefinition = "text")
+    private String businessRequestJson;
+    public String getProcessingSnapshotJson() { return processingSnapshotJson; }
+    public void setProcessingSnapshotJson(String value) { processingSnapshotJson = value; }
+    public String getBusinessRequestJson() { return businessRequestJson; }
+    public void setBusinessRequestJson(String value) { businessRequestJson = value; }
 
     @PrePersist
     public void onCreate() {

@@ -22,7 +22,7 @@ class DeepSeekLiveIntegrationTest {
         properties.getDeepseek().setApiKey(apiKey);
         String model = System.getenv("DEEPSEEK_MODEL");
         if (model != null && !model.isBlank()) properties.getDeepseek().setModel(model);
-        properties.setTurnTimeout(Duration.ofSeconds(60));
+        properties.setModelRequestTimeout(Duration.ofSeconds(60));
         DeepSeekAgentRuntime runtime = new DeepSeekAgentRuntime(
                 properties,
                 new JsonCodec(tools.jackson.databind.json.JsonMapper.builder().build()),

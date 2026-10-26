@@ -10,6 +10,7 @@ import com.example.poc.platform.persistence.repo.ApiOperationRepository;
 import com.example.poc.platform.persistence.repo.ApiSpecRepository;
 import com.example.poc.platform.persistence.repo.CaseRepository;
 import com.example.poc.platform.persistence.repo.EnvironmentRepository;
+import com.example.poc.platform.openapi.OperationProcessingService;
 import io.swagger.parser.OpenAPIParser;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
@@ -40,6 +41,7 @@ public class ApiSpecService {
     private final CaseRepository caseRepository;
     private final EnvironmentRepository environmentRepository;
     private final JsonCodec jsonCodec;
+    private final OperationProcessingService processingService;
     private final ObjectMapper yamlMapper = YAMLMapper.builder().build();
 
     public ApiSpecService(
@@ -48,13 +50,15 @@ public class ApiSpecService {
             ApiOperationRepository apiOperationRepository,
             CaseRepository caseRepository,
             EnvironmentRepository environmentRepository,
-            JsonCodec jsonCodec) {
+            JsonCodec jsonCodec,
+            OperationProcessingService processingService) {
         this.catalogService = catalogService;
         this.apiSpecRepository = apiSpecRepository;
         this.apiOperationRepository = apiOperationRepository;
         this.caseRepository = caseRepository;
         this.environmentRepository = environmentRepository;
         this.jsonCodec = jsonCodec;
+        this.processingService = processingService;
     }
 
     @Transactional
@@ -68,6 +72,9 @@ public class ApiSpecService {
 
         ApiSpecEntity specEntity = apiSpecRepository.findByProjectIdAndName(projectId, fileName)
                 .orElseGet(ApiSpecEntity::new);
+        String previousContent = specEntity.getContent();
+        List<ApiOperationEntity> previous = specEntity.getId() == null ? List.of()
+                : apiOperationRepository.findByApiSpecIdOrderByMethodAscPathAsc(specEntity.getId());
         specEntity.setProjectId(projectId);
         specEntity.setName(fileName);
         specEntity.setTitle(openAPI.getInfo() == null ? fileName : openAPI.getInfo().getTitle());
@@ -76,8 +83,17 @@ public class ApiSpecService {
         specEntity.setContent(content);
         specEntity = apiSpecRepository.save(specEntity);
 
-        apiOperationRepository.deleteByApiSpecId(specEntity.getId());
-        List<ApiOperationEntity> operations = extractOperations(projectId, specEntity.getId(), openAPI);
+        List<ApiOperationEntity> operations = extractOperations(projectId, specEntity.getId(), openAPI, previous);
+        Map<String, Object> document = yamlMapper.readValue(content, new TypeReference<Map<String, Object>>() {});
+        Map<String, Object> paths = (Map<String, Object>) document.getOrDefault("paths", Map.of());
+        for (ApiOperationEntity operation : operations) {
+            Map<String, Object> path = (Map<String, Object>) paths.get(operation.getPath());
+            Map<String, Object> raw = (Map<String, Object>) path.get(operation.getMethod().toLowerCase(java.util.Locale.ROOT));
+            processingService.applyImport(operation, raw, operation.getId() != null && !java.util.Objects.equals(previousContent, content));
+            operation.setRawOperationJson(jsonCodec.write(raw));
+        }
+        java.util.Set<String> retained = operations.stream().map(ApiOperationEntity::getId).filter(java.util.Objects::nonNull).collect(java.util.stream.Collectors.toSet());
+        apiOperationRepository.deleteAll(previous.stream().filter(operation -> !retained.contains(operation.getId())).toList());
         apiOperationRepository.saveAll(operations);
         return toApiSpecRecord(specEntity, operations.size());
     }
@@ -174,7 +190,7 @@ public class ApiSpecService {
         }
     }
 
-    private List<ApiOperationEntity> extractOperations(String projectId, String apiSpecId, OpenAPI openAPI) {
+    private List<ApiOperationEntity> extractOperations(String projectId, String apiSpecId, OpenAPI openAPI, List<ApiOperationEntity> previous) {
         List<ApiOperationEntity> results = new ArrayList<>();
         if (openAPI.getPaths() == null) {
             return results;
@@ -191,7 +207,18 @@ public class ApiSpecService {
                 if (operation == null) {
                     continue;
                 }
-                ApiOperationEntity entity = new ApiOperationEntity();
+                ApiOperationEntity entity = previous.stream().filter(candidate -> candidate.getMethod().equals(operationEntry.getKey().name()) && candidate.getPath().equals(pathEntry.getKey())).findFirst().orElse(null);
+                if (entity == null && operation.getOperationId() != null) {
+                    List<ApiOperationEntity> candidates = previous.stream().filter(candidate -> operation.getOperationId().equals(candidate.getOperationId())).toList();
+                    long occurrences = openAPI.getPaths().values().stream().flatMap(item -> item.readOperationsMap().values().stream()).filter(item -> operation.getOperationId().equals(item.getOperationId())).count();
+                    if (candidates.size() == 1 && occurrences == 1) {
+                        ApiOperationEntity candidate = candidates.get(0);
+                        PathItem originalPath = openAPI.getPaths().get(candidate.getPath());
+                        boolean originalEndpointStillExists = originalPath != null && originalPath.readOperationsMap().containsKey(PathItem.HttpMethod.valueOf(candidate.getMethod()));
+                        if (!originalEndpointStillExists) entity = candidate;
+                    }
+                }
+                if (entity == null) entity = new ApiOperationEntity();
                 entity.setProjectId(projectId);
                 entity.setApiSpecId(apiSpecId);
                 entity.setTagName(operation.getTags() == null || operation.getTags().isEmpty() ? null : operation.getTags().get(0));
@@ -202,7 +229,6 @@ public class ApiSpecService {
                 entity.setDescription(operation.getDescription());
                 entity.setRequestBodyJson(jsonCodec.write(operation.getRequestBody()));
                 entity.setResponsesJson(jsonCodec.write(operation.getResponses()));
-                entity.setRawOperationJson(jsonCodec.write(operation));
                 results.add(entity);
             }
         }

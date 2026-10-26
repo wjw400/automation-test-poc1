@@ -6,6 +6,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.time.Instant;
 import java.util.UUID;
 
@@ -26,6 +27,10 @@ public class SuiteEntity {
 
     @Column(nullable = false, length = 50)
     private String status;
+
+    @Version
+    @Column(nullable = false)
+    private Long revision;
 
     @Column(nullable = false)
     private Instant createdAt;
@@ -60,8 +65,11 @@ public class SuiteEntity {
     public void setDescription(String description) { this.description = description; }
     public String getStatus() { return status; }
     public void setStatus(String status) { this.status = status; }
+    public Long getRevision() { return revision; }
+    public void setRevision(Long revision) { this.revision = revision; }
     public Instant getCreatedAt() { return createdAt; }
     public void setCreatedAt(Instant createdAt) { this.createdAt = createdAt; }
     public Instant getUpdatedAt() { return updatedAt; }
     public void setUpdatedAt(Instant updatedAt) { this.updatedAt = updatedAt; }
+    public void touch() { updatedAt = Instant.now(); }
 }

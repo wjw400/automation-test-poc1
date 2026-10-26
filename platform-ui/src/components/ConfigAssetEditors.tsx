@@ -11,6 +11,7 @@ import type {
   SaveProfileInput,
 } from '../types/platform'
 import { JsonObjectEditor } from './JsonObjectEditor'
+import { PgpKeyFields } from './PgpKeyFields'
 
 const { Text } = Typography
 
@@ -185,12 +186,12 @@ export function EnvironmentAssetEditor({
 const emptyProfile: SaveProfileInput = {
   name: '',
   type: 'PGP',
-  senderPublicKey: '',
-  senderPrivateKey: '',
-  senderPrivateKeyPassphrase: '',
-  recipientPublicKey: '',
-  recipientPrivateKey: '',
-  recipientPrivateKeyPassphrase: '',
+  verificationPublicKey: '',
+  signingPrivateKey: '',
+  signingPrivateKeyPassphrase: '',
+  encryptionPublicKey: '',
+  decryptionPrivateKey: '',
+  decryptionPrivateKeyPassphrase: '',
   environmentIds: [],
   enabled: true,
 }
@@ -303,30 +304,7 @@ export function ProfileAssetEditor({
           <Form.Item label={t('config:enabled')}>
             <Switch checked={draft.enabled} onChange={(enabled) => setDraft({ ...draft, enabled })} />
           </Form.Item>
-          <section className="asset-editor-section">
-            <h2>{t('config:senderKeys')}</h2>
-            <Form.Item label={t('config:publicKey')}>
-              <Input.TextArea rows={5} value={draft.senderPublicKey} onChange={(event) => setDraft({ ...draft, senderPublicKey: event.target.value })} />
-            </Form.Item>
-            <Form.Item label={t('config:privateKey')}>
-              <Input.TextArea rows={5} value={draft.senderPrivateKey} onChange={(event) => setDraft({ ...draft, senderPrivateKey: event.target.value })} />
-            </Form.Item>
-            <Form.Item label={t('config:passphrase')}>
-              <Input.Password value={draft.senderPrivateKeyPassphrase} onChange={(event) => setDraft({ ...draft, senderPrivateKeyPassphrase: event.target.value })} />
-            </Form.Item>
-          </section>
-          <section className="asset-editor-section">
-            <h2>{t('config:recipientKeys')}</h2>
-            <Form.Item label={t('config:publicKey')}>
-              <Input.TextArea rows={5} value={draft.recipientPublicKey} onChange={(event) => setDraft({ ...draft, recipientPublicKey: event.target.value })} />
-            </Form.Item>
-            <Form.Item label={t('config:privateKey')}>
-              <Input.TextArea rows={5} value={draft.recipientPrivateKey} onChange={(event) => setDraft({ ...draft, recipientPrivateKey: event.target.value })} />
-            </Form.Item>
-            <Form.Item label={t('config:passphrase')}>
-              <Input.Password value={draft.recipientPrivateKeyPassphrase} onChange={(event) => setDraft({ ...draft, recipientPrivateKeyPassphrase: event.target.value })} />
-            </Form.Item>
-          </section>
+          <PgpKeyFields value={draft} onChange={setDraft} />
         </Form>
       </div>
     </div>
@@ -350,12 +328,12 @@ function profileDraft(profile?: Profile): SaveProfileInput {
     ? {
         name: profile.name,
         type: profile.type,
-        senderPublicKey: profile.senderPublicKey ?? '',
-        senderPrivateKey: profile.senderPrivateKey ?? '',
-        senderPrivateKeyPassphrase: profile.senderPrivateKeyPassphrase ?? '',
-        recipientPublicKey: profile.recipientPublicKey ?? '',
-        recipientPrivateKey: profile.recipientPrivateKey ?? '',
-        recipientPrivateKeyPassphrase: profile.recipientPrivateKeyPassphrase ?? '',
+        verificationPublicKey: profile.verificationPublicKey ?? '',
+        signingPrivateKey: profile.signingPrivateKey ?? '',
+        signingPrivateKeyPassphrase: profile.signingPrivateKeyPassphrase ?? '',
+        encryptionPublicKey: profile.encryptionPublicKey ?? '',
+        decryptionPrivateKey: profile.decryptionPrivateKey ?? '',
+        decryptionPrivateKeyPassphrase: profile.decryptionPrivateKeyPassphrase ?? '',
         environmentIds: profile.environmentIds ?? [],
         enabled: profile.enabled,
       }

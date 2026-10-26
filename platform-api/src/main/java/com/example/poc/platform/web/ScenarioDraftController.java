@@ -5,6 +5,8 @@ import com.example.poc.platform.agent.scenario.ScenarioDraftDiff;
 import com.example.poc.platform.agent.scenario.ScenarioDraftService;
 import com.example.poc.platform.agent.scenario.ScenarioDraftService.CommandExecutionResult;
 import com.example.poc.platform.agent.scenario.ScenarioDraftService.CreateScenarioDraftRequest;
+import com.example.poc.platform.agent.scenario.ScenarioDraftService.PublishScenarioDraftRequest;
+import com.example.poc.platform.agent.scenario.ScenarioDraftService.PublishScenarioDraftResult;
 import com.example.poc.platform.agent.scenario.ScenarioDraftService.ScenarioDraftRecord;
 import com.example.poc.platform.agent.scenario.ScenarioValidationResult;
 import jakarta.validation.Valid;
@@ -73,6 +75,14 @@ public class ScenarioDraftController {
             @PathVariable("draftId") String draftId,
             @RequestHeader(name = AgentRequestIdentity.HEADER_NAME, required = false) String actorHeader) {
         return draftService.diff(draftId, requestIdentity.resolve(actorHeader));
+    }
+
+    @PostMapping("/scenario-drafts/{draftId}/publish")
+    public PublishScenarioDraftResult publish(
+            @PathVariable("draftId") String draftId,
+            @RequestHeader(name = AgentRequestIdentity.HEADER_NAME, required = false) String actorHeader,
+            @Valid @RequestBody PublishScenarioDraftRequest request) {
+        return draftService.publishNew(draftId, requestIdentity.resolve(actorHeader), request);
     }
 
     @DeleteMapping("/scenario-drafts/{draftId}")

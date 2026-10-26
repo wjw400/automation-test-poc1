@@ -17,6 +17,7 @@ import type {
   ResponseContractRecord,
 } from '../types/platform'
 import { PipelineStepBindings } from './PipelineFlowBindings'
+import { OperationProcessingEditor } from './OperationProcessingEditor'
 
 const { Text, Paragraph } = Typography
 
@@ -97,6 +98,7 @@ export function ApiReference({ projectId, apiSpecId }: ApiReferenceProps) {
       <main className="api-reference-detail">
         {selectedOperation ? (
           <OperationDetail
+            projectId={projectId}
             contract={contractQuery.data}
             operation={selectedOperation}
             activeTab={activeTab}
@@ -156,6 +158,7 @@ function OperationList({
 }
 
 function OperationDetail({
+  projectId,
   contract,
   operation,
   activeTab,
@@ -164,6 +167,7 @@ function OperationDetail({
   onTabChange,
   onCopy,
 }: {
+  projectId: string
   contract: ApiSpecContractRecord
   operation: OperationContractRecord
   activeTab: DetailTab
@@ -205,7 +209,7 @@ function OperationDetail({
           { key: 'parameters', label: `Parameters${operation.parameters.length ? ` (${operation.parameters.length})` : ''}`, children: <Parameters parameters={operation.parameters} /> },
           { key: 'request', label: 'Request', children: <PayloadPanel label="Request" payload={operation.request} registry={contract.schemaRegistry} onCopy={onCopy} /> },
           { key: 'responses', label: `Responses${operation.responses.length ? ` (${operation.responses.length})` : ''}`, children: <Responses responses={operation.responses} registry={contract.schemaRegistry} onCopy={onCopy} /> },
-          { key: 'processing', label: 'Processing', children: <Processing operation={operation} /> },
+          { key: 'processing', label: '请求与响应处理', children: operation.id ? <OperationProcessingEditor projectId={projectId} operationId={operation.id} registry={contract.schemaRegistry} /> : <Processing operation={operation} /> },
           { key: 'source', label: 'Source', children: <SourceViewer source={source} loading={sourceLoading} rawOperation={operation.rawOperation} onCopy={onCopy} /> },
         ]}
       />

@@ -7,8 +7,8 @@ info:
 
     Every request payload is signed and encrypted as an ASCII-armored PGP message
     inside the JSON `payload` field. Successful responses use the same encrypted
-    envelope. The `x-platform-processing` extension references the platform's
-    built-in pipelines and exposes the business JSON before encryption and after decryption.
+    envelope. The `x-platform-processing` extension declares platform-managed
+    PGP protection, ciphertext locations, and business JSON schemas.
 servers:
   - url: http://localhost:8081
     description: Local OrderFlow service
@@ -32,15 +32,26 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ProfileParam'
       x-platform-processing:
+        version: 1
         request:
           businessSchema:
             $ref: '#/components/schemas/CreateOrderPayload'
-          pipeline: system/pgp-json-envelope-request@1
-        response:
+          protection: pgp-sign-encrypt
+          ciphertext:
+            location: json-pointer
+            pointer: /payload
+        responses:
           '200':
             businessSchema:
               $ref: '#/components/schemas/Order'
-            pipeline: system/pgp-json-envelope-response@1
+            protection: pgp-decrypt-verify
+            ciphertext:
+              location: json-pointer
+              pointer: /payload
+          '400':
+            protection: none
+          '500':
+            protection: none
       requestBody:
         $ref: '#/components/requestBodies/EncryptedRequest'
       responses:
@@ -60,15 +71,26 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ProfileParam'
       x-platform-processing:
+        version: 1
         request:
           businessSchema:
             $ref: '#/components/schemas/OrderReferencePayload'
-          pipeline: system/pgp-json-envelope-request@1
-        response:
+          protection: pgp-sign-encrypt
+          ciphertext:
+            location: json-pointer
+            pointer: /payload
+        responses:
           '200':
             businessSchema:
               $ref: '#/components/schemas/Order'
-            pipeline: system/pgp-json-envelope-response@1
+            protection: pgp-decrypt-verify
+            ciphertext:
+              location: json-pointer
+              pointer: /payload
+          '400':
+            protection: none
+          '500':
+            protection: none
       requestBody:
         $ref: '#/components/requestBodies/EncryptedRequest'
       responses:
@@ -88,15 +110,26 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ProfileParam'
       x-platform-processing:
+        version: 1
         request:
           businessSchema:
             $ref: '#/components/schemas/OrderReferencePayload'
-          pipeline: system/pgp-json-envelope-request@1
-        response:
+          protection: pgp-sign-encrypt
+          ciphertext:
+            location: json-pointer
+            pointer: /payload
+        responses:
           '200':
             businessSchema:
               $ref: '#/components/schemas/Order'
-            pipeline: system/pgp-json-envelope-response@1
+            protection: pgp-decrypt-verify
+            ciphertext:
+              location: json-pointer
+              pointer: /payload
+          '400':
+            protection: none
+          '500':
+            protection: none
       requestBody:
         $ref: '#/components/requestBodies/EncryptedRequest'
       responses:
@@ -116,15 +149,26 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ProfileParam'
       x-platform-processing:
+        version: 1
         request:
           businessSchema:
             $ref: '#/components/schemas/FulfillOrderPayload'
-          pipeline: system/pgp-json-envelope-request@1
-        response:
+          protection: pgp-sign-encrypt
+          ciphertext:
+            location: json-pointer
+            pointer: /payload
+        responses:
           '200':
             businessSchema:
               $ref: '#/components/schemas/Order'
-            pipeline: system/pgp-json-envelope-response@1
+            protection: pgp-decrypt-verify
+            ciphertext:
+              location: json-pointer
+              pointer: /payload
+          '400':
+            protection: none
+          '500':
+            protection: none
       requestBody:
         $ref: '#/components/requestBodies/EncryptedRequest'
       responses:
@@ -144,15 +188,26 @@ paths:
       parameters:
         - $ref: '#/components/parameters/ProfileParam'
       x-platform-processing:
+        version: 1
         request:
           businessSchema:
             $ref: '#/components/schemas/OrderReferencePayload'
-          pipeline: system/pgp-json-envelope-request@1
-        response:
+          protection: pgp-sign-encrypt
+          ciphertext:
+            location: json-pointer
+            pointer: /payload
+        responses:
           '200':
             businessSchema:
               $ref: '#/components/schemas/Order'
-            pipeline: system/pgp-json-envelope-response@1
+            protection: pgp-decrypt-verify
+            ciphertext:
+              location: json-pointer
+              pointer: /payload
+          '400':
+            protection: none
+          '500':
+            protection: none
       requestBody:
         $ref: '#/components/requestBodies/EncryptedRequest'
       responses:

@@ -13,7 +13,7 @@ import org.junit.jupiter.api.Test;
 class ScenarioDraftValidatorTest {
     private final ScenarioDslCodec codec = new ScenarioDslCodec();
     private final ApiOperationRepository operationRepository = mock(ApiOperationRepository.class);
-    private final ScenarioDraftValidator validator = new ScenarioDraftValidator(operationRepository, codec);
+    private final ScenarioDraftValidator validator = new ScenarioDraftValidator(operationRepository, codec, mock(ScenarioContractValidator.class));
 
     @Test
     void acceptsValidDraftAndDetectsVariableUsedBeforeExtraction() {
@@ -38,7 +38,9 @@ class ScenarioDraftValidatorTest {
                       headers: {}
                       query: {}
                     response:
-                      status: 201
+                      status:
+                        operator: oneOf
+                        expected: [201]
                       assertions: []
                       extract:
                         orderId:
@@ -56,7 +58,9 @@ class ScenarioDraftValidatorTest {
                       headers: {}
                       query: {}
                     response:
-                      status: 200
+                      status:
+                        operator: oneOf
+                        expected: [200]
                       assertions: []
                       extract: {}
                 """), List.of("create", "read"));
@@ -133,6 +137,97 @@ class ScenarioDraftValidatorTest {
         assertThat(result.valid()).isTrue();
     }
 
+    @Test
+    void rejectsRawAndUnavailableDecryptedExtractionSources() {
+        when(operationRepository.findById("extract-op"))
+                .thenReturn(Optional.of(operation("extract-op", "project-1", "GET", "/orders")));
+        ScenarioDocument document = singleStepDocument("""
+                operation:
+                  id: extract-op
+                  method: GET
+                  path: /orders
+                request: {}
+                actions:
+                  beforeSend: []
+                  afterReceive: []
+                """);
+
+        document.scenario().getSteps().get(0).getResponse().getExtract().put(
+                "rawValue", java.util.Map.of("source", "raw", "path", "$.id"));
+        document.scenario().getSteps().get(0).getResponse().getExtract().put(
+                "missingPayload", java.util.Map.of("source", "decrypted.missing", "path", "$.id"));
+
+        ScenarioValidationResult result = validator.validate("project-1", document);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.issues()).extracting(ScenarioValidationResult.ValidationIssue::code)
+                .containsOnly("EXTRACTION_SOURCE_INVALID")
+                .hasSize(2);
+        assertThat(result.issues()).extracting(ScenarioValidationResult.ValidationIssue::message)
+                .anyMatch(message -> message.contains("raw") && message.contains("not supported"))
+                .anyMatch(message -> message.contains("decrypted.missing") && message.contains("not produced"));
+    }
+
+    @Test
+    void acceptsExtractionFromAnEnabledAfterReceiveOutput() {
+        when(operationRepository.findById("decrypt-op"))
+                .thenReturn(Optional.of(operation("decrypt-op", "project-1", "POST", "/secure")));
+        ScenarioDocument document = singleStepDocument("""
+                runtime:
+                  profile: secure-profile
+                operation:
+                  id: decrypt-op
+                  method: POST
+                  path: /secure
+                request: {}
+                actions:
+                  beforeSend: []
+                  afterReceive:
+                    - type: crypto.pgp.decryptAndVerify
+                      input:
+                        source: response.body
+                        path: $.payload
+                      output:
+                        target: decrypted.securePayload
+                        format: json
+                """);
+        document.scenario().getSteps().get(0).getResponse().getExtract().put(
+                "orderId", java.util.Map.of("source", "decrypted.securePayload", "path", "$.orderId"));
+
+        assertThat(validator.validate("project-1", document).valid()).isTrue();
+    }
+
+    @Test
+    void rejectsPostmanStyleVariablesAtTheRequestField() {
+        when(operationRepository.findById("create-op"))
+                .thenReturn(Optional.of(operation("create-op", "project-1", "POST", "/orders")));
+        ScenarioDocument document = singleStepDocument("""
+                operation:
+                  id: create-op
+                  method: POST
+                  path: /orders
+                request:
+                  body:
+                    items:
+                      - productId: "{{list-products.productId}}"
+                        quantity: 2
+                actions:
+                  beforeSend: []
+                  afterReceive: []
+                """);
+
+        ScenarioValidationResult result = validator.validate("project-1", document);
+
+        assertThat(result.valid()).isFalse();
+        assertThat(result.issues())
+                .filteredOn(issue -> "UNSUPPORTED_VARIABLE_SYNTAX".equals(issue.code()))
+                .singleElement()
+                .satisfies(issue -> {
+                    assertThat(issue.path()).isEqualTo("/steps/step-1/request/body/items/0/productId");
+                    assertThat(issue.message()).contains("${variableName}");
+                });
+    }
+
     private ScenarioDocument singleStepDocument(String stepFields) {
         String yaml = """
                 dslVersion: v1
@@ -144,7 +239,9 @@ class ScenarioDraftValidatorTest {
                     type: http
                 %s
                     response:
-                      status: 200
+                      status:
+                        operator: oneOf
+                        expected: [200]
                       assertions: []
                       extract: {}
                 """.formatted(indent(stepFields, 4));

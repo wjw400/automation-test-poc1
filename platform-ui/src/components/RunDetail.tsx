@@ -1,10 +1,11 @@
-import { Alert, Descriptions, List, Space, Table, Tabs, Typography } from 'antd'
+import { Alert, Descriptions, List, Space, Table, Tabs, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useTranslation } from 'react-i18next'
 import { formatDateTime } from '../i18n'
 import type { RunRecord, StepRun, ValidationReport } from '../types/platform'
 import { JsonPane } from './JsonPane'
 import { StatusPill } from './StatusPill'
+import { BusinessResponseEvidence } from './BusinessResponseEvidence'
 
 const { Text } = Typography
 
@@ -201,6 +202,7 @@ function StepEvidence({ step }: { step: StepRun }) {
                     <div className="action-evidence">
                       <div className="panel-title-row compact">
                         <Space>
+                          <Tag color={action.origin === 'API' ? 'blue' : undefined}>{action.origin === 'API' ? '接口自动处理' : '用例 Action'}</Tag>
                           <Text strong>{`${action.stage} #${action.index}`}</Text>
                           <Text>{action.name}</Text>
                           <Text type="secondary">{action.type}</Text>
@@ -228,9 +230,19 @@ function StepEvidence({ step }: { step: StepRun }) {
             ),
           },
           {
+            key: 'processingSnapshot',
+            label: '处理配置快照',
+            children: <div className="tab-stack"><Text type="secondary">本次执行时保存的有效配置，不受后续接口修改影响。</Text><JsonPane value={step.processingSnapshot} emptyLabel="此历史执行未记录处理配置" /></div>,
+          },
+          {
+            key: 'businessRequest',
+            label: '业务请求',
+            children: <JsonPane value={step.businessRequest} emptyLabel="此历史执行未记录业务请求" />,
+          },
+          {
             key: 'decrypted',
-            label: t('execution:decrypted'),
-            children: <JsonPane value={step.decryptedPayloads} emptyLabel={t('execution:noDecrypted')} />,
+            label: t('execution:businessResponseTab'),
+            children: <BusinessResponseEvidence step={step} />,
           },
           {
             key: 'validations',

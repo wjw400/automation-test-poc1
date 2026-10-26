@@ -1,58 +1,59 @@
 package com.example.poc.pgp;
 
+/** Local private keys and counterparty public keys, named by cryptographic purpose. */
 public class PgpProfileMaterial {
-    private String senderPublicKey;
-    private String senderPrivateKey;
-    private String senderPrivateKeyPassphrase;
-    private String recipientPublicKey;
-    private String recipientPrivateKey;
-    private String recipientPrivateKeyPassphrase;
+    private String verificationPublicKey;
+    private String signingPrivateKey;
+    private String signingPrivateKeyPassphrase;
+    private String encryptionPublicKey;
+    private String decryptionPrivateKey;
+    private String decryptionPrivateKeyPassphrase;
 
-    public String getSenderPublicKey() {
-        return senderPublicKey;
+    public String getVerificationPublicKey() {
+        return verificationPublicKey;
     }
 
-    public void setSenderPublicKey(String senderPublicKey) {
-        this.senderPublicKey = senderPublicKey;
+    public void setVerificationPublicKey(String verificationPublicKey) {
+        this.verificationPublicKey = verificationPublicKey;
     }
 
-    public String getSenderPrivateKey() {
-        return senderPrivateKey;
+    public String getSigningPrivateKey() {
+        return signingPrivateKey;
     }
 
-    public void setSenderPrivateKey(String senderPrivateKey) {
-        this.senderPrivateKey = senderPrivateKey;
+    public void setSigningPrivateKey(String signingPrivateKey) {
+        this.signingPrivateKey = signingPrivateKey;
     }
 
-    public String getSenderPrivateKeyPassphrase() {
-        return senderPrivateKeyPassphrase;
+    public String getSigningPrivateKeyPassphrase() {
+        return signingPrivateKeyPassphrase;
     }
 
-    public void setSenderPrivateKeyPassphrase(String senderPrivateKeyPassphrase) {
-        this.senderPrivateKeyPassphrase = senderPrivateKeyPassphrase;
+    public void setSigningPrivateKeyPassphrase(String signingPrivateKeyPassphrase) {
+        this.signingPrivateKeyPassphrase = signingPrivateKeyPassphrase;
     }
 
-    public String getRecipientPublicKey() {
-        return recipientPublicKey;
+    public String getEncryptionPublicKey() {
+        return encryptionPublicKey;
     }
 
-    public void setRecipientPublicKey(String recipientPublicKey) {
-        this.recipientPublicKey = recipientPublicKey;
+    public void setEncryptionPublicKey(String encryptionPublicKey) {
+        this.encryptionPublicKey = encryptionPublicKey;
     }
 
-    public String getRecipientPrivateKey() {
-        return recipientPrivateKey;
+    public String getDecryptionPrivateKey() {
+        return decryptionPrivateKey;
     }
 
-    public void setRecipientPrivateKey(String recipientPrivateKey) {
-        this.recipientPrivateKey = recipientPrivateKey;
+    public void setDecryptionPrivateKey(String decryptionPrivateKey) {
+        this.decryptionPrivateKey = decryptionPrivateKey;
     }
 
-    public String getRecipientPrivateKeyPassphrase() {
-        return recipientPrivateKeyPassphrase;
+    public String getDecryptionPrivateKeyPassphrase() {
+        return decryptionPrivateKeyPassphrase;
     }
 
-    public void setRecipientPrivateKeyPassphrase(String recipientPrivateKeyPassphrase) {
-        this.recipientPrivateKeyPassphrase = recipientPrivateKeyPassphrase;
+    public void setDecryptionPrivateKeyPassphrase(String decryptionPrivateKeyPassphrase) {
+        this.decryptionPrivateKeyPassphrase = decryptionPrivateKeyPassphrase;
     }
 }

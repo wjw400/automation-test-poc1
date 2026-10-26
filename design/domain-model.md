@@ -57,12 +57,12 @@
 - `projectId`
 - `name`
 - `type`
-- `senderPublicKeyRef`
-- `senderPrivateKeyRef`
-- `senderPrivateKeyPassphraseRef`
-- `recipientPublicKeyRef`
-- `recipientPrivateKeyRef`
-- `recipientPrivateKeyPassphraseRef`
+- `verificationPublicKeyRef`
+- `signingPrivateKeyRef`
+- `signingPrivateKeyPassphraseRef`
+- `encryptionPublicKeyRef`
+- `decryptionPrivateKeyRef`
+- `decryptionPrivateKeyPassphraseRef`
 - `algorithm`
 - `enabled`
 

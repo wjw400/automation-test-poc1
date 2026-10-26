@@ -1,7 +1,7 @@
 package com.example.poc.engine;
 
 public class ExtractValueSpec {
-    private String source = "raw";
+    private String source = CaseDslDataSources.RESPONSE_BODY;
     private String path;
 
     public String getSource() {

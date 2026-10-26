@@ -247,12 +247,12 @@ public class PlatformCatalogService {
         entity.setProjectId(projectId);
         entity.setName(request.name());
         entity.setType(request.type() == null || request.type().isBlank() ? "PGP" : request.type());
-        entity.setSenderPublicKey(request.senderPublicKey());
-        entity.setSenderPrivateKey(request.senderPrivateKey());
-        entity.setSenderPrivateKeyPassphrase(request.senderPrivateKeyPassphrase());
-        entity.setRecipientPublicKey(request.recipientPublicKey());
-        entity.setRecipientPrivateKey(request.recipientPrivateKey());
-        entity.setRecipientPrivateKeyPassphrase(request.recipientPrivateKeyPassphrase());
+        entity.setVerificationPublicKey(request.verificationPublicKey());
+        entity.setSigningPrivateKey(request.signingPrivateKey());
+        entity.setSigningPrivateKeyPassphrase(request.signingPrivateKeyPassphrase());
+        entity.setEncryptionPublicKey(request.encryptionPublicKey());
+        entity.setDecryptionPrivateKey(request.decryptionPrivateKey());
+        entity.setDecryptionPrivateKeyPassphrase(request.decryptionPrivateKeyPassphrase());
         entity.setEnabled(request.enabled() == null || request.enabled());
         entity.setEnvironmentIds(environmentIds);
         return toProfileRecord(profileRepository.save(entity));
@@ -385,13 +385,18 @@ public class PlatformCatalogService {
         SuiteEntity entity = request.id() == null || request.id().isBlank()
                 ? new SuiteEntity()
                 : requireSuite(request.id());
+        if (entity.getId() != null && !projectId.equals(entity.getProjectId())) {
+            throw new IllegalArgumentException("Suite does not belong to the selected project");
+        }
         entity.setProjectId(projectId);
         entity.setName(request.name());
         entity.setDescription(request.description());
         entity.setStatus(defaultStatus(request.status()));
-        SuiteEntity saved = suiteRepository.save(entity);
+        SuiteEntity saved = suiteRepository.saveAndFlush(entity);
 
-        suiteCaseRepository.deleteBySuiteId(saved.getId());
+        Map<String, SuiteCaseEntity> existingEntries = suiteCaseRepository.findBySuiteIdOrderByCaseOrderAsc(saved.getId()).stream()
+                .collect(java.util.stream.Collectors.toMap(SuiteCaseEntity::getId, item -> item));
+        java.util.Set<String> retainedEntryIds = new java.util.HashSet<>();
         List<UpsertSuiteCaseRequest> cases = request.cases() == null ? List.of() : request.cases();
         for (int i = 0; i < cases.size(); i++) {
             UpsertSuiteCaseRequest suiteCaseRequest = cases.get(i);
@@ -399,7 +404,12 @@ public class PlatformCatalogService {
             if (!projectId.equals(testCase.getProjectId())) {
                 throw new IllegalArgumentException("Case does not belong to project: " + suiteCaseRequest.caseId());
             }
-            SuiteCaseEntity suiteCase = new SuiteCaseEntity();
+            SuiteCaseEntity suiteCase = suiteCaseRequest.id() == null || suiteCaseRequest.id().isBlank()
+                    ? new SuiteCaseEntity()
+                    : existingEntries.get(suiteCaseRequest.id());
+            if (suiteCase == null) {
+                throw new IllegalArgumentException("Suite entry does not belong to the selected Suite: " + suiteCaseRequest.id());
+            }
             suiteCase.setSuiteId(saved.getId());
             suiteCase.setCaseId(suiteCaseRequest.caseId());
             suiteCase.setDisplayName(suiteCaseRequest.displayName());
@@ -425,7 +435,13 @@ public class PlatformCatalogService {
             suiteCase.setEnvironmentId(environmentId);
             suiteCase.setProfileId(profileId);
             suiteCaseRepository.save(suiteCase);
+            retainedEntryIds.add(suiteCase.getId());
         }
+        existingEntries.values().stream()
+                .filter(entry -> !retainedEntryIds.contains(entry.getId()))
+                .forEach(suiteCaseRepository::delete);
+        saved.touch();
+        saved = suiteRepository.saveAndFlush(saved);
 
         return toSuiteRecord(saved);
     }
@@ -550,12 +566,12 @@ public class PlatformCatalogService {
         profile.setProjectId(projectId);
         profile.setName("local-secure-profile");
         profile.setType("PGP");
-        profile.setSenderPublicKey(readOptionalFile("test-framework/src/test/resources/keys/server-public.asc"));
-        profile.setSenderPrivateKey(readOptionalFile("test-framework/src/test/resources/keys/client-private.asc"));
-        profile.setSenderPrivateKeyPassphrase("demo-client-passphrase");
-        profile.setRecipientPublicKey(readOptionalFile("test-framework/src/test/resources/keys/server-public.asc"));
-        profile.setRecipientPrivateKey(readOptionalFile("test-framework/src/test/resources/keys/client-private.asc"));
-        profile.setRecipientPrivateKeyPassphrase("demo-client-passphrase");
+        profile.setVerificationPublicKey(readOptionalFile("test-framework/src/test/resources/keys/server-public.asc"));
+        profile.setSigningPrivateKey(readOptionalFile("test-framework/src/test/resources/keys/client-private.asc"));
+        profile.setSigningPrivateKeyPassphrase("demo-client-passphrase");
+        profile.setEncryptionPublicKey(readOptionalFile("test-framework/src/test/resources/keys/server-public.asc"));
+        profile.setDecryptionPrivateKey(readOptionalFile("test-framework/src/test/resources/keys/client-private.asc"));
+        profile.setDecryptionPrivateKeyPassphrase("demo-client-passphrase");
         profile.setEnabled(true);
         profile.setEnvironmentIds(new HashSet<>(environmentIds));
         profileRepository.save(profile);
@@ -670,12 +686,12 @@ public class PlatformCatalogService {
                 entity.getProjectId(),
                 entity.getName(),
                 entity.getType(),
-                entity.getSenderPublicKey(),
-                entity.getSenderPrivateKey(),
-                entity.getSenderPrivateKeyPassphrase(),
-                entity.getRecipientPublicKey(),
-                entity.getRecipientPrivateKey(),
-                entity.getRecipientPrivateKeyPassphrase(),
+                entity.getVerificationPublicKey(),
+                entity.getSigningPrivateKey(),
+                entity.getSigningPrivateKeyPassphrase(),
+                entity.getEncryptionPublicKey(),
+                entity.getDecryptionPrivateKey(),
+                entity.getDecryptionPrivateKeyPassphrase(),
                 List.copyOf(entity.getEnvironmentIds()),
                 entity.isEnabled());
     }
@@ -720,6 +736,7 @@ public class PlatformCatalogService {
                 entity.getName(),
                 entity.getDescription(),
                 entity.getStatus(),
+                entity.getRevision() == null ? 0 : entity.getRevision(),
                 cases,
                 entity.getCreatedAt(),
                 entity.getUpdatedAt());
@@ -848,12 +865,12 @@ public class PlatformCatalogService {
             String projectId,
             String name,
             String type,
-            String senderPublicKey,
-            String senderPrivateKey,
-            String senderPrivateKeyPassphrase,
-            String recipientPublicKey,
-            String recipientPrivateKey,
-            String recipientPrivateKeyPassphrase,
+            String verificationPublicKey,
+            String signingPrivateKey,
+            String signingPrivateKeyPassphrase,
+            String encryptionPublicKey,
+            String decryptionPrivateKey,
+            String decryptionPrivateKeyPassphrase,
             List<String> environmentIds,
             boolean enabled) {
     }
@@ -908,6 +925,7 @@ public class PlatformCatalogService {
             String name,
             String description,
             String status,
+            long revision,
             List<SuiteCaseRecord> cases,
             Instant createdAt,
             Instant updatedAt) {
@@ -939,12 +957,12 @@ public class PlatformCatalogService {
             String id,
             @NotBlank String name,
             String type,
-            String senderPublicKey,
-            String senderPrivateKey,
-            String senderPrivateKeyPassphrase,
-            String recipientPublicKey,
-            String recipientPrivateKey,
-            String recipientPrivateKeyPassphrase,
+            String verificationPublicKey,
+            String signingPrivateKey,
+            String signingPrivateKeyPassphrase,
+            String encryptionPublicKey,
+            String decryptionPrivateKey,
+            String decryptionPrivateKeyPassphrase,
             @NotEmpty List<String> environmentIds,
             Boolean enabled) {
     }

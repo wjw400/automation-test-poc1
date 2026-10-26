@@ -2,10 +2,15 @@
 
 ## Status
 
-This is the current implementation baseline. It replaces the encryption-specific
-`x-platform-payload` model for new OpenAPI documents. The legacy
-`x-plaintext-request-schema` and `x-plaintext-response-schema` fields remain a
-read-only compatibility fallback while older documents are migrated.
+2026-10-24 update: operation-level PGP settings and automatic execution now follow
+[the operation processing implementation](operation-processing-implementation.md).
+The built-in catalog remains a read-only reference; known legacy pipeline
+references can be imported into the effective operation settings. New documents
+can declare protection and ciphertext locations directly.
+
+Operation business schemas and processing rules use `x-platform-processing` or
+saved platform settings. The catalog describes reviewed built-in capabilities;
+it does not provide adapters for removed extension formats.
 
 ## Goal
 

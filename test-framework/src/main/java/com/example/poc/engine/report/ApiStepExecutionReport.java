@@ -17,6 +17,12 @@ public class ApiStepExecutionReport {
     private Map<String, Object> decryptedPayloads = new LinkedHashMap<>();
     private List<ValidationReport> validations = new ArrayList<>();
     private Map<String, Object> extractedValues = new LinkedHashMap<>();
+    private Map<String, Object> processingSnapshot = new LinkedHashMap<>();
+    private Object businessRequest;
+    public Map<String, Object> getProcessingSnapshot() { return processingSnapshot; }
+    public void setProcessingSnapshot(Map<String, Object> snapshot) { processingSnapshot = snapshot; }
+    public Object getBusinessRequest() { return businessRequest; }
+    public void setBusinessRequest(Object body) { businessRequest = body; }
 
     public int getIndex() {
         return index;

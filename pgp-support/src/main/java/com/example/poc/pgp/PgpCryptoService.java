@@ -60,12 +60,21 @@ public class PgpCryptoService {
     }
 
     public String signAndEncrypt(String plaintext, PgpProfileMaterial profile) {
-        ensureOutboundProfile(profile);
+        return encrypt(plaintext, profile, true);
+    }
+
+    public String encrypt(String plaintext, PgpProfileMaterial profile) {
+        return encrypt(plaintext, profile, false);
+    }
+
+    private String encrypt(String plaintext, PgpProfileMaterial profile, boolean sign) {
+        if (sign) ensureOutboundProfile(profile);
+        else if (profile == null || isBlank(profile.getEncryptionPublicKey())) throw new IllegalArgumentException("PGP encryption requires encryptionPublicKey (counterparty public key)");
         try {
             byte[] data = plaintext.getBytes(StandardCharsets.UTF_8);
-            PGPSecretKey signingKey = loadSigningSecretKey(profile.getSenderPrivateKey());
-            PGPPrivateKey privateKey = extractPrivateKey(signingKey, profile.getSenderPrivateKeyPassphrase());
-            PGPPublicKey encryptionKey = loadEncryptionKey(profile.getRecipientPublicKey());
+            PGPSecretKey signingKey = sign ? loadSigningSecretKey(profile.getSigningPrivateKey()) : null;
+            PGPPrivateKey privateKey = sign ? extractPrivateKey(signingKey, profile.getSigningPrivateKeyPassphrase()) : null;
+            PGPPublicKey encryptionKey = loadEncryptionKey(profile.getEncryptionPublicKey());
 
             ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
             try (ArmoredOutputStream armoredOutputStream = new ArmoredOutputStream(outputStream)) {
@@ -81,21 +90,24 @@ public class PgpCryptoService {
                     PGPCompressedDataGenerator compressedDataGenerator =
                             new PGPCompressedDataGenerator(CompressionAlgorithmTags.ZIP);
                     try (OutputStream compressedOutput = compressedDataGenerator.open(encryptedOutput)) {
-                        PGPSignatureGenerator signatureGenerator = new PGPSignatureGenerator(
-                                new JcaPGPContentSignerBuilder(
-                                        signingKey.getPublicKey().getAlgorithm(),
-                                        HashAlgorithmTags.SHA256)
-                                        .setProvider(PROVIDER));
-                        signatureGenerator.init(PGPSignature.BINARY_DOCUMENT, privateKey);
+                        PGPSignatureGenerator signatureGenerator = null;
+                        if (sign) {
+                            signatureGenerator = new PGPSignatureGenerator(
+                                    new JcaPGPContentSignerBuilder(
+                                            signingKey.getPublicKey().getAlgorithm(),
+                                            HashAlgorithmTags.SHA256)
+                                            .setProvider(PROVIDER));
+                            signatureGenerator.init(PGPSignature.BINARY_DOCUMENT, privateKey);
 
-                        Iterator<String> userIds = signingKey.getPublicKey().getUserIDs();
-                        if (userIds.hasNext()) {
-                            PGPSignatureSubpacketGenerator subpacketGenerator = new PGPSignatureSubpacketGenerator();
-                            subpacketGenerator.setSignerUserID(false, userIds.next());
-                            signatureGenerator.setHashedSubpackets(subpacketGenerator.generate());
+                            Iterator<String> userIds = signingKey.getPublicKey().getUserIDs();
+                            if (userIds.hasNext()) {
+                                PGPSignatureSubpacketGenerator subpacketGenerator = new PGPSignatureSubpacketGenerator();
+                                subpacketGenerator.setSignerUserID(false, userIds.next());
+                                signatureGenerator.setHashedSubpackets(subpacketGenerator.generate());
+                            }
+
+                            signatureGenerator.generateOnePassVersion(false).encode(compressedOutput);
                         }
-
-                        signatureGenerator.generateOnePassVersion(false).encode(compressedOutput);
 
                         PGPLiteralDataGenerator literalDataGenerator = new PGPLiteralDataGenerator();
                         try (OutputStream literalOutput = literalDataGenerator.open(
@@ -105,10 +117,10 @@ public class PgpCryptoService {
                                 data.length,
                                 new Date())) {
                             literalOutput.write(data);
-                            signatureGenerator.update(data);
+                            if (sign) signatureGenerator.update(data);
                         }
 
-                        signatureGenerator.generate().encode(compressedOutput);
+                        if (sign) signatureGenerator.generate().encode(compressedOutput);
                     } finally {
                         compressedDataGenerator.close();
                     }
@@ -116,12 +128,21 @@ public class PgpCryptoService {
             }
             return outputStream.toString(StandardCharsets.UTF_8);
         } catch (IOException | PGPException e) {
-            throw new IllegalArgumentException("Failed to sign and encrypt payload", e);
+            throw new IllegalArgumentException(sign ? "Failed to sign and encrypt payload" : "Failed to encrypt payload", e);
         }
     }
 
     public String decryptAndVerify(String armoredMessage, PgpProfileMaterial profile) {
-        ensureInboundProfile(profile);
+        return decrypt(armoredMessage, profile, true);
+    }
+
+    public String decrypt(String armoredMessage, PgpProfileMaterial profile) {
+        return decrypt(armoredMessage, profile, false);
+    }
+
+    private String decrypt(String armoredMessage, PgpProfileMaterial profile, boolean verifySignature) {
+        if (verifySignature) ensureInboundProfile(profile);
+        else if (profile == null || isBlank(profile.getDecryptionPrivateKey())) throw new IllegalArgumentException("PGP decryption requires decryptionPrivateKey (our private key)");
         try (InputStream decoderInput = PGPUtil.getDecoderStream(
                 new ByteArrayInputStream(armoredMessage.getBytes(StandardCharsets.UTF_8)))) {
             JcaPGPObjectFactory objectFactory = new JcaPGPObjectFactory(decoderInput);
@@ -130,7 +151,7 @@ public class PgpCryptoService {
                     ? (PGPEncryptedDataList) firstObject
                     : (PGPEncryptedDataList) objectFactory.nextObject();
 
-            PGPSecretKeyRingCollection secretKeyRings = loadSecretKeyRingCollection(profile.getRecipientPrivateKey());
+            PGPSecretKeyRingCollection secretKeyRings = loadSecretKeyRingCollection(profile.getDecryptionPrivateKey());
             PGPPublicKeyEncryptedData encryptedData = null;
             PGPPrivateKey privateKey = null;
 
@@ -139,7 +160,7 @@ public class PgpCryptoService {
                 PGPSecretKey secretKey = secretKeyRings.getSecretKey(candidate.getKeyID());
                 if (secretKey != null) {
                     encryptedData = candidate;
-                    privateKey = extractPrivateKey(secretKey, profile.getRecipientPrivateKeyPassphrase());
+                    privateKey = extractPrivateKey(secretKey, profile.getDecryptionPrivateKeyPassphrase());
                     break;
                 }
             }
@@ -161,12 +182,14 @@ public class PgpCryptoService {
                 PGPOnePassSignatureList onePassSignatures = null;
                 PGPLiteralData literalData = null;
                 PGPSignatureList signatureList = null;
+                byte[] literalBytes = null;
 
                 while (message != null) {
                     if (message instanceof PGPOnePassSignatureList signatures) {
                         onePassSignatures = signatures;
                     } else if (message instanceof PGPLiteralData data) {
                         literalData = data;
+                        literalBytes = data.getInputStream().readAllBytes();
                     } else if (message instanceof PGPSignatureList signatures) {
                         signatureList = signatures;
                     }
@@ -177,23 +200,20 @@ public class PgpCryptoService {
                     throw new IllegalArgumentException("PGP payload did not contain literal data");
                 }
 
-                byte[] literalBytes;
-                try (InputStream literalInput = literalData.getInputStream()) {
-                    literalBytes = literalInput.readAllBytes();
-                }
+                if (verifySignature) {
+                    if (onePassSignatures == null || signatureList == null || onePassSignatures.size() == 0) {
+                        throw new IllegalArgumentException("PGP payload did not contain a verifiable signature");
+                    }
 
-                if (onePassSignatures == null || signatureList == null || onePassSignatures.size() == 0) {
-                    throw new IllegalArgumentException("PGP payload did not contain a verifiable signature");
-                }
+                    PGPOnePassSignature onePassSignature = onePassSignatures.get(0);
+                    PGPPublicKey verificationKey = loadVerificationKey(profile.getVerificationPublicKey(), onePassSignature.getKeyID());
+                    onePassSignature.init(new JcaPGPContentVerifierBuilderProvider().setProvider(PROVIDER), verificationKey);
+                    onePassSignature.update(literalBytes);
 
-                PGPOnePassSignature onePassSignature = onePassSignatures.get(0);
-                PGPPublicKey verificationKey = loadVerificationKey(profile.getSenderPublicKey(), onePassSignature.getKeyID());
-                onePassSignature.init(new JcaPGPContentVerifierBuilderProvider().setProvider(PROVIDER), verificationKey);
-                onePassSignature.update(literalBytes);
-
-                PGPSignature signature = signatureList.get(0);
-                if (!onePassSignature.verify(signature)) {
-                    throw new IllegalArgumentException("PGP signature verification failed");
+                    PGPSignature signature = signatureList.get(0);
+                    if (!onePassSignature.verify(signature)) {
+                        throw new IllegalArgumentException("PGP signature verification failed");
+                    }
                 }
 
                 if (encryptedData.isIntegrityProtected() && !encryptedData.verify()) {
@@ -203,25 +223,25 @@ public class PgpCryptoService {
                 return new String(literalBytes, StandardCharsets.UTF_8);
             }
         } catch (IOException | PGPException e) {
-            throw new IllegalArgumentException("Failed to decrypt and verify payload", e);
+            throw new IllegalArgumentException(verifySignature ? "Failed to decrypt and verify payload" : "Failed to decrypt payload", e);
         }
     }
 
     private void ensureOutboundProfile(PgpProfileMaterial profile) {
         if (profile == null
-                || isBlank(profile.getSenderPrivateKey())
-                || isBlank(profile.getSenderPrivateKeyPassphrase())
-                || isBlank(profile.getRecipientPublicKey())) {
-            throw new IllegalArgumentException("Outbound PGP profile is incomplete");
+                || isBlank(profile.getSigningPrivateKey())
+                || isBlank(profile.getSigningPrivateKeyPassphrase())
+                || isBlank(profile.getEncryptionPublicKey())) {
+            throw new IllegalArgumentException("PGP sign-and-encrypt requires signingPrivateKey, its passphrase and encryptionPublicKey");
         }
     }
 
     private void ensureInboundProfile(PgpProfileMaterial profile) {
         if (profile == null
-                || isBlank(profile.getRecipientPrivateKey())
-                || isBlank(profile.getRecipientPrivateKeyPassphrase())
-                || isBlank(profile.getSenderPublicKey())) {
-            throw new IllegalArgumentException("Inbound PGP profile is incomplete");
+                || isBlank(profile.getDecryptionPrivateKey())
+                || isBlank(profile.getDecryptionPrivateKeyPassphrase())
+                || isBlank(profile.getVerificationPublicKey())) {
+            throw new IllegalArgumentException("PGP decrypt-and-verify requires decryptionPrivateKey, its passphrase and verificationPublicKey");
         }
     }
 

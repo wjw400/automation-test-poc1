@@ -84,6 +84,10 @@ public class ScenarioCommandEngine {
             request.setBody(setJsonPointer(request.getBody(), value.path(), value.value()));
             return;
         }
+        if (command instanceof ScenarioCommand.SetResponseStatus value) {
+            response(step(scenario, stepIds, value.stepId())).setStatus(value.status());
+            return;
+        }
         if (command instanceof ScenarioCommand.AddBeforeAction value) {
             actions(step(scenario, stepIds, value.stepId())).getBeforeSend().add(value.action());
             return;

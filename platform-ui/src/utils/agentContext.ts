@@ -19,6 +19,7 @@ export type ResolvedAgentContext = {
 
 export function resolveAgentContext(options: {
   targetScenario?: CaseRecord
+  targetSuite?: SuiteRecord
   selection: AgentContextSelection
   scenarios: CaseRecord[]
   suites: SuiteRecord[]
@@ -26,7 +27,7 @@ export function resolveAgentContext(options: {
   runs: RunRecord[]
   knowledge: TestKnowledgeRecord[]
 }): ResolvedAgentContext {
-  const { targetScenario, selection, scenarios, operations, runs, knowledge } = options
+  const { targetScenario, targetSuite, selection, scenarios, operations, runs, knowledge } = options
   const scenarioIds = new Set<string>()
   const suiteIds = new Set<string>()
   const automaticOperationIds = new Set<string>()
@@ -42,6 +43,7 @@ export function resolveAgentContext(options: {
   )
 
   if (targetScenario) scenarioIds.add(targetScenario.id)
+  if (targetSuite) suiteIds.add(targetSuite.id)
   selection.included.forEach((item) => {
     if (item.type === 'SCENARIO') scenarioIds.add(item.id)
     if (item.type === 'SUITE') suiteIds.add(item.id)

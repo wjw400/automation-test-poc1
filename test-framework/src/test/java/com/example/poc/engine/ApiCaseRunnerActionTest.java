@@ -88,7 +88,9 @@ class ApiCaseRunnerActionTest {
                           path: /health
                         request: {}
                         response:
-                          status: 200
+                          status:
+                            operator: oneOf
+                            expected: [200]
                           assertions:
                             - source: response.body
                               path: $.status
@@ -138,7 +140,9 @@ class ApiCaseRunnerActionTest {
                             customer: A B
                             orderId: ${orderId}
                         response:
-                          status: 200
+                          status:
+                            operator: oneOf
+                            expected: [200]
                           assertions: []
                     """.formatted(server.getAddress().getPort());
 
@@ -187,12 +191,12 @@ class ApiCaseRunnerActionTest {
 
     private PgpProfileMaterial serverProfile() {
         PgpProfileMaterial profile = new PgpProfileMaterial();
-        profile.setSenderPublicKey(keyMaterial("keys/client-public.asc"));
-        profile.setSenderPrivateKey(keyMaterial("keys/server-private.asc"));
-        profile.setSenderPrivateKeyPassphrase("demo-server-passphrase");
-        profile.setRecipientPublicKey(keyMaterial("keys/client-public.asc"));
-        profile.setRecipientPrivateKey(keyMaterial("keys/server-private.asc"));
-        profile.setRecipientPrivateKeyPassphrase("demo-server-passphrase");
+        profile.setVerificationPublicKey(keyMaterial("keys/client-public.asc"));
+        profile.setSigningPrivateKey(keyMaterial("keys/server-private.asc"));
+        profile.setSigningPrivateKeyPassphrase("demo-server-passphrase");
+        profile.setEncryptionPublicKey(keyMaterial("keys/client-public.asc"));
+        profile.setDecryptionPrivateKey(keyMaterial("keys/server-private.asc"));
+        profile.setDecryptionPrivateKeyPassphrase("demo-server-passphrase");
         return profile;
     }
 
@@ -217,12 +221,12 @@ class ApiCaseRunnerActionTest {
                   baseUrl: http://127.0.0.1:%d
                 profiles:
                   secureEcho:
-                    senderPublicKey: classpath:keys/server-public.asc
-                    senderPrivateKey: classpath:keys/client-private.asc
-                    senderPrivateKeyPassphrase: demo-client-passphrase
-                    recipientPublicKey: classpath:keys/server-public.asc
-                    recipientPrivateKey: classpath:keys/client-private.asc
-                    recipientPrivateKeyPassphrase: demo-client-passphrase
+                    verificationPublicKey: classpath:keys/server-public.asc
+                    signingPrivateKey: classpath:keys/client-private.asc
+                    signingPrivateKeyPassphrase: demo-client-passphrase
+                    encryptionPublicKey: classpath:keys/server-public.asc
+                    decryptionPrivateKey: classpath:keys/client-private.asc
+                    decryptionPrivateKeyPassphrase: demo-client-passphrase
                 steps:
                   - name: Submit encrypted XML envelope
                     type: http
@@ -268,7 +272,9 @@ class ApiCaseRunnerActionTest {
                             target: decrypted.securePayload
                             format: json
                     response:
-                      status: 200
+                      status:
+                        operator: oneOf
+                        expected: [200]
                       assertions:
                         - source: response.body
                           path: $.code

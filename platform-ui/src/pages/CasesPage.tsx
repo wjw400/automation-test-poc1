@@ -22,15 +22,18 @@ import {
   PlayCircleOutlined,
   PlusOutlined,
   RightOutlined,
+  RobotOutlined,
   SaveOutlined,
 } from '@ant-design/icons'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSearchParams } from 'react-router-dom'
 import { CaseDesigner } from '../components/CaseDesigner'
+import { ScenarioDslViewer } from '../components/ScenarioDslViewer'
 import { ScenarioRunHistory } from '../components/ScenarioRunHistory'
 import { platformApi } from '../api/platformApi'
 import { parseDsl, stringifyDsl } from '../utils/caseDsl'
+import { validateCaseDslV1 } from '../utils/caseDslValidation'
 import type {
   CaseRecord,
   FolderRecord,
@@ -72,6 +75,9 @@ type CasesPageProps = {
   onDeleted?: () => void
   agentDraft?: ScenarioDraftRecord
   onAgentDraftApplied?: (scenarioId: string) => void
+  agentOpen?: boolean
+  onAgentToggle?: () => void
+  agentPane?: ReactNode
 }
 
 export function CasesPage({
@@ -84,9 +90,12 @@ export function CasesPage({
   onDeleted,
   agentDraft,
   onAgentDraftApplied,
+  agentOpen = false,
+  onAgentToggle,
+  agentPane,
 }: CasesPageProps = {}) {
   const { message, modal } = App.useApp()
-  const { t } = useTranslation(['common', 'scenario'])
+  const { t } = useTranslation(['common', 'scenario', 'agent'])
   const queryClient = useQueryClient()
   const [searchParams, setSearchParams] = useSearchParams()
   const [draft, setDraft] = useState<SaveCaseInput>(emptyDraft)
@@ -112,7 +121,7 @@ export function CasesPage({
   const [caseFilter, setCaseFilter] = useState('')
   const [expandedFolderKeys, setExpandedFolderKeys] = useState<Set<string>>(() => new Set())
   const [runResultOverride, setRunResultOverride] = useState<RunRecord>()
-  const [activeAssetView, setActiveAssetView] = useState<'definition' | 'runs'>('definition')
+  const [activeAssetView, setActiveAssetView] = useState<'definition' | 'raw' | 'runs'>('definition')
   const [selectedRunId, setSelectedRunId] = useState<string>()
   const [variablesJsonError, setVariablesJsonError] = useState<string | null>(null)
   const [embeddedStepIndex, setEmbeddedStepIndex] = useState<number>()
@@ -234,8 +243,9 @@ export function CasesPage({
   useEffect(() => {
     if (
       !agentDraft
+      || !agentDraft.scenarioId
       || agentDraft.scenarioId !== selectedCase?.id
-      || draftCaseId !== selectedCase.id
+      || draftCaseId !== selectedCase?.id
       || appliedAgentDraftIdRef.current === agentDraft.id
     ) {
       return
@@ -278,6 +288,12 @@ export function CasesPage({
   }, [isCreating, selectedCase?.id])
 
   const parsedDraft = useMemo(() => parseDsl(draft.content), [draft.content])
+  const dslValidationIssues = useMemo(
+    () => parsedDraft.data ? validateCaseDslV1(parsedDraft.data) : [],
+    [parsedDraft.data],
+  )
+  const dslValidationError = parsedDraft.error ?? dslValidationIssues[0]?.message ?? null
+  const dslIssueCount = parsedDraft.error ? 1 : dslValidationIssues.length
   const draftSteps = Array.isArray(parsedDraft.data?.steps) ? parsedDraft.data.steps : []
   const requestedStepIndex = selectedStepParam == null ? -1 : Number(selectedStepParam)
   const activeStepIndex = Number.isInteger(requestedStepIndex)
@@ -390,6 +406,9 @@ export function CasesPage({
       }
       if (variablesJsonError) {
         throw new Error(`${t('scenario:messages.fixVariablesBeforeSave')}: ${variablesJsonError}`)
+      }
+      if (dslValidationError) {
+        throw new Error(`${t('scenario:messages.fixDslBeforeSave')}: ${dslValidationError}`)
       }
       const payload = normalizeDraftForSave(draft)
       pendingSaveWasManuallyModifiedRef.current = Boolean(
@@ -1008,8 +1027,16 @@ export function CasesPage({
                   onPressEnter={(event) => event.currentTarget.blur()}
                 />
               </div>
-              <Text className={variablesJsonError ? 'scenario-draft-state invalid' : isDraftDirty ? 'scenario-draft-state dirty' : 'scenario-draft-state'}>
-                {variablesJsonError ? t('scenario:messages.invalidJson') : saveTitleMutation.isPending ? t('scenario:saving') : isDraftDirty ? t('scenario:messages.unsaved') : t('scenario:saved')}
+              <Text className={variablesJsonError || dslValidationError ? 'scenario-draft-state invalid' : isDraftDirty ? 'scenario-draft-state dirty' : 'scenario-draft-state'}>
+                {variablesJsonError
+                  ? t('scenario:messages.invalidJson')
+                  : dslValidationError
+                    ? t('scenario:validation.issueCount', { count: dslIssueCount })
+                    : saveTitleMutation.isPending
+                      ? t('scenario:saving')
+                      : isDraftDirty
+                        ? t('scenario:messages.unsaved')
+                        : t('scenario:saved')}
               </Text>
             </div>
 
@@ -1045,20 +1072,42 @@ export function CasesPage({
               </div>
               <Button
                 icon={<SaveOutlined />}
-                disabled={!isDraftDirty || Boolean(variablesJsonError)}
+                disabled={!isDraftDirty || Boolean(variablesJsonError) || Boolean(dslValidationError)}
                 loading={saveCaseMutation.isPending}
-                title={variablesJsonError ? t('scenario:messages.fixVariablesBeforeSave') : t('common:actions.save')}
+                title={variablesJsonError
+                  ? t('scenario:messages.fixVariablesBeforeSave')
+                  : dslValidationError
+                    ? t('scenario:messages.fixDslBeforeSave')
+                    : t('common:actions.save')}
                 onClick={() => void saveCaseMutation.mutateAsync()}
               >
                 {t('common:actions.save')}
               </Button>
+              {embedded ? (
+                <Button
+                  className={agentOpen ? 'asset-agent-button active' : 'asset-agent-button'}
+                  icon={<RobotOutlined />}
+                  disabled={!selectedCase || isCreating}
+                  aria-label={t('agent:openScenarioAgent')}
+                  title={t('agent:openScenarioAgent')}
+                  onClick={onAgentToggle}
+                >
+                  {t('agent:shortTitle')}
+                </Button>
+              ) : null}
               <Space.Compact>
                 <Button
                   type="primary"
                   icon={<PlayCircleOutlined />}
                   loading={runMutation.isPending}
-                  disabled={!selectedCase || !selectedEnvironment || !selectedProfile || isCreating || isDraftDirty || Boolean(variablesJsonError)}
-                  title={variablesJsonError ? t('scenario:messages.fixVariablesBeforeRun') : isDraftDirty ? t('scenario:messages.saveBeforeRun') : t('scenario:messages.runSelectedContext')}
+                  disabled={!selectedCase || !selectedEnvironment || !selectedProfile || isCreating || isDraftDirty || Boolean(variablesJsonError) || Boolean(dslValidationError)}
+                  title={variablesJsonError
+                    ? t('scenario:messages.fixVariablesBeforeRun')
+                    : dslValidationError
+                      ? t('scenario:messages.fixDslBeforeRun')
+                      : isDraftDirty
+                        ? t('scenario:messages.saveBeforeRun')
+                        : t('scenario:messages.runSelectedContext')}
                   onClick={() => void runMutation.mutateAsync({})}
                 >
                   {t('common:actions.run')}
@@ -1084,7 +1133,7 @@ export function CasesPage({
                     type="primary"
                     aria-label={t('scenario:moreRunOptions')}
                     icon={<DownOutlined />}
-                    disabled={!selectedCase || isCreating || isDraftDirty || Boolean(variablesJsonError) || runMutation.isPending}
+                    disabled={!selectedCase || isCreating || isDraftDirty || Boolean(variablesJsonError) || Boolean(dslValidationError) || runMutation.isPending}
                     title={t('scenario:moreRunOptions')}
                   />
                 </Dropdown>
@@ -1092,54 +1141,74 @@ export function CasesPage({
             </Space>
           </section>
 
-          {saveCaseMutation.isError ? (
-            <Alert className="section-alert" type="error" showIcon message={t('scenario:messages.saveFailed')} />
-          ) : null}
-          {runMutation.isError ? (
-            <Alert className="section-alert" type="error" showIcon message={t('scenario:messages.runFailed')} />
-          ) : null}
-          {deleteCaseMutation.isError ? (
-            <Alert className="section-alert" type="error" showIcon message={t('scenario:messages.deleteFailed')} />
-          ) : null}
+          <div className={agentPane ? 'asset-tab-workspace agent-visible' : 'asset-tab-workspace'}>
+            <div className="asset-tab-editor-pane scenario-editor-pane">
+              {saveCaseMutation.isError ? (
+                <Alert className="section-alert" type="error" showIcon message={t('scenario:messages.saveFailed')} />
+              ) : null}
+              {runMutation.isError ? (
+                <Alert className="section-alert" type="error" showIcon message={t('scenario:messages.runFailed')} />
+              ) : null}
+              {deleteCaseMutation.isError ? (
+                <Alert className="section-alert" type="error" showIcon message={t('scenario:messages.deleteFailed')} />
+              ) : null}
 
-          <nav className="asset-context-tabs" aria-label={t('scenario:sectionsLabel')}>
-            <button
-              type="button"
-              className={activeAssetView === 'definition' ? 'active' : ''}
-              onClick={() => setActiveAssetView('definition')}
-            >
-              {t('scenario:definition')}
-            </button>
-            <button
-              type="button"
-              className={activeAssetView === 'runs' ? 'active' : ''}
-              onClick={() => setActiveAssetView('runs')}
-            >
-              {t('scenario:executions')} <span>{scenarioRuns.length}</span>
-            </button>
-          </nav>
+              <nav className="asset-context-tabs" aria-label={t('scenario:sectionsLabel')}>
+                <button
+                  type="button"
+                  className={activeAssetView === 'definition' ? 'active' : ''}
+                  onClick={() => setActiveAssetView('definition')}
+                >
+                  {t('scenario:definition')}
+                </button>
+                <button
+                  type="button"
+                  className={activeAssetView === 'raw' ? 'active' : ''}
+                  onClick={() => setActiveAssetView('raw')}
+                >
+                  {t('scenario:raw')} {dslIssueCount ? <span>{dslIssueCount}</span> : null}
+                </button>
+                <button
+                  type="button"
+                  className={activeAssetView === 'runs' ? 'active' : ''}
+                  onClick={() => setActiveAssetView('runs')}
+                >
+                  {t('scenario:executions')} <span>{scenarioRuns.length}</span>
+                </button>
+              </nav>
 
-          <div className="asset-context-content">
-            {activeAssetView === 'definition' ? (
-              <CaseDesigner
-                key={isCreating ? '__new__' : selectedCase?.id ?? '__empty__'}
-                draft={draft}
-                onChange={setDraft}
-                operations={operationsQuery.data ?? []}
-                view={selectedEditorView}
-                activeStepIndex={activeStepIndex}
-                onSelectCaseOverview={handleSelectCaseOverview}
-                onSelectStep={handleSelectDraftStep}
-                onVariablesValidationChange={setVariablesJsonError}
-              />
-            ) : (
-              <ScenarioRunHistory
-                runs={scenarioRuns}
-                selectedRunId={selectedRunId}
-                suiteNamesById={suiteNamesById}
-                onSelect={setSelectedRunId}
-              />
-            )}
+              <div className="asset-context-content">
+                {activeAssetView === 'definition' ? (
+                  <CaseDesigner
+                    key={isCreating ? '__new__' : selectedCase?.id ?? '__empty__'}
+                    draft={draft}
+                    onChange={setDraft}
+                    operations={operationsQuery.data ?? []}
+                    view={selectedEditorView}
+                    activeStepIndex={activeStepIndex}
+                    onSelectCaseOverview={handleSelectCaseOverview}
+                    onSelectStep={handleSelectDraftStep}
+                    onOpenRaw={() => setActiveAssetView('raw')}
+                    onVariablesValidationChange={setVariablesJsonError}
+                  />
+                ) : activeAssetView === 'raw' ? (
+                  <ScenarioDslViewer
+                    content={draft.content}
+                    issues={dslValidationIssues}
+                    parseError={parsedDraft.error}
+                    onChange={(content) => setDraft((current) => ({ ...current, content }))}
+                  />
+                ) : (
+                  <ScenarioRunHistory
+                    runs={scenarioRuns}
+                    selectedRunId={selectedRunId}
+                    suiteNamesById={suiteNamesById}
+                    onSelect={setSelectedRunId}
+                  />
+                )}
+              </div>
+            </div>
+            {agentPane}
           </div>
         </main>
 

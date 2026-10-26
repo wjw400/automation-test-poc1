@@ -1,7 +1,10 @@
-import { SaveOutlined } from '@ant-design/icons'
+import { EditOutlined, ReadOutlined, SaveOutlined } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Alert, App, Button, Form, Input, Select, Space, Tag, Typography } from 'antd'
+import { Alert, App, Button, Form, Input, Segmented, Select, Space, Tag, Typography } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { platformApi } from '../api/platformApi'
 import type { SaveTestKnowledgeInput, TestKnowledgeRecord, TestKnowledgeScope } from '../types/platform'
 
@@ -22,18 +25,26 @@ const emptyDraft: SaveTestKnowledgeInput = {
 
 export function TestKnowledgeEditor({ projectId, knowledge, onDirtyChange, onTitleChange, onSaveReady, onSaved }: Props) {
   const { message } = App.useApp()
+  const { t } = useTranslation('workspace')
   const queryClient = useQueryClient()
   const initial = useMemo(() => knowledge ? toDraft(knowledge) : emptyDraft, [knowledge])
   const [draft, setDraft] = useState<SaveTestKnowledgeInput>(initial)
   const [baseline, setBaseline] = useState<SaveTestKnowledgeInput>(initial)
   const [tagsInput, setTagsInput] = useState(initial.tags.join(', '))
   const [error, setError] = useState<string>()
+  const [mode, setMode] = useState<'read' | 'edit'>(knowledge ? 'read' : 'edit')
   const specsQuery = useQuery({ queryKey: ['api-specs', projectId], queryFn: () => platformApi.listApiSpecs(projectId) })
   const operationsQuery = useQuery({ queryKey: ['operations', projectId], queryFn: () => platformApi.listOperations(projectId) })
   const casesQuery = useQuery({ queryKey: ['cases', projectId], queryFn: () => platformApi.listCases(projectId) })
   const suitesQuery = useQuery({ queryKey: ['suites', projectId], queryFn: () => platformApi.listSuites(projectId) })
 
-  useEffect(() => { setDraft(initial); setBaseline(initial); setTagsInput(initial.tags.join(', ')); setError(undefined) }, [initial])
+  useEffect(() => {
+    setDraft(initial)
+    setBaseline(initial)
+    setTagsInput(initial.tags.join(', '))
+    setError(undefined)
+    setMode(knowledge ? 'read' : 'edit')
+  }, [initial, knowledge])
   const dirty = JSON.stringify(draft) !== JSON.stringify(baseline)
   useEffect(() => { onDirtyChange?.(dirty) }, [dirty, onDirtyChange])
   useEffect(() => { onTitleChange?.(draft.name || 'New Test Knowledge') }, [draft.name, onTitleChange])
@@ -62,17 +73,40 @@ export function TestKnowledgeEditor({ projectId, knowledge, onDirtyChange, onTit
 
   const setScope = (scope: TestKnowledgeScope) => setDraft({ ...draft, scope, targetId: undefined })
   const targetOptions = getTargetOptions(draft.scope, specsQuery.data ?? [], operationsQuery.data ?? [], casesQuery.data ?? [], suitesQuery.data ?? [])
+  const targetLabel = draft.scope === 'PROJECT'
+    ? t('knowledgeEditor.entireProject')
+    : targetOptions.find((option) => option.value === draft.targetId)?.label ?? t('knowledgeEditor.noTarget')
   return (
     <div className="asset-editor-page knowledge-editor-page">
       <header className="asset-editor-header">
-        <div><h1>{draft.name || 'New Test Knowledge'}</h1><Text type="secondary">Markdown guidance for people and the Test Agent</Text></div>
-        <Space><Text className={dirty ? 'scenario-draft-state dirty' : 'scenario-draft-state'}>{dirty ? 'Unsaved' : 'Saved'}</Text>
-          <Button type="primary" icon={<SaveOutlined />} disabled={!dirty || !draft.name.trim() || !draft.content.trim()} loading={saveMutation.isPending} onClick={() => void saveMutation.mutateAsync()}>Save</Button>
+        <div><h1>{draft.name || 'New Test Knowledge'}</h1><Text type="secondary">{draft.description || t('knowledgeEditor.subtitle')}</Text></div>
+        <Space>
+          <Segmented
+            value={mode}
+            options={[
+              { value: 'read', label: t('knowledgeEditor.read'), icon: <ReadOutlined /> },
+              { value: 'edit', label: t('knowledgeEditor.edit'), icon: <EditOutlined /> },
+            ]}
+            onChange={(value) => setMode(value as 'read' | 'edit')}
+          />
+          <Text className={dirty ? 'scenario-draft-state dirty' : 'scenario-draft-state'}>{dirty ? 'Unsaved' : 'Saved'}</Text>
+          {mode === 'edit' ? <Button type="primary" icon={<SaveOutlined />} disabled={!dirty || !draft.name.trim() || !draft.content.trim()} loading={saveMutation.isPending} onClick={() => void saveMutation.mutateAsync()}>Save</Button> : null}
         </Space>
       </header>
       {error ? <Alert type="error" showIcon message={error} /> : null}
       <div className="asset-editor-scroll">
-        <Form className="asset-editor-form knowledge-editor-form" layout="vertical">
+        {mode === 'read' ? (
+          <article className="knowledge-reader">
+            <div className="knowledge-reader-meta">
+              <Tag variant="filled" color={draft.status === 'PUBLISHED' ? 'green' : 'default'}>{draft.status === 'PUBLISHED' ? t('knowledgeEditor.published') : t('knowledgeEditor.draft')}</Tag>
+              <Text type="secondary">{t(scopeLabelKeys[draft.scope])} · {targetLabel}</Text>
+              {draft.tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}
+            </div>
+            <div className="knowledge-reader-content">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{draft.content}</ReactMarkdown>
+            </div>
+          </article>
+        ) : <Form className="asset-editor-form knowledge-editor-form" layout="vertical">
           <div className="knowledge-editor-meta">
             <Form.Item label="Name"><Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Form.Item>
             <Form.Item label="Status"><Select value={draft.status} options={[{ value: 'DRAFT', label: 'Draft' }, { value: 'PUBLISHED', label: 'Published' }]} onChange={(status) => setDraft({ ...draft, status })} /></Form.Item>
@@ -88,7 +122,7 @@ export function TestKnowledgeEditor({ projectId, knowledge, onDirtyChange, onTit
             {draft.tags.length ? <div className="knowledge-tag-list">{draft.tags.map((tag) => <Tag key={tag}>{tag}</Tag>)}</div> : null}
           </Form.Item>
           <Form.Item className="knowledge-editor-content" label="Markdown"><Input.TextArea className="knowledge-markdown-input" spellCheck={false} value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} /></Form.Item>
-        </Form>
+        </Form>}
       </div>
     </div>
   )
@@ -98,6 +132,10 @@ const scopeOptions = [
   { value: 'PROJECT', label: 'Project' }, { value: 'API_SPEC', label: 'API Spec' }, { value: 'OPERATION', label: 'Operation' },
   { value: 'SCENARIO', label: 'Scenario' }, { value: 'SUITE', label: 'Suite' },
 ]
+const scopeLabelKeys = {
+  PROJECT: 'knowledgeEditor.scope.project', API_SPEC: 'knowledgeEditor.scope.apiSpec', OPERATION: 'knowledgeEditor.scope.operation',
+  SCENARIO: 'knowledgeEditor.scope.scenario', SUITE: 'knowledgeEditor.scope.suite',
+} as const satisfies Record<TestKnowledgeScope, string>
 function toDraft(record: TestKnowledgeRecord): SaveTestKnowledgeInput { return { name: record.name, description: record.description, scope: record.scope, targetId: record.targetId ?? undefined, tags: record.tags, content: record.content, status: record.status } }
 function getTargetOptions(scope: TestKnowledgeScope, specs: Awaited<ReturnType<typeof platformApi.listApiSpecs>>, operations: Awaited<ReturnType<typeof platformApi.listOperations>>, cases: Awaited<ReturnType<typeof platformApi.listCases>>, suites: Awaited<ReturnType<typeof platformApi.listSuites>>) {
   if (scope === 'API_SPEC') return specs.map((record) => ({ value: record.id, label: record.title || record.name }))

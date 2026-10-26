@@ -35,6 +35,51 @@ request:
 
 The Runner resolves variables and URL-encodes each path value before replacing the matching placeholder. `request.path` keys that do not exist in the Operation path are validation warnings; missing required path values are validation errors.
 
+### Variable References
+
+Case DSL v1 uses `${variableName}` as its canonical variable syntax. `${variables.variableName}` is also accepted when an explicit Scenario Variable prefix improves readability. Postman-style `{{variableName}}` placeholders are invalid and are never sent as literal request data.
+
+Variables created by `response.extract` are flat Scenario Variables. The extraction key is the variable name, independent of the producing Step name:
+
+```yaml
+response:
+  extract:
+    productId:
+      source: response.body
+      path: $[0].id
+
+# A later Step
+request:
+  body:
+    productId: ${productId}
+```
+
+Do not use `{{productId}}`, `{{list-products.productId}}`, or `${list-products.productId}` for this extraction.
+
+### HTTP Status Rules
+
+Every HTTP Step must declare `response.status`. It is the first assertion evaluated for the response and supports three explicit modes:
+
+```yaml
+# One exact status
+status:
+  operator: equals
+  expected: 201
+
+# Any listed status
+status:
+  operator: oneOf
+  expected: [200, 202, 204]
+
+# Inclusive status range
+status:
+  operator: range
+  min: 200
+  max: 299
+```
+
+Status values must be integers from 100 to 599. `oneOf` requires at least one unique value, and `range.min` must not exceed `range.max`. The legacy scalar form `status: 200` is invalid and is not migrated automatically.
+
 ## 3. Standard Example
 
 The following case starts with an XML business payload, signs and encrypts it with PGP, Base64-encodes the armored encrypted text, and constructs the final JSON Wire Request Body.
@@ -116,7 +161,9 @@ steps:
             format: json
 
     response:
-      status: 200
+      status:
+        operator: oneOf
+        expected: [200]
       assertions:
         - source: response.body
           path: $.code
@@ -158,7 +205,7 @@ DSL v1 supports exactly four Actions.
 
 Stage: `beforeSend`
 
-Signs the input with the sender private key and encrypts it with the recipient public key. It uses the resolved Step or Scenario Profile and produces ASCII-armored PGP text.
+Signs the input with our `signingPrivateKey` and encrypts it with the counterparty's `encryptionPublicKey`. It uses the resolved Step or Scenario Profile and produces ASCII-armored PGP text.
 
 Supported input formats:
 
@@ -203,7 +250,7 @@ The template must resolve to a JSON object or array, and the output target must 
 
 Stage: `afterReceive`
 
-Reads an encrypted value from the raw response, decrypts it with the recipient private key, and verifies the embedded signature with the sender public key.
+Reads an encrypted value from the raw response, decrypts it with our `decryptionPrivateKey`, and verifies the embedded signature with the counterparty's `verificationPublicKey`.
 
 Supported output formats:
 
@@ -266,6 +313,54 @@ input:
   path: $.payload
 ```
 
+### Response Assertion And Extraction Sources
+
+`response.assertions[].source` and `response.extract.<variableName>.source` use a smaller,
+stage-specific source vocabulary. Case DSL v1 supports exactly these forms:
+
+| Source | Meaning | Availability |
+| --- | --- | --- |
+| `response.body` | Raw HTTP response body captured before `afterReceive` processing | Always |
+| `decrypted.<name>` | Decrypted payload written by an enabled `afterReceive` Action | Only when that Action produces the exact target in the same Step |
+
+`raw` is not a Case DSL v1 response source. Use `response.body` for the received HTTP body.
+
+The `source` selects a logical response document. The required `path` is a JSONPath evaluated
+against that document:
+
+```yaml
+extract:
+  orderId:
+    source: response.body
+    path: $.orderId
+```
+
+For a processed payload, the source name must match an earlier `afterReceive` output target:
+
+```yaml
+actions:
+  afterReceive:
+    - type: crypto.pgp.decryptAndVerify
+      input:
+        source: response.body
+        path: $.payload
+      output:
+        target: decrypted.securePayload
+        format: json
+response:
+  status:
+    operator: oneOf
+    expected: [200]
+  assertions: []
+  extract:
+    orderId:
+      source: decrypted.securePayload
+      path: $.orderId
+```
+
+Response sources are Step-scoped. A `decrypted.<name>` produced by one Step cannot be referenced
+directly by another Step. Promote values needed by later Steps through `response.extract`.
+
 ## 8. Profile Resolution
 
 Actions never define their own Profile.
@@ -289,8 +384,8 @@ If a Step contains a crypto Action and neither level resolves a Profile, validat
 
 A Profile contains both directions of a communication relationship:
 
-- Outbound protection uses the sender private key and recipient public key.
-- Inbound processing uses the recipient private key and sender public key.
+- Outbound protection uses our `signingPrivateKey` and the counterparty's `encryptionPublicKey`.
+- Inbound processing uses our `decryptionPrivateKey` and the counterparty's `verificationPublicKey`.
 
 Private keys and passphrases are provided by the platform Profile catalog at execution time and should not be stored in managed Case YAML.
 
@@ -321,6 +416,10 @@ assertions:
 ```
 
 Extraction remains under `response.extract` because it changes Scenario context for later Steps.
+
+Both assertions and extraction must use one of the response sources defined in Section 7. A
+syntactically valid `decrypted.<name>` is still invalid when no enabled `afterReceive` Action in
+the same Step produces that exact target.
 
 ## 11. Reporting
 

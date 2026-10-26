@@ -3,6 +3,7 @@ package com.example.poc.platform.agent.scenario;
 import com.example.poc.engine.ApiStep;
 import com.example.poc.engine.CaseActionSpec;
 import com.example.poc.engine.ExtractValueSpec;
+import com.example.poc.engine.HttpStatusSpec;
 import com.example.poc.engine.ValidationSpec;
 
 public sealed interface ScenarioCommand permits
@@ -12,6 +13,7 @@ public sealed interface ScenarioCommand permits
         ScenarioCommand.SetPathParameter,
         ScenarioCommand.SetRequestBody,
         ScenarioCommand.SetRequestBodyValue,
+        ScenarioCommand.SetResponseStatus,
         ScenarioCommand.AddBeforeAction,
         ScenarioCommand.AddAfterAction,
         ScenarioCommand.AddAssertion,
@@ -30,6 +32,7 @@ public sealed interface ScenarioCommand permits
     record SetPathParameter(String stepId, String name, Object value) implements ScenarioCommand {}
     record SetRequestBody(String stepId, Object body) implements ScenarioCommand {}
     record SetRequestBodyValue(String stepId, String path, Object value) implements ScenarioCommand {}
+    record SetResponseStatus(String stepId, HttpStatusSpec status) implements ScenarioCommand {}
     record AddBeforeAction(String stepId, CaseActionSpec action) implements ScenarioCommand {}
     record AddAfterAction(String stepId, CaseActionSpec action) implements ScenarioCommand {}
     record AddAssertion(String stepId, ValidationSpec assertion) implements ScenarioCommand {}

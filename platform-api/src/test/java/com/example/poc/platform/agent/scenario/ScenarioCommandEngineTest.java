@@ -8,6 +8,7 @@ import com.example.poc.engine.ActionOutputSpec;
 import com.example.poc.engine.ApiStep;
 import com.example.poc.engine.CaseActionSpec;
 import com.example.poc.engine.ExtractValueSpec;
+import com.example.poc.engine.HttpStatusSpec;
 import com.example.poc.engine.OperationSpec;
 import com.example.poc.engine.ValidationSpec;
 import java.util.LinkedHashMap;
@@ -75,7 +76,9 @@ class ScenarioCommandEngineTest {
                         "method", "GET",
                         "path", "/temporary"),
                 "request", Map.of(),
-                "response", Map.of("status", 200)), ApiStep.class, "step");
+                "response", Map.of("status", Map.of(
+                        "operator", "oneOf",
+                        "expected", List.of(200)))), ApiStep.class, "step");
 
         List<ScenarioCommand> commands = List.of(
                 new ScenarioCommand.SetRequestHeader("create-order", "X-Test", "true"),
@@ -84,6 +87,8 @@ class ScenarioCommandEngineTest {
                 new ScenarioCommand.SetPathParameter("create-order", "tenantId", "cn"),
                 new ScenarioCommand.SetRequestBody("create-order", Map.of("order", Map.of("customer", Map.of()))),
                 new ScenarioCommand.SetRequestBodyValue("create-order", "/order/customer/name", "Blaine"),
+                new ScenarioCommand.SetResponseStatus(
+                        "create-order", status(HttpStatusSpec.RANGE, null, 200, 299)),
                 new ScenarioCommand.AddBeforeAction("create-order", before),
                 new ScenarioCommand.AddAfterAction("create-order", after),
                 new ScenarioCommand.AddAssertion("create-order", assertion),
@@ -111,6 +116,9 @@ class ScenarioCommandEngineTest {
         assertThat(step.getRequest().getPath()).containsEntry("tenantId", "cn");
         assertThat(step.getRequest().getBody()).isEqualTo(Map.of(
                 "order", Map.of("customer", Map.of("name", "Blaine"))));
+        assertThat(step.getResponse().getStatus().getOperator()).isEqualTo(HttpStatusSpec.RANGE);
+        assertThat(step.getResponse().getStatus().getMin()).isEqualTo(200);
+        assertThat(step.getResponse().getStatus().getMax()).isEqualTo(299);
         assertThat(step.getActions().getBeforeSend()).hasSize(1);
         assertThat(step.getActions().getAfterReceive()).hasSize(1);
         assertThat(step.getResponse().getAssertions()).singleElement().satisfies(value ->
@@ -170,6 +178,8 @@ class ScenarioCommandEngineTest {
                 new ScenarioCommand.SetPathParameter("missing", "id", "value"),
                 new ScenarioCommand.SetRequestBody("missing", Map.of()),
                 new ScenarioCommand.SetRequestBodyValue("missing", "/id", "value"),
+                new ScenarioCommand.SetResponseStatus(
+                        "missing", status(HttpStatusSpec.ONE_OF, List.of(200), null, null)),
                 new ScenarioCommand.AddBeforeAction("missing", action),
                 new ScenarioCommand.AddAfterAction("missing", action),
                 new ScenarioCommand.AddAssertion("missing", assertion),
@@ -201,6 +211,7 @@ class ScenarioCommandEngineTest {
                 "SetPathParameter",
                 "SetRequestBody",
                 "SetRequestBodyValue",
+                "SetResponseStatus",
                 "AddBeforeAction",
                 "AddAfterAction",
                 "AddAssertion",
@@ -235,7 +246,9 @@ class ScenarioCommandEngineTest {
                         "method", "POST",
                         "path", "/sessions"),
                 "request", Map.of(),
-                "response", Map.of("status", 200)), ApiStep.class, "step");
+                "response", Map.of("status", Map.of(
+                        "operator", "oneOf",
+                        "expected", List.of(200)))), ApiStep.class, "step");
         ScenarioCommandPlan plan = decoder.decode(Map.of(
                 "targetType", "SCENARIO_DRAFT",
                 "targetId", "draft-1",
@@ -314,7 +327,9 @@ class ScenarioCommandEngineTest {
                       beforeSend: []
                       afterReceive: []
                     response:
-                      status: 201
+                      status:
+                        operator: oneOf
+                        expected: [201]
                       assertions:
                         - source: response.body
                           path: $.status
@@ -336,7 +351,9 @@ class ScenarioCommandEngineTest {
                       beforeSend: []
                       afterReceive: []
                     response:
-                      status: 200
+                      status:
+                        operator: oneOf
+                        expected: [200]
                       assertions: []
                       extract: {}
                 """), List.of("create-order", "get-order"));
@@ -368,6 +385,15 @@ class ScenarioCommandEngineTest {
         extraction.setSource(source);
         extraction.setPath(path);
         return extraction;
+    }
+
+    private HttpStatusSpec status(String operator, Object expected, Integer min, Integer max) {
+        HttpStatusSpec status = new HttpStatusSpec();
+        status.setOperator(operator);
+        if (expected != null) status.setExpected(expected);
+        if (min != null) status.setMin(min);
+        if (max != null) status.setMax(max);
+        return status;
     }
 
     private OperationSpec operation(String id, String method, String path) {

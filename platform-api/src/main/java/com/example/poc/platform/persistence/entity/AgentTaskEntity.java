@@ -1,7 +1,10 @@
 package com.example.poc.platform.persistence.entity;
 
+import com.example.poc.platform.agent.AgentPermissionMode;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
@@ -19,13 +22,18 @@ public class AgentTaskEntity {
     @Column(nullable = false, length = 32) private String status;
     @Column(length = 32) private String targetType;
     @Column(length = 64) private String targetId;
-    @Column(nullable = false, length = 32) private String permissionMode;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 32) private AgentPermissionMode permissionMode;
+    @Column(nullable = false) private int permissionModeRevision;
     @Column(nullable = false, length = 32) private String runtimeType;
     @Column(length = 200) private String modelId;
     @Column(nullable = false, length = 100) private String createdBy;
     @Column(nullable = false) private int iterationCount;
     @Column(nullable = false) private long tokenBudget;
     @Column(nullable = false, columnDefinition = "text") private String contextJson;
+    @Column(length = 64) private String pauseReason;
+    @Column(columnDefinition = "text") private String pauseContextJson;
+    @Column(nullable = false) private int continuationCount;
     @Version @Column(nullable = false) private Long revision;
     @Column(nullable = false) private Instant createdAt;
     @Column(nullable = false) private Instant updatedAt;
@@ -54,8 +62,10 @@ public class AgentTaskEntity {
     public void setTargetType(String targetType) { this.targetType = targetType; }
     public String getTargetId() { return targetId; }
     public void setTargetId(String targetId) { this.targetId = targetId; }
-    public String getPermissionMode() { return permissionMode; }
-    public void setPermissionMode(String permissionMode) { this.permissionMode = permissionMode; }
+    public AgentPermissionMode getPermissionMode() { return permissionMode; }
+    public void setPermissionMode(AgentPermissionMode permissionMode) { this.permissionMode = permissionMode; }
+    public int getPermissionModeRevision() { return permissionModeRevision; }
+    public void setPermissionModeRevision(int permissionModeRevision) { this.permissionModeRevision = permissionModeRevision; }
     public String getRuntimeType() { return runtimeType; }
     public void setRuntimeType(String runtimeType) { this.runtimeType = runtimeType; }
     public String getModelId() { return modelId; }
@@ -68,6 +78,12 @@ public class AgentTaskEntity {
     public void setTokenBudget(long tokenBudget) { this.tokenBudget = tokenBudget; }
     public String getContextJson() { return contextJson; }
     public void setContextJson(String contextJson) { this.contextJson = contextJson; }
+    public String getPauseReason() { return pauseReason; }
+    public void setPauseReason(String pauseReason) { this.pauseReason = pauseReason; }
+    public String getPauseContextJson() { return pauseContextJson; }
+    public void setPauseContextJson(String pauseContextJson) { this.pauseContextJson = pauseContextJson; }
+    public int getContinuationCount() { return continuationCount; }
+    public void setContinuationCount(int continuationCount) { this.continuationCount = continuationCount; }
     public Long getRevision() { return revision; }
     public void setRevision(Long revision) { this.revision = revision; }
     public Instant getCreatedAt() { return createdAt; }

@@ -7,6 +7,11 @@ public class CaseActionSpec {
     private ActionInputSpec input = new ActionInputSpec();
     private ActionOutputSpec output = new ActionOutputSpec();
     private Object template;
+    private String origin = "CASE";
+
+    @com.fasterxml.jackson.annotation.JsonIgnore
+    public String getOrigin() { return origin; }
+    public void setOrigin(String origin) { this.origin = origin; }
 
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }

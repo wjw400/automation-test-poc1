@@ -117,6 +117,28 @@ class FulfillmentServiceTest {
     }
 
     @Test
+    void createsQueriesAndCancelsUsingEncryptedBusinessPayloadsAndTheReturnedId() throws Exception {
+        Map<String, Object> created = decodeBusiness(secureFulfillmentService.createFulfillmentOrder("secureEcho", encryptedBody(Map.of(
+                "customerName", "Automation Partner", "customerReference", "AUTO-CANCEL-1",
+                "items", List.of(Map.of("productId", "P100", "quantity", 1))))));
+        assertThat(created).containsEntry("status", "CREATED").containsKey("id").doesNotContainKey("orderId");
+        Map<String, Object> reference = Map.of("orderId", created.get("id"));
+        Map<String, Object> queried = decodeBusiness(secureFulfillmentService.queryFulfillmentOrder("secureEcho", encryptedBody(reference)));
+        Map<String, Object> cancelled = decodeBusiness(secureFulfillmentService.cancelFulfillmentOrder("secureEcho", encryptedBody(reference)));
+        assertThat(queried).containsEntry("id", created.get("id")).containsEntry("status", "CREATED");
+        assertThat(cancelled).containsEntry("id", created.get("id")).containsEntry("status", "CANCELLED");
+    }
+
+    private Map<String, Object> encryptedBody(Map<String, Object> business) throws Exception {
+        return Map.of("payload", pgpCryptoService.signAndEncrypt(objectMapper.writeValueAsString(business), clientProfile()));
+    }
+
+    private Map<String, Object> decodeBusiness(Map<String, Object> envelope) throws Exception {
+        String plaintext = pgpCryptoService.decryptAndVerify((String) envelope.get("payload"), clientProfile());
+        return objectMapper.readValue(plaintext, new TypeReference<>() {});
+    }
+
+    @Test
     void exposesOnlyTheSecureFulfillmentEndpoints() throws Exception {
         mockMvc.perform(post("/secure/raw")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -147,7 +169,7 @@ class FulfillmentServiceTest {
         assertThat(partnerKeyService.listPartners())
                 .extracting(partner -> partner.get("profileName"))
                 .contains("secureEcho", "qaPartner");
-        assertThat(partnerKeyService.resolveMaterial("qaPartner").getSenderPublicKey())
+        assertThat(partnerKeyService.resolveMaterial("qaPartner").getVerificationPublicKey())
                 .contains("BEGIN PGP PUBLIC KEY BLOCK");
 
         partnerKeyService.deletePartner("qaPartner");
@@ -162,12 +184,12 @@ class FulfillmentServiceTest {
 
     private PgpProfileMaterial clientProfile() {
         PgpProfileMaterial profile = new PgpProfileMaterial();
-        profile.setSenderPublicKey(keyMaterial("keys/server-public.asc"));
-        profile.setSenderPrivateKey(keyMaterial("keys/client-private.asc"));
-        profile.setSenderPrivateKeyPassphrase("demo-client-passphrase");
-        profile.setRecipientPublicKey(keyMaterial("keys/server-public.asc"));
-        profile.setRecipientPrivateKey(keyMaterial("keys/client-private.asc"));
-        profile.setRecipientPrivateKeyPassphrase("demo-client-passphrase");
+        profile.setVerificationPublicKey(keyMaterial("keys/server-public.asc"));
+        profile.setSigningPrivateKey(keyMaterial("keys/client-private.asc"));
+        profile.setSigningPrivateKeyPassphrase("demo-client-passphrase");
+        profile.setEncryptionPublicKey(keyMaterial("keys/server-public.asc"));
+        profile.setDecryptionPrivateKey(keyMaterial("keys/client-private.asc"));
+        profile.setDecryptionPrivateKeyPassphrase("demo-client-passphrase");
         return profile;
     }
 

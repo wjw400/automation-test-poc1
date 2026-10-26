@@ -6,6 +6,9 @@ import java.util.List;
 public class ActionPipelineSpec {
     private List<CaseActionSpec> beforeSend = new ArrayList<>();
     private List<CaseActionSpec> afterReceive = new ArrayList<>();
+    private List<CaseActionSpec> afterRequestProcessing = new ArrayList<>();
+    public List<CaseActionSpec> getAfterRequestProcessing() { return afterRequestProcessing; }
+    public void setAfterRequestProcessing(List<CaseActionSpec> actions) { afterRequestProcessing = actions == null ? new ArrayList<>() : actions; }
 
     public List<CaseActionSpec> getBeforeSend() {
         return beforeSend;

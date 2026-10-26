@@ -46,12 +46,8 @@ function AppShell() {
   const [unsavedGuard, setUnsavedGuard] = useState<WorkspaceUnsavedGuard>()
   const [pendingNavigation, setPendingNavigation] = useState<{ to: string, workspaceName?: string }>()
   const [savingBeforeNavigation, setSavingBeforeNavigation] = useState(false)
-  const [agentPanelOpen, setAgentPanelOpen] = useState(
-    () => window.localStorage.getItem('test-agent-pinned') === 'true',
-  )
-  const [agentPanelPinned, setAgentPanelPinned] = useState(
-    () => window.localStorage.getItem('test-agent-pinned') === 'true',
-  )
+  const [projectAgentRequest, setProjectAgentRequest] = useState(0)
+  const [projectAgentActive, setProjectAgentActive] = useState(false)
   const projectsQuery = useQuery({
     queryKey: ['projects'],
     queryFn: platformApi.listProjects,
@@ -205,13 +201,13 @@ function AppShell() {
         />
         <div className="workspace-actions">
           {location.pathname.startsWith('/workspace') ? (
-            <Tooltip title={t('agent:open')}>
+            <Tooltip placement="left" title={t('agent:openProject')}>
               <Button
-                aria-label={t('agent:open')}
-                className={agentPanelOpen ? 'workspace-agent-button active' : 'workspace-agent-button'}
+                aria-label={t('agent:openProject')}
+                className={projectAgentActive ? 'workspace-agent-button active' : 'workspace-agent-button'}
                 icon={<RobotOutlined />}
                 type="text"
-                onClick={() => setAgentPanelOpen((open) => !open)}
+                onClick={() => setProjectAgentRequest((current) => current + 1)}
               />
             </Tooltip>
           ) : null}
@@ -242,13 +238,8 @@ function AppShell() {
                 path="/workspace"
                 element={(
                   <WorkbenchPage
-                    agentPanelOpen={agentPanelOpen}
-                    agentPanelPinned={agentPanelPinned}
-                    onAgentPanelOpenChange={setAgentPanelOpen}
-                    onAgentPanelPinnedChange={(pinned) => {
-                      setAgentPanelPinned(pinned)
-                      window.localStorage.setItem('test-agent-pinned', String(pinned))
-                    }}
+                    projectAgentRequest={projectAgentRequest}
+                    onProjectAgentActiveChange={setProjectAgentActive}
                     onUnsavedGuardChange={setUnsavedGuard}
                   />
                 )}

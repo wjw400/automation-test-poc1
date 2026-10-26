@@ -1,38 +1,38 @@
 import {
+  ApartmentOutlined,
   ApiOutlined,
   CheckCircleFilled,
   ClockCircleOutlined,
   CloseCircleFilled,
   CloseOutlined,
-  CompressOutlined,
   DeleteOutlined,
+  DownOutlined,
   EditOutlined,
   ExperimentOutlined,
-  ExpandOutlined,
   FileTextOutlined,
+  GlobalOutlined,
   HistoryOutlined,
   LikeOutlined,
   DislikeOutlined,
   LoadingOutlined,
   LockOutlined,
   MoreOutlined,
-  PushpinFilled,
-  PushpinOutlined,
   PlusOutlined,
   ProfileOutlined,
   ReadOutlined,
   RobotOutlined,
-  SafetyCertificateOutlined,
   SendOutlined,
   StopOutlined,
   ToolOutlined,
   WarningFilled,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { App, Button, Dropdown, Empty, Input, Modal, Popover, Select, Spin, Tooltip, Typography } from 'antd'
+import { App, Button, Dropdown, Input, Modal, Popconfirm, Popover, Select, Spin, Tooltip, Typography } from 'antd'
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { TFunction } from 'i18next'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { platformApi } from '../api/platformApi'
 import { formatDateTime } from '../i18n'
 import type {
@@ -40,12 +40,15 @@ import type {
   AgentContextReference,
   AgentContextSelection,
   AgentEventRecord,
+  AgentPermissionMode,
   AgentTaskRecord,
   ApiOperationRecord,
   CaseRecord,
   RunRecord,
+  PublishScenarioDraftResult,
   ScenarioDraftDiffItem,
   ScenarioDraftRecord,
+  SuiteDraftRecord,
   ScenarioDraftValidation,
   SuiteRecord,
   TestKnowledgeRecord,
@@ -65,59 +68,72 @@ const eventTypes = [
   'message.completed',
   'artifact.created',
   'task.completed',
+  'task.paused',
   'task.failed',
   'task.cancelled',
+  'continuation.started',
+  'continuation.declined',
 ]
+
+export type AgentScope =
+  | { type: 'PROJECT' }
+  | { type: 'SCENARIO', id: string }
+  | { type: 'SUITE', id: string }
 
 type AgentPanelProps = {
   projectId: string
-  activeScenario?: CaseRecord
+  scope: AgentScope
   scenarios: CaseRecord[]
   suites: SuiteRecord[]
   operations: ApiOperationRecord[]
   runs: RunRecord[]
   knowledge: TestKnowledgeRecord[]
-  pinned: boolean
-  onPinnedChange: (pinned: boolean) => void
-  onClose: () => void
+  presentation?: 'embedded' | 'workspace'
+  targetDirty?: boolean
+  onClose?: () => void
   onOpenScenario: (scenarioId: string) => void
+  onOpenSuite: (suiteId: string) => void
   onOpenKnowledge: (knowledgeId: string) => void
-  onApplyDraft: (draft: ScenarioDraftRecord) => Promise<void> | void
+  onApplyDraft: (draft: ScenarioDraftRecord | SuiteDraftRecord) => Promise<void> | void
 }
 
 export function AgentPanel({
   projectId,
-  activeScenario,
+  scope,
   scenarios,
   suites,
   operations,
   runs,
   knowledge,
-  pinned,
-  onPinnedChange,
+  presentation = 'embedded',
+  targetDirty = false,
   onClose,
   onOpenScenario,
+  onOpenSuite,
   onOpenKnowledge,
   onApplyDraft,
 }: AgentPanelProps) {
   const { t } = useTranslation('agent')
   const { message, modal } = App.useApp()
   const queryClient = useQueryClient()
+  const storageScopeKey = `${projectId}:${scopeValue(scope)}`
   const [selectedTaskId, setSelectedTaskId] = useState<string>()
   const [newChatMode, setNewChatMode] = useState(false)
-  const [composer, setComposer] = useState('')
-  const [runtimeType, setRuntimeType] = useState<string>()
+  const [composer, setComposer] = useState(
+    () => window.localStorage.getItem(`agent-composer:${storageScopeKey}`) ?? '',
+  )
   const [contextSelection, setContextSelection] = useState<AgentContextSelection>(emptyAgentContextSelection)
   const [events, setEvents] = useState<AgentEventRecord[]>([])
   const [streamingText, setStreamingText] = useState('')
   const [streamConnected, setStreamConnected] = useState(true)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [panelWidth, setPanelWidth] = useState(420)
-  const [expanded, setExpanded] = useState(false)
   const [renameOpen, setRenameOpen] = useState(false)
   const [renameTitle, setRenameTitle] = useState('')
   const [feedback, setFeedback] = useState<'positive' | 'negative'>()
   const messageEndRef = useRef<HTMLDivElement>(null)
+  const skipAutoRestoreRef = useRef(false)
+  const panelTitle = t('title')
 
   useEffect(() => setFeedback(undefined), [selectedTaskId])
 
@@ -146,56 +162,57 @@ export function AgentPanel({
     enabled: Boolean(selectedTaskId),
   })
 
-  const selectedTask = taskQuery.data
-    ?? tasksQuery.data?.find((task) => task.id === selectedTaskId)
-  const taskScenario = scenarios.find((record) => record.id === selectedTask?.targetId)
-  const contextScenario = selectedTask?.targetType === 'SCENARIO' ? taskScenario : activeScenario
+  const scopeTasks = useMemo(
+    () => (tasksQuery.data ?? []).filter((task) => sameScope(taskScope(task), scope)),
+    [scope, tasksQuery.data],
+  )
+  const selectedTaskCandidate = selectedTaskId
+    ? taskQuery.data ?? scopeTasks.find((task) => task.id === selectedTaskId)
+    : undefined
+  const selectedTask = !newChatMode
+    && selectedTaskCandidate
+    && sameScope(taskScope(selectedTaskCandidate), scope)
+    ? selectedTaskCandidate
+    : undefined
+  const activePermissionMode = selectedTask?.permissionMode ?? defaultPermissionMode(scope)
+  const draftCapable = activePermissionMode === 'REVIEW_REQUIRED'
+  const targetScenario = scope.type === 'SCENARIO'
+    ? scenarios.find((record) => record.id === scope.id)
+    : undefined
+  const targetSuite = scope.type === 'SUITE'
+    ? suites.find((record) => record.id === scope.id)
+    : undefined
   const effectiveContextSelection = selectedTask?.context ?? contextSelection
   const isRunning = selectedTask?.status === 'RUNNING'
+  const isWaitingForUser = selectedTask?.status === 'WAITING_FOR_USER'
   const resolvedContext = useMemo(() => resolveAgentContext({
-    targetScenario: contextScenario,
+    targetScenario,
+    targetSuite,
     selection: effectiveContextSelection,
     scenarios,
     suites,
     operations,
     runs,
     knowledge,
-  }), [contextScenario, effectiveContextSelection, knowledge, operations, runs, scenarios, suites])
+  }), [effectiveContextSelection, knowledge, operations, runs, scenarios, suites, targetScenario, targetSuite])
 
   useEffect(() => {
-    const available = runtimesQuery.data?.filter((runtime) => runtime.capabilities.available) ?? []
-    if (runtimeType && available.some((runtime) => runtime.type === runtimeType)) return
-    setRuntimeType(
-      available.find((runtime) => runtime.type === 'DEEPSEEK')?.type
-      ?? available.find((runtime) => runtime.type === 'FAKE')?.type
-      ?? available[0]?.type,
-    )
-  }, [runtimeType, runtimesQuery.data])
-
-  useEffect(() => {
-    setNewChatMode(false)
-    setSelectedTaskId(undefined)
-    setComposer('')
-    setContextSelection(emptyAgentContextSelection())
-  }, [projectId])
-
-  useEffect(() => {
-    if (!selectedTaskId) setContextSelection(emptyAgentContextSelection())
-  }, [activeScenario?.id, selectedTaskId])
-
-  useEffect(() => {
-    if (newChatMode || !tasksQuery.data?.length) return
-    if (selectedTaskId && tasksQuery.data.some((task) => task.id === selectedTaskId)) return
-    const stored = window.localStorage.getItem(`agent-task:${projectId}`)
-    const next = tasksQuery.data.find((task) => task.targetId === activeScenario?.id)
-      ?? tasksQuery.data.find((task) => task.id === stored)
-      ?? tasksQuery.data[0]
+    if (skipAutoRestoreRef.current || newChatMode || !scopeTasks.length) return
+    if (selectedTaskId && scopeTasks.some((task) => task.id === selectedTaskId)) return
+    const stored = window.localStorage.getItem(`agent-task:${storageScopeKey}`)
+    const next = scopeTasks.find((task) => task.id === stored) ?? scopeTasks[0]
     setSelectedTaskId(next?.id)
-  }, [activeScenario?.id, newChatMode, projectId, selectedTaskId, tasksQuery.data])
+  }, [newChatMode, scopeTasks, selectedTaskId, storageScopeKey])
 
   useEffect(() => {
-    if (selectedTaskId) window.localStorage.setItem(`agent-task:${projectId}`, selectedTaskId)
-  }, [projectId, selectedTaskId])
+    if (selectedTaskId) window.localStorage.setItem(`agent-task:${storageScopeKey}`, selectedTaskId)
+  }, [selectedTaskId, storageScopeKey])
+
+  useEffect(() => {
+    const key = `agent-composer:${storageScopeKey}`
+    if (composer) window.localStorage.setItem(key, composer)
+    else window.localStorage.removeItem(key)
+  }, [composer, storageScopeKey])
 
   useEffect(() => {
     setEvents([])
@@ -274,16 +291,16 @@ export function AgentPanel({
 
   const createTaskMutation = useMutation({
     mutationFn: async () => {
-      if (!activeScenario || !runtimeType) throw new Error(t('noScenario'))
+      const target = scopeTarget(scope)
       return platformApi.createAgentTask(projectId, {
-        title: activeScenario.name,
-        targetType: 'SCENARIO',
-        targetId: activeScenario.id,
-        runtimeType,
+        title: scopeLabel(scope, scenarios, suites, t),
+        targetType: target?.type,
+        targetId: target?.id,
         context: contextSelection,
       })
     },
     onSuccess: async (task) => {
+      skipAutoRestoreRef.current = false
       setNewChatMode(false)
       setSelectedTaskId(task.id)
       await queryClient.invalidateQueries({ queryKey: ['agent-tasks', projectId] })
@@ -292,7 +309,7 @@ export function AgentPanel({
 
   const sendMutation = useMutation({
     mutationFn: async (content: string) => {
-      let taskId = selectedTaskId
+      let taskId = newChatMode ? undefined : selectedTaskId
       if (!taskId) taskId = (await createTaskMutation.mutateAsync()).id
       const task = await platformApi.sendAgentMessage(taskId, content)
       return { taskId, task }
@@ -321,10 +338,28 @@ export function AgentPanel({
     },
   })
 
+  const continuationMutation = useMutation({
+    mutationFn: (decision: 'CONTINUE' | 'STOP') => platformApi.decideAgentContinuation(selectedTaskId!, decision),
+    onSuccess: async (task) => {
+      queryClient.setQueryData(['agent-task', task.id], task)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['agent-task', task.id] }),
+        queryClient.invalidateQueries({ queryKey: ['agent-events', task.id] }),
+        queryClient.invalidateQueries({ queryKey: ['agent-messages', task.id] }),
+        queryClient.invalidateQueries({ queryKey: ['agent-artifacts', task.id] }),
+        queryClient.invalidateQueries({ queryKey: ['agent-tasks', projectId] }),
+      ])
+    },
+    onError: (error) => {
+      void message.error(error instanceof Error ? error.message : t('continuationFailed'))
+    },
+  })
+
   const deleteMutation = useMutation({
     mutationFn: platformApi.deleteAgentTask,
     onSuccess: async (_result, taskId) => {
       if (selectedTaskId === taskId) {
+        skipAutoRestoreRef.current = true
         setSelectedTaskId(undefined)
         setNewChatMode(true)
       }
@@ -344,6 +379,34 @@ export function AgentPanel({
     },
   })
 
+  const permissionModeMutation = useMutation({
+    mutationFn: (nextMode: AgentPermissionMode) => platformApi.changeAgentTaskPermission(selectedTaskId!, nextMode),
+    onSuccess: async (task) => {
+      queryClient.setQueryData(['agent-task', task.id], task)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['agent-task', task.id] }),
+        queryClient.invalidateQueries({ queryKey: ['agent-tasks', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['agent-events', task.id] }),
+      ])
+      void message.success(t('permissionUpdated'))
+    },
+    onError: () => void message.error(t('permissionUpdateFailed')),
+  })
+
+  const modelMutation = useMutation({
+    mutationFn: (nextModelId: string) => platformApi.changeAgentTaskModel(selectedTaskId!, nextModelId),
+    onSuccess: async (task) => {
+      queryClient.setQueryData(['agent-task', task.id], task)
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['agent-task', task.id] }),
+        queryClient.invalidateQueries({ queryKey: ['agent-tasks', projectId] }),
+        queryClient.invalidateQueries({ queryKey: ['agent-events', task.id] }),
+      ])
+      void message.success(t('modelUpdated'))
+    },
+    onError: () => void message.error(t('modelUpdateFailed')),
+  })
+
   const feedbackMutation = useMutation({
     mutationFn: (value: 'positive' | 'negative') => platformApi.recordAgentDecision(
       selectedTaskId!,
@@ -353,9 +416,15 @@ export function AgentPanel({
     onError: () => void message.error(t('feedbackFailed')),
   })
 
-  const applyDraft = useCallback(async (draftId: string) => {
+  const applyDraft = useCallback(async (
+    draftId: string,
+    draftType: 'SCENARIO_DRAFT' | 'SUITE_DRAFT',
+    artifactContent: Record<string, unknown>,
+  ) => {
     try {
-      const draft = await platformApi.getScenarioDraft(draftId)
+      const draft = draftType === 'SUITE_DRAFT'
+        ? artifactContent as unknown as SuiteDraftRecord
+        : await platformApi.getScenarioDraft(draftId)
       if (!draft.validation.valid) throw new Error(t('invalid'))
       await onApplyDraft(draft)
       if (selectedTaskId) {
@@ -369,10 +438,46 @@ export function AgentPanel({
     }
   }, [message, onApplyDraft, selectedTaskId, t])
 
+  const publishNewScenario = useCallback(async (draftId: string, addToSuite: boolean) => {
+    try {
+      if (addToSuite && targetDirty) throw new Error(t('saveSuiteBeforeAdd'))
+      const result = await platformApi.publishScenarioDraft(draftId, {
+        addToSuite,
+        expectedSuiteRevision: addToSuite ? targetSuite?.revision : undefined,
+      })
+      queryClient.setQueryData<CaseRecord[]>(['cases', projectId], (current = []) => {
+        const withoutPublished = current.filter((item) => item.id !== result.scenario.id)
+        return [result.scenario, ...withoutPublished]
+      })
+      if (result.suite) {
+        queryClient.setQueryData<SuiteRecord[]>(['suites', projectId], (current = []) => current.map(
+          (item) => item.id === result.suite?.id ? result.suite : item,
+        ))
+      }
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: ['cases', projectId] }),
+        result.suite ? queryClient.invalidateQueries({ queryKey: ['suites', projectId] }) : Promise.resolve(),
+      ])
+      void message.success(addToSuite ? t('scenarioCreatedAndAdded') : t('scenarioCreated'))
+      return result
+    } catch (error) {
+      void message.error(error instanceof Error ? error.message : t('scenarioCreateFailed'))
+      throw error
+    }
+  }, [message, projectId, queryClient, t, targetDirty, targetSuite?.revision])
+
   const submit = (content = composer) => {
     const value = content.trim()
     if (!value || isRunning || sendMutation.isPending) return
     void sendMutation.mutateAsync(value)
+  }
+
+  const startNewChat = () => {
+    skipAutoRestoreRef.current = true
+    setNewChatMode(true)
+    setSelectedTaskId(undefined)
+    setComposer('')
+    setContextSelection(emptyAgentContextSelection())
   }
 
   const retry = () => {
@@ -386,9 +491,8 @@ export function AgentPanel({
     const startX = event.clientX
     const startWidth = panelWidth
     const move = (pointerEvent: PointerEvent) => {
-      const maximum = Math.min(760, window.innerWidth - 340)
+      const maximum = Math.min(760, Math.floor(window.innerWidth * 0.45))
       setPanelWidth(Math.max(340, Math.min(maximum, startWidth + startX - pointerEvent.clientX)))
-      setExpanded(false)
     }
     const stop = () => {
       window.removeEventListener('pointermove', move)
@@ -398,21 +502,14 @@ export function AgentPanel({
     window.addEventListener('pointerup', stop)
   }
 
-  const toggleExpanded = () => {
-    if (expanded) {
-      setPanelWidth(420)
-      setExpanded(false)
-    } else {
-      setPanelWidth(Math.min(720, Math.max(420, window.innerWidth - 420)))
-      setExpanded(true)
-    }
-  }
-
   const activityEvents = events.filter((event) => (
     event.eventType === 'context.snapshot.created'
     || event.eventType === 'skill.loaded'
     || event.eventType.startsWith('tool.')
   ))
+  const activeTurnId = isRunning
+    ? [...events].reverse().find((event) => event.eventType === 'task.started')?.payload.turnId
+    : undefined
   const latestTaskEvent = [...events].reverse().find((event) => event.eventType.startsWith('task.'))
   const failedEvent = !sendMutation.isPending
     && selectedTask?.status === 'FAILED'
@@ -423,17 +520,79 @@ export function AgentPanel({
     .filter((event) => event.eventType === 'decision.draft_applied_to_editor')
     .map((event) => event.payload.draftId)
     .filter((draftId): draftId is string => typeof draftId === 'string')), [events])
-
+  const persistedPublishedScenarios = useMemo(() => new Map(events
+    .filter((event) => event.eventType === 'decision.scenario_saved')
+    .map((event) => [event.payload.draftId, event.payload.scenarioId] as const)
+    .filter((entry): entry is readonly [string, string] => (
+      typeof entry[0] === 'string' && typeof entry[1] === 'string'
+    ))), [events])
+  const modelOptions = useMemo(() => {
+    if (!selectedTask) return []
+    const runtime = (runtimesQuery.data ?? []).find((item) => item.type === selectedTask.runtimeType)
+    const models = runtime?.capabilities.models?.length
+      ? runtime.capabilities.models
+      : [selectedTask.modelId]
+    return models.map((modelId) => ({ key: modelId, label: modelId }))
+  }, [runtimesQuery.data, selectedTask])
   return (
-    <aside className="agent-panel" style={{ width: panelWidth }} aria-label={t('title')}>
-      <div className="agent-panel-resize" role="separator" aria-orientation="vertical" onPointerDown={startResize} />
+    <aside
+      className={presentation === 'workspace'
+        ? 'agent-panel agent-workspace-panel'
+        : 'agent-panel agent-tab-pane'}
+      style={presentation === 'embedded' ? { width: panelWidth } : undefined}
+      aria-label={panelTitle}
+    >
+      {presentation === 'embedded' ? (
+        <div className="agent-panel-resize" role="separator" aria-orientation="vertical" onPointerDown={startResize} />
+      ) : null}
       <header className="agent-panel-header">
         <div className="agent-panel-title">
           <RobotOutlined />
-          <span>{t('title')}</span>
-          <Tooltip title={t('safetyDescription')}>
-            <span className="agent-safety-mode"><SafetyCertificateOutlined />{t('draftOnly')}</span>
-          </Tooltip>
+          <span>{panelTitle}</span>
+          {selectedTask ? (
+            <>
+              <Dropdown
+                trigger={['click']}
+                menu={{
+                  selectable: true,
+                  selectedKeys: [selectedTask.modelId],
+                  items: modelOptions,
+                  onClick: ({ key }) => modelMutation.mutate(String(key)),
+                }}
+              >
+                <Button
+                  aria-label={t('model')}
+                  className="agent-model-trigger"
+                  size="small"
+                  type="text"
+                  loading={modelMutation.isPending}
+                  disabled={isRunning || isWaitingForUser || modelOptions.length < 2}
+                >
+                  {selectedTask.modelId}<DownOutlined />
+                </Button>
+              </Dropdown>
+              <Dropdown
+                trigger={['click']}
+                menu={{
+                  selectable: true,
+                  selectedKeys: [selectedTask.permissionMode],
+                  items: permissionOptions(scope, t).map((option) => ({ key: option.value, label: option.label })),
+                  onClick: ({ key }) => permissionModeMutation.mutate(key as AgentPermissionMode),
+                }}
+              >
+                <Button
+                  aria-label={t('permission')}
+                  className="agent-permission-trigger"
+                  size="small"
+                  type="text"
+                  loading={permissionModeMutation.isPending}
+                  disabled={isRunning || isWaitingForUser}
+                >
+                  {t(selectedTask.permissionMode === 'REVIEW_REQUIRED' ? 'reviewRequired' : 'readOnly')}<DownOutlined />
+                </Button>
+              </Dropdown>
+            </>
+          ) : null}
         </div>
         <div className="agent-panel-actions">
           <Tooltip title={t('newChat')}>
@@ -442,13 +601,7 @@ export function AgentPanel({
               icon={<FileTextOutlined />}
               size="small"
               type="text"
-              disabled={!activeScenario}
-              onClick={() => {
-                setNewChatMode(true)
-                setSelectedTaskId(undefined)
-                setComposer('')
-                setContextSelection(emptyAgentContextSelection())
-              }}
+              onClick={() => startNewChat()}
             />
           </Tooltip>
           <Popover
@@ -459,9 +612,10 @@ export function AgentPanel({
             onOpenChange={setHistoryOpen}
             content={(
               <AgentHistory
-                tasks={tasksQuery.data ?? []}
+                tasks={scopeTasks}
                 selectedTaskId={selectedTaskId}
                 onSelect={(taskId) => {
+                  skipAutoRestoreRef.current = false
                   setNewChatMode(false)
                   setSelectedTaskId(taskId)
                   setHistoryOpen(false)
@@ -473,79 +627,75 @@ export function AgentPanel({
               <Button aria-label={t('history')} icon={<HistoryOutlined />} size="small" type="text" />
             </Tooltip>
           </Popover>
-          <Tooltip title={pinned ? t('unpin') : t('pin')}>
-            <Button
-              aria-label={pinned ? t('unpin') : t('pin')}
-              icon={pinned ? <PushpinFilled /> : <PushpinOutlined />}
-              size="small"
-              type="text"
-              onClick={() => onPinnedChange(!pinned)}
-            />
-          </Tooltip>
-          <Tooltip title={expanded ? t('collapse') : t('expand')}>
-            <Button
-              aria-label={expanded ? t('collapse') : t('expand')}
-              icon={expanded ? <CompressOutlined /> : <ExpandOutlined />}
-              size="small"
-              type="text"
-              onClick={toggleExpanded}
-            />
-          </Tooltip>
-          <Tooltip title={t('close')}>
-            <Button aria-label={t('close')} icon={<CloseOutlined />} size="small" type="text" onClick={onClose} />
-          </Tooltip>
+          {presentation === 'embedded' ? (
+            <>
+              <Tooltip title={t('close')}>
+                <Button aria-label={t('close')} icon={<CloseOutlined />} size="small" type="text" onClick={onClose} />
+              </Tooltip>
+            </>
+          ) : null}
         </div>
       </header>
 
-      <div className="agent-context-bar">
-        <ExperimentOutlined />
-        <div>
-          <span>{contextScenario?.name ?? t('noScenario')}</span>
+      <div className="agent-context-bar agent-scope-bar">
+        {scopeIcon(scope.type)}
+        <div className="agent-scope-copy">
+          <span>{scopeLabel(scope, scenarios, suites, t)}</span>
           <small>{t('contextSummary', {
             operations: resolvedContext.automaticOperations.length,
             knowledge: resolvedContext.visibleKnowledge.length,
             added: effectiveContextSelection.included.length,
           })}</small>
         </div>
-        {contextScenario ? (
-          <Popover
-            arrow={false}
-            placement="bottomRight"
-            trigger="click"
-            content={(
-              <AgentContextEditor
-                locked={Boolean(selectedTask)}
-                targetScenario={contextScenario}
-                selection={effectiveContextSelection}
-                resolved={resolvedContext}
-                scenarios={scenarios}
-                suites={suites}
-                operations={operations}
-                runs={runs}
-                onChange={setContextSelection}
-              />
-            )}
-          >
-            <Button
-              aria-label={selectedTask ? t('viewContext') : t('editContext')}
-              icon={selectedTask ? <LockOutlined /> : <PlusOutlined />}
-              size="small"
-              type="text"
+        <Popover
+          arrow={false}
+          placement="bottomRight"
+          trigger="click"
+          content={(
+            <AgentContextEditor
+              locked={Boolean(selectedTask)}
+              scope={scope}
+              targetScenario={targetScenario}
+              targetSuite={targetSuite}
+              selection={effectiveContextSelection}
+              resolved={resolvedContext}
+              scenarios={scenarios}
+              suites={suites}
+              operations={operations}
+              runs={runs}
+              onChange={setContextSelection}
             />
-          </Popover>
-        ) : null}
+          )}
+        >
+          <Button
+            aria-label={selectedTask ? t('viewContext') : t('editContext')}
+            icon={selectedTask ? <LockOutlined /> : <PlusOutlined />}
+            size="small"
+            type="text"
+          />
+        </Popover>
         {selectedTask ? (
           <Dropdown
             trigger={['click']}
             menu={{
               items: [
-                { key: 'open', label: t('openScenario'), icon: <ExperimentOutlined />, disabled: !selectedTask.targetId },
+                {
+                  key: 'open',
+                  label: selectedTask.targetType === 'SUITE' ? t('openSuite') : t('openScenario'),
+                  icon: selectedTask.targetType === 'SUITE' ? <ApartmentOutlined /> : <ExperimentOutlined />,
+                  disabled: !selectedTask.targetId || !['SCENARIO', 'SUITE'].includes(selectedTask.targetType ?? ''),
+                },
                 { key: 'rename', label: t('renameSession'), icon: <EditOutlined /> },
                 { type: 'divider' },
                 { key: 'delete', label: t('deleteSession'), icon: <DeleteOutlined />, danger: true, disabled: isRunning },
               ],
               onClick: ({ key }) => {
-                if (key === 'open' && selectedTask.targetId) onOpenScenario(selectedTask.targetId)
+                if (key === 'open' && selectedTask.targetId && selectedTask.targetType === 'SCENARIO') {
+                  onOpenScenario(selectedTask.targetId)
+                }
+                if (key === 'open' && selectedTask.targetId && selectedTask.targetType === 'SUITE') {
+                  onOpenSuite(selectedTask.targetId)
+                }
                 if (key === 'rename') {
                   setRenameTitle(selectedTask.title)
                   setRenameOpen(true)
@@ -566,63 +716,42 @@ export function AgentPanel({
         ) : null}
       </div>
 
-      {!selectedTask ? (
-        <div className="agent-runtime-row">
-          <Text type="secondary">{t('runtime')}</Text>
-          <Select
-            size="small"
-            value={runtimeType}
-            loading={runtimesQuery.isLoading}
-            options={(runtimesQuery.data ?? []).map((runtime) => ({
-              value: runtime.type,
-              disabled: !runtime.capabilities.available,
-              label: runtime.capabilities.available
-                ? `${runtime.type} / ${runtime.capabilities.defaultModel}`
-                : `${runtime.type} / ${t('runtimeUnavailable')}`,
-            }))}
-            onChange={setRuntimeType}
-          />
-        </div>
-      ) : null}
-
       <div className="agent-conversation">
         {tasksQuery.isLoading && !selectedTask ? <Spin size="small" /> : null}
-        {!contextScenario && !selectedTask ? (
-          <Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={(
-            <div className="agent-empty-copy">
-              <strong>{t('noScenario')}</strong>
-              <span>{t('noScenarioDetail')}</span>
-            </div>
-          )} />
-        ) : null}
-        {contextScenario && !selectedTask && !messagesQuery.isLoading ? (
+        {!selectedTask && !messagesQuery.isLoading ? (
           <div className="agent-empty-state">
             <RobotOutlined />
-            <strong>{t('emptyTitle')}</strong>
-            <span>{t('emptyDescription')}</span>
+            <strong>{t(emptyTitleKey(scope.type))}</strong>
+            <span>{t(emptyDescriptionKey(scope.type))}</span>
           </div>
         ) : null}
 
         {(messagesQuery.data ?? []).map((item) => (
           <article key={item.id} className={`agent-message ${item.role.toLowerCase()}`}>
-            <div className="agent-message-role">{item.role === 'USER' ? 'You' : t('title')}</div>
-            <div className="agent-message-content">{messageText(item.content)}</div>
+            <div className="agent-message-role">{item.role === 'USER' ? 'You' : panelTitle}</div>
+            {item.role === 'ASSISTANT'
+              ? <AgentMarkdown content={messageText(item.content)} />
+              : <div className="agent-message-content">{messageText(item.content)}</div>}
           </article>
         ))}
         {streamingText ? (
           <article className="agent-message assistant streaming">
-            <div className="agent-message-role">{t('title')}</div>
-            <div className="agent-message-content">{streamingText}<span className="agent-stream-caret" /></div>
+            <div className="agent-message-role">{panelTitle}</div>
+            <AgentMarkdown content={streamingText} streaming />
           </article>
         ) : null}
 
-        {activityEvents.length ? <AgentActivity events={activityEvents} /> : null}
-        {artifactsQuery.data?.length ? (
+        {activityEvents.length ? <AgentActivity events={activityEvents} activeTurnId={activeTurnId} /> : null}
+        {draftCapable && artifactsQuery.data?.length ? (
           <AgentArtifacts
             key={selectedTaskId}
             artifacts={artifactsQuery.data}
             persistedAppliedDraftIds={persistedAppliedDraftIds}
+            persistedPublishedScenarios={persistedPublishedScenarios}
+            canAddToSuite={!targetDirty}
             onApply={applyDraft}
+            onPublishNewScenario={publishNewScenario}
+            onOpenScenario={onOpenScenario}
             onOpenKnowledge={onOpenKnowledge}
           />
         ) : null}
@@ -665,6 +794,30 @@ export function AgentPanel({
             {failedEvent.payload.retryable === true ? <Button size="small" onClick={retry}>{t('retry')}</Button> : null}
           </div>
         ) : null}
+        {isWaitingForUser ? (
+          <div className="agent-pause-row">
+            <ClockCircleOutlined />
+            <div>
+              <strong>{t('paused')}</strong>
+              <span>{t('pausedDescription')}</span>
+            </div>
+            <Button
+              size="small"
+              disabled={continuationMutation.isPending}
+              onClick={() => void continuationMutation.mutateAsync('STOP')}
+            >
+              {t('stop')}
+            </Button>
+            <Button
+              size="small"
+              type="primary"
+              loading={continuationMutation.isPending}
+              onClick={() => void continuationMutation.mutateAsync('CONTINUE')}
+            >
+              {t('continue')}
+            </Button>
+          </div>
+        ) : null}
         {!streamConnected && selectedTaskId ? <div className="agent-stream-state">{t('connectionLost')}</div> : null}
         <div ref={messageEndRef} />
       </div>
@@ -673,8 +826,8 @@ export function AgentPanel({
         <Input.TextArea
           autoSize={{ minRows: 2, maxRows: 6 }}
           value={composer}
-          placeholder={t('composerPlaceholder')}
-          disabled={(!selectedTask && !activeScenario) || isRunning}
+          disabled={isRunning || isWaitingForUser}
+          placeholder={isWaitingForUser ? t('composerPaused') : t(composerPlaceholderKey(scope.type))}
           onChange={(event) => setComposer(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter' && !event.shiftKey) {
@@ -704,7 +857,7 @@ export function AgentPanel({
                 icon={<SendOutlined />}
                 loading={sendMutation.isPending || createTaskMutation.isPending}
                 shape="circle"
-                disabled={!composer.trim() || (!selectedTask && (!activeScenario || !runtimeType))}
+                disabled={!composer.trim()}
                 onClick={() => submit()}
               />
             </Tooltip>
@@ -736,7 +889,9 @@ export function AgentPanel({
 
 function AgentContextEditor({
   locked,
+  scope,
   targetScenario,
+  targetSuite,
   selection,
   resolved,
   scenarios,
@@ -746,7 +901,9 @@ function AgentContextEditor({
   onChange,
 }: {
   locked: boolean
-  targetScenario: CaseRecord
+  scope: AgentScope
+  targetScenario?: CaseRecord
+  targetSuite?: SuiteRecord
   selection: AgentContextSelection
   resolved: ResolvedAgentContext
   scenarios: CaseRecord[]
@@ -765,13 +922,13 @@ function AgentContextEditor({
     {
       label: t('contextScenarios'),
       options: scenarios
-        .filter((item) => item.id !== targetScenario.id && !includedKeys.has(`SCENARIO:${item.id}`))
+        .filter((item) => item.id !== targetScenario?.id && !includedKeys.has(`SCENARIO:${item.id}`))
         .map((item) => ({ value: `SCENARIO:${item.id}`, label: item.name })),
     },
     {
       label: t('contextSuites'),
       options: suites
-        .filter((item) => !includedKeys.has(`SUITE:${item.id}`))
+        .filter((item) => item.id !== targetSuite?.id && !includedKeys.has(`SUITE:${item.id}`))
         .map((item) => ({ value: `SUITE:${item.id}`, label: item.name })),
     },
     {
@@ -810,12 +967,30 @@ function AgentContextEditor({
         <small>{locked ? t('contextLocked') : t('contextEditable')}</small>
       </div>
       <div className="agent-context-list">
-        <ContextRow
-          icon={<ExperimentOutlined />}
-          title={targetScenario.name}
-          detail={t('targetScenario')}
-          action={<LockOutlined />}
-        />
+        {scope.type === 'PROJECT' ? (
+          <ContextRow
+            icon={<GlobalOutlined />}
+            title={t('projectScope')}
+            detail={t('targetProject')}
+            action={<LockOutlined />}
+          />
+        ) : null}
+        {targetScenario ? (
+          <ContextRow
+            icon={<ExperimentOutlined />}
+            title={targetScenario.name}
+            detail={t('targetScenario')}
+            action={<LockOutlined />}
+          />
+        ) : null}
+        {targetSuite ? (
+          <ContextRow
+            icon={<ApartmentOutlined />}
+            title={targetSuite.name}
+            detail={t('targetSuite')}
+            action={<LockOutlined />}
+          />
+        ) : null}
         {resolved.availableAutomaticOperations.map((operation) => {
           const reference: AgentContextReference = { type: 'OPERATION', id: operation.id }
           const excluded = excludedKeys.has(contextKey(reference))
@@ -949,7 +1124,7 @@ function AgentHistory({
             onClick={() => onSelect(task.id)}
           >
             <span>{task.title}</span>
-            <small>{t(taskStatusKey(task.status))} · {formatDateTime(task.updatedAt)}</small>
+            <small>{formatDateTime(task.updatedAt)}</small>
             <i className={`agent-status-dot ${task.status.toLowerCase()}`} />
           </button>
         ))}
@@ -959,16 +1134,17 @@ function AgentHistory({
   )
 }
 
-function AgentActivity({ events }: { events: AgentEventRecord[] }) {
+function AgentActivity({ events, activeTurnId }: { events: AgentEventRecord[]; activeTurnId?: unknown }) {
   const { t } = useTranslation('agent')
+  const items = collapseActivityEvents(events)
   return (
     <details className="agent-activity">
-      <summary><ToolOutlined /><span>{t('activity')}</span><small>{events.length}</small></summary>
+      <summary><ToolOutlined /><span>{t('activity')}</span><small>{items.length}</small></summary>
       <div className="agent-activity-list">
-        {events.map((event) => (
-          <div key={event.id} className="agent-activity-row">
-            {activityIcon(event.eventType)}
-            <span>{activityLabel(event)}</span>
+        {items.map((item) => (
+          <div key={item.key} className="agent-activity-row">
+            {activityIcon(item.event.eventType, isCurrentToolCall(item, activeTurnId))}
+            <span>{activityLabel(item.event, isCurrentToolCall(item, activeTurnId))}</span>
           </div>
         ))}
       </div>
@@ -979,59 +1155,135 @@ function AgentActivity({ events }: { events: AgentEventRecord[] }) {
 function AgentArtifacts({
   artifacts,
   persistedAppliedDraftIds,
+  persistedPublishedScenarios,
+  canAddToSuite,
   onApply,
+  onPublishNewScenario,
+  onOpenScenario,
   onOpenKnowledge,
 }: {
   artifacts: AgentArtifactRecord[]
   persistedAppliedDraftIds: ReadonlySet<string>
-  onApply: (draftId: string) => Promise<boolean>
+  persistedPublishedScenarios: ReadonlyMap<string, string>
+  canAddToSuite: boolean
+  onApply: (draftId: string, draftType: 'SCENARIO_DRAFT' | 'SUITE_DRAFT', content: Record<string, unknown>) => Promise<boolean>
+  onPublishNewScenario: (draftId: string, addToSuite: boolean) => Promise<PublishScenarioDraftResult>
+  onOpenScenario: (scenarioId: string) => void
   onOpenKnowledge: (knowledgeId: string) => void
 }) {
   const { t } = useTranslation('agent')
   const [applyingId, setApplyingId] = useState<string>()
   const [appliedDraftIds, setAppliedDraftIds] = useState<Set<string>>(() => new Set())
-  const drafts = artifacts.filter((artifact) => artifact.artifactType === 'SCENARIO_DRAFT' && artifact.targetId)
+  const [publishedScenarios, setPublishedScenarios] = useState<Map<string, string>>(() => new Map())
+  const draft = [...artifacts].reverse().find(
+    (artifact) => (
+      artifact.artifactType === 'SCENARIO_DRAFT'
+      || artifact.artifactType === 'NEW_SCENARIO_DRAFT'
+      || artifact.artifactType === 'SUITE_DRAFT'
+    ) && artifact.targetId,
+  )
 
-  if (!drafts.length) return null
+  if (!draft?.targetId) return null
+  const draftId = draft.targetId
+  const suiteDraft = draft.artifactType === 'SUITE_DRAFT'
+  const newScenarioDraft = draft.artifactType === 'NEW_SCENARIO_DRAFT'
+  const validationArtifact = findLatestArtifact(artifacts, suiteDraft ? 'SUITE_VALIDATION' : 'SCENARIO_VALIDATION', draftId)
+  const diffArtifact = findLatestArtifact(artifacts, suiteDraft ? 'SUITE_DIFF' : 'SCENARIO_DIFF', draftId)
+  const planArtifact = findLatestArtifact(artifacts, suiteDraft ? 'SUITE_COMMAND_PLAN' : 'COMMAND_PLAN', draftId)
+  const validation = (nestedObject(validationArtifact?.content, 'validation')
+    ?? nestedObject(draft.content, 'validation')) as ScenarioDraftValidation | undefined
+  const diff = nestedObject(diffArtifact?.content, 'diff')
+  const changes = Array.isArray(diff?.items) ? diff.items as ScenarioDraftDiffItem[] : []
+  const commands = Array.isArray(planArtifact?.content.commands)
+    ? planArtifact.content.commands as Array<Record<string, unknown>>
+    : []
+  const citations = Array.isArray(planArtifact?.content.citations) ? planArtifact.content.citations : []
+  const canApply = validation?.valid === true
+  const applied = appliedDraftIds.has(draftId) || persistedAppliedDraftIds.has(draftId)
+  const publishedScenarioId = publishedScenarios.get(draftId) ?? persistedPublishedScenarios.get(draftId)
+  const draftName = typeof draft.content.name === 'string' && draft.content.name.trim()
+    ? draft.content.name
+    : t('newScenarioDraft')
+  const draftSteps = Array.isArray(draft.content.steps)
+    ? draft.content.steps as Array<{ id?: string, name?: string }>
+    : []
+
+  const publish = async (addToSuite: boolean) => {
+    setApplyingId(draftId)
+    try {
+      const result = await onPublishNewScenario(draftId, addToSuite)
+      setPublishedScenarios((current) => new Map(current).set(draftId, result.scenario.id))
+    } finally {
+      setApplyingId(undefined)
+    }
+  }
   return (
     <section className="agent-artifacts">
       <div className="agent-artifacts-title"><FileTextOutlined /><strong>{t('artifacts')}</strong></div>
-      {drafts.map((draft, index) => {
-        const validationArtifact = findLatestArtifact(artifacts, 'SCENARIO_VALIDATION', draft.targetId!)
-        const diffArtifact = findLatestArtifact(artifacts, 'SCENARIO_DIFF', draft.targetId!)
-        const planArtifact = findLatestArtifact(artifacts, 'COMMAND_PLAN', draft.targetId!)
-        const validation = nestedObject(validationArtifact?.content, 'validation') as ScenarioDraftValidation | undefined
-        const diff = nestedObject(diffArtifact?.content, 'diff')
-        const changes = Array.isArray(diff?.items) ? diff.items as ScenarioDraftDiffItem[] : []
-        const commands = Array.isArray(planArtifact?.content.commands)
-          ? planArtifact.content.commands as Array<Record<string, unknown>>
-          : []
-        const citations = Array.isArray(planArtifact?.content.citations) ? planArtifact.content.citations : []
-        const canApply = validation?.valid === true
-        const applied = appliedDraftIds.has(draft.targetId!) || persistedAppliedDraftIds.has(draft.targetId!)
-        return (
-          <div key={draft.id} className={applied ? 'agent-artifact applied' : 'agent-artifact'}>
+          <div key={draft.id} className={(applied || publishedScenarioId) ? 'agent-artifact applied' : 'agent-artifact'}>
             <div className="agent-artifact-head">
               <div>
-                <strong>{t('draft')} {drafts.length > 1 ? index + 1 : ''}</strong>
+                <strong>{newScenarioDraft ? draftName : t('draft')}</strong>
                 <span className={canApply ? 'valid' : 'invalid'}>
                   {canApply ? <CheckCircleFilled /> : <WarningFilled />}
                   {canApply ? t('valid') : t('invalid')}
                 </span>
               </div>
-              {applied ? (
+              {publishedScenarioId ? (
+                <div className="agent-artifact-actions">
+                  <span className="agent-applied-status"><CheckCircleFilled />{t('created')}</span>
+                  <Button size="small" type="link" onClick={() => onOpenScenario(publishedScenarioId)}>
+                    {t('openScenario')}
+                  </Button>
+                </div>
+              ) : newScenarioDraft ? (
+                <div className="agent-artifact-actions">
+                  <Popconfirm
+                    title={t('confirmCreateScenarioTitle')}
+                    description={t('confirmCreateScenarioDescription', { name: draftName })}
+                    okText={t('createScenarioOnly')}
+                    cancelText={t('cancel')}
+                    onConfirm={() => publish(false)}
+                  >
+                    <Button size="small" disabled={!canApply} loading={applyingId === draftId}>
+                      {t('createScenarioOnly')}
+                    </Button>
+                  </Popconfirm>
+                  <Popconfirm
+                    title={t('confirmCreateAndAddTitle')}
+                    description={t('confirmCreateAndAddDescription', { name: draftName })}
+                    okText={t('createAndAddToSuite')}
+                    cancelText={t('cancel')}
+                    onConfirm={() => publish(true)}
+                  >
+                    <Button
+                      size="small"
+                      type="primary"
+                      disabled={!canApply || !canAddToSuite}
+                      loading={applyingId === draftId}
+                      title={!canAddToSuite ? t('saveSuiteBeforeAdd') : undefined}
+                    >
+                      {t('createAndAddToSuite')}
+                    </Button>
+                  </Popconfirm>
+                </div>
+              ) : applied ? (
                 <span className="agent-applied-status"><CheckCircleFilled />{t('appliedShort')}</span>
               ) : (
                 <Button
                   size="small"
                   type="primary"
                   disabled={!canApply}
-                  loading={applyingId === draft.targetId}
+                  loading={applyingId === draftId}
                   onClick={async () => {
-                    setApplyingId(draft.targetId!)
+                    setApplyingId(draftId)
                     try {
-                      if (await onApply(draft.targetId!)) {
-                        setAppliedDraftIds((current) => new Set(current).add(draft.targetId!))
+                      if (await onApply(
+                        draftId,
+                        draft.artifactType as 'SCENARIO_DRAFT' | 'SUITE_DRAFT',
+                        draft.content,
+                      )) {
+                        setAppliedDraftIds((current) => new Set(current).add(draftId))
                       }
                     } finally {
                       setApplyingId(undefined)
@@ -1042,6 +1294,14 @@ function AgentArtifacts({
                 </Button>
               )}
             </div>
+            {newScenarioDraft && !publishedScenarioId ? (
+              <div className="agent-new-scenario-summary">
+                <span>{t('stepCount', { count: draftSteps.length })}</span>
+                {draftSteps.length ? (
+                  <ol>{draftSteps.map((step, index) => <li key={step.id ?? index}>{step.name || t('unnamedStep')}</li>)}</ol>
+                ) : null}
+              </div>
+            ) : null}
             {!applied && commands.length ? (
               <details open className="agent-artifact-detail agent-plan">
                 <summary>{t('plan')} ({commands.length})</summary>
@@ -1094,9 +1354,7 @@ function AgentArtifacts({
                 </div>
               </details>
             ) : null}
-          </div>
-        )
-      })}
+      </div>
     </section>
   )
 }
@@ -1113,6 +1371,22 @@ function messageText(content: Record<string, unknown>) {
   return typeof value === 'string' ? value : JSON.stringify(content, null, 2)
 }
 
+function AgentMarkdown({ content, streaming = false }: { content: string; streaming?: boolean }) {
+  return (
+    <div className="agent-message-content agent-markdown">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ node: _node, ...props }) => <a {...props} target="_blank" rel="noreferrer noopener" />,
+        }}
+      >
+        {content}
+      </ReactMarkdown>
+      {streaming ? <span className="agent-stream-caret" /> : null}
+    </div>
+  )
+}
+
 function agentFailureMessage(event: AgentEventRecord, t: TFunction<'agent'>) {
   const code = String(event.payload.code ?? '')
   if (code === 'MODEL_RATE_LIMITED') return t('failureRateLimited')
@@ -1127,18 +1401,79 @@ function agentFailureMessage(event: AgentEventRecord, t: TFunction<'agent'>) {
   return String(event.payload.message ?? code ?? t('sendFailed'))
 }
 
-function activityIcon(type: string) {
+function activityIcon(type: string, active: boolean) {
   if (type.endsWith('.completed')) return <CheckCircleFilled className="success" />
   if (type.endsWith('.failed')) return <CloseCircleFilled className="failed" />
-  if (type.endsWith('.started')) return <LoadingOutlined spin />
+  if (type.endsWith('.started')) return active ? <LoadingOutlined spin /> : <ClockCircleOutlined />
   return <FileTextOutlined />
 }
 
-function activityLabel(event: AgentEventRecord) {
+function activityLabel(event: AgentEventRecord, active = true) {
   if (event.eventType === 'skill.loaded') return `Skill: ${String(event.payload.skillName ?? '')}`
-  if (event.eventType.startsWith('tool.')) return `${String(event.payload.toolName ?? 'Tool')} / ${event.eventType.split('.')[1]}`
+  if (event.eventType.startsWith('tool.')) {
+    const state = event.eventType === 'tool.started' && !active ? 'unfinished' : event.eventType.split('.')[1]
+    return `${String(event.payload.toolName ?? 'Tool')} / ${state}`
+  }
   if (event.eventType === 'context.snapshot.created') return `Context snapshot / ${String(event.payload.sourceCount ?? 0)} sources`
   return event.eventType
+}
+
+type AgentActivityItem = {
+  key: string
+  event: AgentEventRecord
+  pending: boolean
+  fallbackKey?: string
+}
+
+function collapseActivityEvents(events: AgentEventRecord[]) {
+  const items: AgentActivityItem[] = []
+  const callsByKey = new Map<string, AgentActivityItem>()
+  const pendingByFallback = new Map<string, AgentActivityItem[]>()
+
+  for (const event of [...events].sort((left, right) => left.sequence - right.sequence)) {
+    if (!event.eventType.startsWith('tool.')) {
+      items.push({ key: event.id, event, pending: false })
+      continue
+    }
+
+    const callKey = toolCallKey(event)
+    const fallbackKey = toolFallbackKey(event)
+    if (event.eventType === 'tool.started') {
+      const item = { key: callKey ?? event.id, event, pending: true, fallbackKey }
+      items.push(item)
+      if (callKey) callsByKey.set(callKey, item)
+      const pending = pendingByFallback.get(fallbackKey) ?? []
+      pending.push(item)
+      pendingByFallback.set(fallbackKey, pending)
+      continue
+    }
+
+    const item = (callKey ? callsByKey.get(callKey) : undefined)
+      ?? pendingByFallback.get(fallbackKey)?.find((candidate) => candidate.pending)
+    if (item) {
+      item.event = event
+      item.pending = false
+      continue
+    }
+    items.push({ key: callKey ?? event.id, event, pending: false, fallbackKey })
+  }
+  return items
+}
+
+function toolCallKey(event: AgentEventRecord) {
+  const sequence = event.payload.callSequence
+  if (typeof sequence !== 'number' && typeof sequence !== 'string') return undefined
+  return `${String(event.payload.turnId ?? '')}:${String(sequence)}`
+}
+
+function toolFallbackKey(event: AgentEventRecord) {
+  return `${String(event.payload.turnId ?? '')}:${String(event.payload.toolName ?? 'Tool')}`
+}
+
+function isCurrentToolCall(item: AgentActivityItem, activeTurnId: unknown) {
+  return item.pending
+    && (typeof activeTurnId === 'string' || typeof activeTurnId === 'number')
+    && String(item.event.payload.turnId ?? '') === String(activeTurnId)
 }
 
 function findLatestArtifact(artifacts: AgentArtifactRecord[], type: string, targetId: string) {
@@ -1171,14 +1506,86 @@ function commandSummary(command: Record<string, unknown>) {
 
 function taskStatusKey(status: AgentTaskRecord['status']) {
   if (status === 'RUNNING') return 'running'
+  if (status === 'WAITING_FOR_USER') return 'waiting'
   if (status === 'FAILED') return 'failed'
   if (status === 'CANCELLED') return 'cancelled'
   if (status === 'COMPLETED') return 'completed'
   return 'waiting'
 }
 
+function taskScope(task: AgentTaskRecord): AgentScope {
+  if (task.targetType === 'SCENARIO' && task.targetId) return { type: 'SCENARIO', id: task.targetId }
+  if (task.targetType === 'SUITE' && task.targetId) return { type: 'SUITE', id: task.targetId }
+  return { type: 'PROJECT' }
+}
+
+function scopeTarget(scope: AgentScope) {
+  if (scope.type === 'PROJECT') return undefined
+  return { type: scope.type, id: scope.id } as const
+}
+
+function scopeValue(scope: AgentScope) {
+  return scope.type === 'PROJECT' ? 'PROJECT' : `${scope.type}:${scope.id}`
+}
+
+function sameScope(left: AgentScope, right: AgentScope) {
+  return scopeValue(left) === scopeValue(right)
+}
+
+function scopeLabel(
+  scope: AgentScope,
+  scenarios: CaseRecord[],
+  suites: SuiteRecord[],
+  t: TFunction<'agent'>,
+) {
+  if (scope.type === 'PROJECT') return t('projectScope')
+  if (scope.type === 'SCENARIO') {
+    return scenarios.find((item) => item.id === scope.id)?.name ?? t('missingScenario')
+  }
+  return suites.find((item) => item.id === scope.id)?.name ?? t('missingSuite')
+}
+
+function defaultPermissionMode(scope: AgentScope): AgentPermissionMode {
+  return scope.type === 'SCENARIO' ? 'REVIEW_REQUIRED' : 'READ_ONLY'
+}
+
+function permissionOptions(scope: AgentScope, t: TFunction<'agent'>) {
+  if (scope.type !== 'SCENARIO') return [{ value: 'READ_ONLY', label: t('readOnly') }]
+  return [
+    { value: 'READ_ONLY', label: t('readOnly') },
+    { value: 'REVIEW_REQUIRED', label: t('reviewRequired') },
+  ]
+}
+
+function scopeIcon(type: AgentScope['type']) {
+  if (type === 'SCENARIO') return <ExperimentOutlined />
+  if (type === 'SUITE') return <ApartmentOutlined />
+  return <GlobalOutlined />
+}
+
+function emptyTitleKey(type: AgentScope['type']) {
+  if (type === 'SCENARIO') return 'emptyTitleScenario' as const
+  if (type === 'SUITE') return 'emptyTitleSuite' as const
+  return 'emptyTitleProject' as const
+}
+
+function composerPlaceholderKey(type: AgentScope['type']) {
+  if (type === 'SCENARIO') return 'composerPlaceholderScenario' as const
+  if (type === 'SUITE') return 'composerPlaceholderSuite' as const
+  return 'composerPlaceholderProject' as const
+}
+
+function emptyDescriptionKey(type: AgentScope['type']) {
+  if (type === 'SCENARIO') return 'emptyDescriptionScenario' as const
+  if (type === 'SUITE') return 'emptyDescriptionSuite' as const
+  return 'emptyDescriptionProject' as const
+}
+
 function isTerminalAgentEvent(eventType: string) {
-  return eventType === 'task.completed' || eventType === 'task.failed' || eventType === 'task.cancelled'
+  return eventType === 'task.completed'
+    || eventType === 'task.paused'
+    || eventType === 'task.failed'
+    || eventType === 'task.cancelled'
 }
 
 function contextKey(reference: AgentContextReference) {

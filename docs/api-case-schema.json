@@ -3,28 +3,47 @@
   "$id": "https://example.com/schemas/api-case-v1.schema.json",
   "title": "API Automation Case DSL v1",
   "type": "object",
-  "required": ["dslVersion", "name", "steps"],
+  "required": [
+    "dslVersion",
+    "name",
+    "steps"
+  ],
   "additionalProperties": false,
   "properties": {
-    "dslVersion": { "const": "v1" },
-    "name": { "type": "string", "minLength": 1 },
-    "description": { "type": "string" },
+    "dslVersion": {
+      "const": "v1"
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
     "tags": {
       "type": "array",
-      "items": { "type": "string" }
+      "items": {
+        "type": "string"
+      }
     },
-    "runtime": { "$ref": "#/$defs/runtime" },
+    "runtime": {
+      "$ref": "#/$defs/runtime"
+    },
     "variables": {
       "type": "object",
       "additionalProperties": true
     },
     "profiles": {
       "type": "object",
-      "additionalProperties": { "$ref": "#/$defs/profile" }
+      "additionalProperties": {
+        "$ref": "#/$defs/profile"
+      }
     },
     "steps": {
       "type": "array",
-      "items": { "$ref": "#/$defs/httpStep" }
+      "items": {
+        "$ref": "#/$defs/httpStep"
+      }
     }
   },
   "$defs": {
@@ -32,61 +51,146 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "environment": { "type": "string" },
-        "profile": { "type": "string" }
+        "environment": {
+          "type": "string"
+        },
+        "profile": {
+          "type": "string"
+        }
       }
     },
     "profile": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "senderPublicKey": { "type": "string" },
-        "senderPrivateKey": { "type": "string" },
-        "senderPrivateKeyPassphrase": { "type": "string" },
-        "recipientPublicKey": { "type": "string" },
-        "recipientPrivateKey": { "type": "string" },
-        "recipientPrivateKeyPassphrase": { "type": "string" }
+        "verificationPublicKey": {
+          "type": "string",
+          "description": "Counterparty public key used to verify response signatures."
+        },
+        "signingPrivateKey": {
+          "type": "string",
+          "description": "Our private key used to sign requests."
+        },
+        "signingPrivateKeyPassphrase": {
+          "type": "string"
+        },
+        "encryptionPublicKey": {
+          "type": "string",
+          "description": "Counterparty public key used to encrypt requests."
+        },
+        "decryptionPrivateKey": {
+          "type": "string",
+          "description": "Our private key used to decrypt responses."
+        },
+        "decryptionPrivateKeyPassphrase": {
+          "type": "string"
+        }
       }
     },
     "httpStep": {
       "type": "object",
-      "required": ["name", "type", "operation", "request", "actions", "response"],
+      "required": [
+        "name",
+        "type",
+        "operation",
+        "request",
+        "actions",
+        "response"
+      ],
       "additionalProperties": false,
       "properties": {
-        "name": { "type": "string", "minLength": 1 },
-        "type": { "const": "http" },
-        "operation": { "$ref": "#/$defs/operation" },
-        "runtime": { "$ref": "#/$defs/runtime" },
-        "request": { "$ref": "#/$defs/request" },
-        "actions": { "$ref": "#/$defs/actionPipeline" },
-        "response": { "$ref": "#/$defs/response" }
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "const": "http"
+        },
+        "operation": {
+          "$ref": "#/$defs/operation"
+        },
+        "runtime": {
+          "$ref": "#/$defs/runtime"
+        },
+        "request": {
+          "$ref": "#/$defs/request"
+        },
+        "actions": {
+          "$ref": "#/$defs/actionPipeline"
+        },
+        "response": {
+          "$ref": "#/$defs/response"
+        },
+        "processingMode": {
+          "type": "string",
+          "enum": [
+            "automatic",
+            "manual",
+            "wire"
+          ],
+          "default": "automatic",
+          "description": "Use API processing, explicit manual actions, or send the wire body directly while retaining API response handling."
+        }
       }
     },
     "operation": {
       "type": "object",
-      "required": ["method", "path"],
+      "required": [
+        "method",
+        "path"
+      ],
       "additionalProperties": false,
       "properties": {
-        "id": { "type": "string" },
-        "apiSpecId": { "type": "string" },
-        "apiSpecName": { "type": "string" },
-        "operationId": { "type": "string" },
-        "summary": { "type": "string" },
-        "service": { "type": "string" },
+        "id": {
+          "type": "string"
+        },
+        "apiSpecId": {
+          "type": "string"
+        },
+        "apiSpecName": {
+          "type": "string"
+        },
+        "operationId": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "service": {
+          "type": "string"
+        },
         "method": {
           "type": "string",
-          "enum": ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
+          "enum": [
+            "GET",
+            "POST",
+            "PUT",
+            "PATCH",
+            "DELETE",
+            "HEAD",
+            "OPTIONS"
+          ]
         },
-        "path": { "type": "string", "minLength": 1 }
+        "path": {
+          "type": "string",
+          "minLength": 1
+        }
       }
     },
     "request": {
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "path": {
+          "type": "object",
+          "description": "Values for placeholders declared by operation.path.",
+          "additionalProperties": true
+        },
         "headers": {
           "type": "object",
-          "additionalProperties": { "type": "string" }
+          "additionalProperties": {
+            "type": "string"
+          }
         },
         "query": {
           "type": "object",
@@ -103,127 +207,438 @@
           "type": "array",
           "items": {
             "oneOf": [
-              { "$ref": "#/$defs/signAndEncryptAction" },
-              { "$ref": "#/$defs/encodeBase64Action" },
-              { "$ref": "#/$defs/buildJsonAction" }
+              {
+                "$ref": "#/$defs/signAndEncryptAction"
+              },
+              {
+                "$ref": "#/$defs/encodeBase64Action"
+              },
+              {
+                "$ref": "#/$defs/buildJsonAction"
+              },
+              {
+                "$ref": "#/$defs/encryptAction"
+              }
             ]
           }
         },
         "afterReceive": {
           "type": "array",
-          "items": { "$ref": "#/$defs/decryptAndVerifyAction" }
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/decryptAndVerifyAction"
+              },
+              {
+                "$ref": "#/$defs/decryptAction"
+              }
+            ]
+          }
+        },
+        "afterRequestProcessing": {
+          "type": "array",
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/signAndEncryptAction"
+              },
+              {
+                "$ref": "#/$defs/encodeBase64Action"
+              },
+              {
+                "$ref": "#/$defs/buildJsonAction"
+              },
+              {
+                "$ref": "#/$defs/encryptAction"
+              }
+            ]
+          },
+          "description": "Runs after API request encryption and envelope construction."
         }
       }
     },
     "signAndEncryptAction": {
       "type": "object",
-      "required": ["type", "input", "output"],
+      "required": [
+        "type",
+        "input",
+        "output"
+      ],
       "additionalProperties": false,
       "properties": {
-        "type": { "const": "crypto.pgp.signAndEncrypt" },
-        "name": { "type": "string" },
-        "enabled": { "type": "boolean", "default": true },
-        "input": { "$ref": "#/$defs/actionInput" },
-        "output": { "$ref": "#/$defs/actionOutput" }
+        "type": {
+          "const": "crypto.pgp.signAndEncrypt"
+        },
+        "name": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "input": {
+          "$ref": "#/$defs/actionInput"
+        },
+        "output": {
+          "$ref": "#/$defs/actionOutput"
+        }
       }
     },
     "encodeBase64Action": {
       "type": "object",
-      "required": ["type", "input", "output"],
+      "required": [
+        "type",
+        "input",
+        "output"
+      ],
       "additionalProperties": false,
       "properties": {
-        "type": { "const": "data.encodeBase64" },
-        "name": { "type": "string" },
-        "enabled": { "type": "boolean", "default": true },
-        "input": { "$ref": "#/$defs/actionInput" },
-        "output": { "$ref": "#/$defs/actionOutput" }
+        "type": {
+          "const": "data.encodeBase64"
+        },
+        "name": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "input": {
+          "$ref": "#/$defs/actionInput"
+        },
+        "output": {
+          "$ref": "#/$defs/actionOutput"
+        }
       }
     },
     "buildJsonAction": {
       "type": "object",
-      "required": ["type", "template", "output"],
+      "required": [
+        "type",
+        "template",
+        "output"
+      ],
       "additionalProperties": false,
       "properties": {
-        "type": { "const": "body.buildJson" },
-        "name": { "type": "string" },
-        "enabled": { "type": "boolean", "default": true },
+        "type": {
+          "const": "body.buildJson"
+        },
+        "name": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
         "template": {
           "oneOf": [
-            { "type": "object" },
-            { "type": "array" }
+            {
+              "type": "object"
+            },
+            {
+              "type": "array"
+            }
           ]
         },
-        "output": { "$ref": "#/$defs/actionOutput" }
+        "output": {
+          "$ref": "#/$defs/actionOutput"
+        }
       }
     },
     "decryptAndVerifyAction": {
       "type": "object",
-      "required": ["type", "input", "output"],
+      "required": [
+        "type",
+        "input",
+        "output"
+      ],
       "additionalProperties": false,
       "properties": {
-        "type": { "const": "crypto.pgp.decryptAndVerify" },
-        "name": { "type": "string" },
-        "enabled": { "type": "boolean", "default": true },
-        "input": { "$ref": "#/$defs/actionInput" },
-        "output": { "$ref": "#/$defs/actionOutput" }
+        "type": {
+          "const": "crypto.pgp.decryptAndVerify"
+        },
+        "name": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "input": {
+          "$ref": "#/$defs/actionInput"
+        },
+        "output": {
+          "$ref": "#/$defs/actionOutput"
+        }
       }
     },
     "actionInput": {
       "type": "object",
-      "required": ["source"],
+      "required": [
+        "source"
+      ],
       "additionalProperties": false,
       "properties": {
-        "source": { "type": "string", "minLength": 1 },
-        "path": { "type": "string" },
-        "format": { "enum": ["json", "text", "xml"] }
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string"
+        },
+        "format": {
+          "enum": [
+            "json",
+            "text",
+            "xml"
+          ]
+        },
+        "pointer": {
+          "type": "string",
+          "description": "Exact JSON Pointer for ciphertext extraction; supports nested fields."
+        }
       }
     },
     "actionOutput": {
       "type": "object",
-      "required": ["target"],
+      "required": [
+        "target"
+      ],
       "additionalProperties": false,
       "properties": {
-        "target": { "type": "string", "minLength": 1 },
-        "path": { "type": "string" },
-        "format": { "enum": ["json", "text", "xml"] }
+        "target": {
+          "type": "string",
+          "minLength": 1
+        },
+        "path": {
+          "type": "string"
+        },
+        "format": {
+          "enum": [
+            "json",
+            "text",
+            "xml"
+          ]
+        }
       }
     },
     "response": {
       "type": "object",
-      "required": ["status"],
+      "required": [
+        "status"
+      ],
       "additionalProperties": false,
       "properties": {
-        "status": { "type": "integer", "minimum": 100, "maximum": 599 },
+        "status": {
+          "$ref": "#/$defs/httpStatusRule"
+        },
         "assertions": {
           "type": "array",
-          "items": { "$ref": "#/$defs/assertion" }
+          "items": {
+            "$ref": "#/$defs/assertion"
+          }
         },
         "extract": {
           "type": "object",
-          "additionalProperties": { "$ref": "#/$defs/extractValue" }
+          "additionalProperties": {
+            "$ref": "#/$defs/extractValue"
+          }
         }
       }
     },
+    "httpStatusRule": {
+      "description": "Required HTTP response status assertion.",
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "operator",
+            "expected"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "operator": {
+              "const": "equals"
+            },
+            "expected": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 599
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "operator",
+            "expected"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "operator": {
+              "const": "oneOf"
+            },
+            "expected": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 599
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "operator",
+            "min",
+            "max"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "operator": {
+              "const": "range"
+            },
+            "min": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 599
+            },
+            "max": {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 599
+            }
+          }
+        }
+      ]
+    },
     "assertion": {
       "type": "object",
-      "required": ["source", "path", "operator"],
+      "required": [
+        "source",
+        "path",
+        "operator"
+      ],
       "additionalProperties": false,
       "properties": {
-        "source": { "type": "string", "minLength": 1 },
-        "path": { "type": "string", "minLength": 1 },
+        "source": {
+          "$ref": "#/$defs/responseDataSource"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "JSONPath evaluated against the selected response data source."
+        },
         "operator": {
-          "enum": ["equals", "notEquals", "exists", "notExists", "contains", "greaterThan", "lessThan"]
+          "enum": [
+            "equals",
+            "notEquals",
+            "exists",
+            "notExists",
+            "contains",
+            "greaterThan",
+            "lessThan"
+          ]
         },
         "expected": true
       }
     },
     "extractValue": {
       "type": "object",
-      "required": ["source", "path"],
+      "required": [
+        "source",
+        "path"
+      ],
       "additionalProperties": false,
       "properties": {
-        "source": { "type": "string", "minLength": 1 },
-        "path": { "type": "string", "minLength": 1 }
+        "source": {
+          "$ref": "#/$defs/responseDataSource"
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "JSONPath evaluated against the selected response data source."
+        }
+      }
+    },
+    "responseDataSource": {
+      "description": "A response value available after all enabled afterReceive Actions have run.",
+      "oneOf": [
+        {
+          "const": "response.body",
+          "description": "The raw HTTP response body."
+        },
+        {
+          "type": "string",
+          "pattern": "^decrypted[.][A-Za-z][A-Za-z0-9_-]*$",
+          "description": "A decrypted payload produced by an enabled afterReceive Action in the same Step."
+        },
+        {
+          "const": "business.response.body",
+          "description": "Business response after API processing; raw JSON when no processing is configured."
+        },
+        {
+          "const": "wire.response.body",
+          "description": "Original HTTP response body."
+        }
+      ]
+    },
+    "encryptAction": {
+      "type": "object",
+      "required": [
+        "type",
+        "input",
+        "output"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "crypto.pgp.encrypt"
+        },
+        "name": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "input": {
+          "$ref": "#/$defs/actionInput"
+        },
+        "output": {
+          "$ref": "#/$defs/actionOutput"
+        }
+      }
+    },
+    "decryptAction": {
+      "type": "object",
+      "required": [
+        "type",
+        "input",
+        "output"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "const": "crypto.pgp.decrypt"
+        },
+        "name": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": true
+        },
+        "input": {
+          "$ref": "#/$defs/actionInput"
+        },
+        "output": {
+          "$ref": "#/$defs/actionOutput"
+        }
       }
     }
   }

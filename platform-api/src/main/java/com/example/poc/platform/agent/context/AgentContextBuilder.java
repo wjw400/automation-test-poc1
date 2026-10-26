@@ -2,6 +2,7 @@ package com.example.poc.platform.agent.context;
 
 import com.example.poc.engine.ApiStep;
 import com.example.poc.engine.ApiTestCase;
+import com.example.poc.engine.CaseDslDataSources;
 import com.example.poc.platform.agent.AgentTaskService.AgentTaskRecord;
 import com.example.poc.platform.agent.scenario.ScenarioDslCodec;
 import com.example.poc.platform.persistence.JsonCodec;
@@ -47,6 +48,9 @@ public class AgentContextBuilder {
     private final ScenarioDslCodec scenarioCodec;
     private final JsonCodec jsonCodec;
     private final AgentContextRedactor redactor;
+    private final AgentWorkContextBuilder workContextBuilder;
+    private final com.example.poc.platform.openapi.OperationProcessingService processingService;
+    private final com.example.poc.platform.openapi.OperationAuthoringContractService authoringContracts;
 
     public AgentContextBuilder(
             CaseRepository caseRepository,
@@ -58,7 +62,10 @@ public class AgentContextBuilder {
             StepRunRepository stepRunRepository,
             ScenarioDslCodec scenarioCodec,
             JsonCodec jsonCodec,
-            AgentContextRedactor redactor) {
+            AgentContextRedactor redactor,
+            AgentWorkContextBuilder workContextBuilder,
+            com.example.poc.platform.openapi.OperationProcessingService processingService,
+            com.example.poc.platform.openapi.OperationAuthoringContractService authoringContracts) {
         this.caseRepository = caseRepository;
         this.operationRepository = operationRepository;
         this.knowledgeRepository = knowledgeRepository;
@@ -69,6 +76,9 @@ public class AgentContextBuilder {
         this.scenarioCodec = scenarioCodec;
         this.jsonCodec = jsonCodec;
         this.redactor = redactor;
+        this.workContextBuilder = workContextBuilder;
+        this.processingService = processingService;
+        this.authoringContracts = authoringContracts;
     }
 
     public AgentContextSnapshot build(AgentTaskRecord task, String turnId) {
@@ -108,6 +118,7 @@ public class AgentContextBuilder {
 
         addPublishedKnowledge(items, itemKeys, task, scenarioIds, suiteIds, operationIds, apiSpecIds, selection);
         addItem(items, itemKeys, fixedRulesItem());
+        addItem(items, itemKeys, workContextBuilder.build(task));
         items.sort(Comparator.comparingInt(AgentContextItem::priority));
         return new AgentContextSnapshot(
                 UUID.randomUUID().toString(), task.id(), turnId, task.projectId(),
@@ -238,6 +249,10 @@ public class AgentContextBuilder {
         content.put("description", operation.getDescription());
         content.put("requestBody", parseObject(operation.getRequestBodyJson()));
         content.put("responses", parseObject(operation.getResponsesJson()));
+        content.put("processingSettings", redactor.redact(jsonCodec.readObjectMap(jsonCodec.write(processingService.settings(operation)))));
+        var authoring = authoringContracts.describe(operation);
+        content.put("authoring", authoring == null ? Map.of() : redactor.redact(authoring.agentView()));
+        content.put("processingGuidance", "Use business request data and business.response.body. API PGP processing runs automatically; do not duplicate it with manual Actions.");
         return new AgentContextItem(
                 20, "OPERATION", "OPERATION", operation.getId(),
                 operation.getCreatedAt() == null ? "unknown" : operation.getCreatedAt().toString(),
@@ -298,10 +313,19 @@ public class AgentContextBuilder {
         Map<String, Object> content = new LinkedHashMap<>();
         content.put("dslVersion", "v1");
         content.put("supportedActions", List.of(
+                "crypto.pgp.encrypt",
                 "crypto.pgp.signAndEncrypt",
                 "data.encodeBase64",
                 "body.buildJson",
-                "crypto.pgp.decryptAndVerify"));
+                "crypto.pgp.decryptAndVerify",
+                "crypto.pgp.decrypt"));
+        content.put("responseDataSources", List.of(
+                CaseDslDataSources.RESPONSE_BODY,
+                CaseDslDataSources.BUSINESS_RESPONSE_BODY,
+                CaseDslDataSources.WIRE_RESPONSE_BODY,
+                CaseDslDataSources.DECRYPTED_PREFIX + "<name>"));
+        content.put("operationProcessingRule", "Use effective API processing settings. Do not add duplicate PGP Actions. beforeSend runs on business data; API request protection and afterRequestProcessing follow; API response decoding precedes afterReceive and assertions.");
+        content.put("operationSchemaRule", "Read the resolved operation.authoring contract before creating request data or JSONPaths. Use its business request schema and business.response.body for decoded responses. Variable names are independent of API field names. Repair request-schema and response-source/path ERRORs returned by Draft validation before proposing a save.");
         content.put("securityRules", List.of(
                 "Only Scenario Drafts may be changed",
                 "Environment and Profile secrets are never available",

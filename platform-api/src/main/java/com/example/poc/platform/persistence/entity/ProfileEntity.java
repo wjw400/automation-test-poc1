@@ -29,22 +29,22 @@ public class ProfileEntity {
     private String type;
 
     @Column(columnDefinition = "text")
-    private String senderPublicKey;
+    private String verificationPublicKey;
 
     @Column(columnDefinition = "text")
-    private String senderPrivateKey;
+    private String signingPrivateKey;
 
     @Column(length = 500)
-    private String senderPrivateKeyPassphrase;
+    private String signingPrivateKeyPassphrase;
 
     @Column(columnDefinition = "text")
-    private String recipientPublicKey;
+    private String encryptionPublicKey;
 
     @Column(columnDefinition = "text")
-    private String recipientPrivateKey;
+    private String decryptionPrivateKey;
 
     @Column(length = 500)
-    private String recipientPrivateKeyPassphrase;
+    private String decryptionPrivateKeyPassphrase;
 
     @Column(nullable = false)
     private boolean enabled;
@@ -71,18 +71,18 @@ public class ProfileEntity {
     public void setName(String name) { this.name = name; }
     public String getType() { return type; }
     public void setType(String type) { this.type = type; }
-    public String getSenderPublicKey() { return senderPublicKey; }
-    public void setSenderPublicKey(String senderPublicKey) { this.senderPublicKey = senderPublicKey; }
-    public String getSenderPrivateKey() { return senderPrivateKey; }
-    public void setSenderPrivateKey(String senderPrivateKey) { this.senderPrivateKey = senderPrivateKey; }
-    public String getSenderPrivateKeyPassphrase() { return senderPrivateKeyPassphrase; }
-    public void setSenderPrivateKeyPassphrase(String senderPrivateKeyPassphrase) { this.senderPrivateKeyPassphrase = senderPrivateKeyPassphrase; }
-    public String getRecipientPublicKey() { return recipientPublicKey; }
-    public void setRecipientPublicKey(String recipientPublicKey) { this.recipientPublicKey = recipientPublicKey; }
-    public String getRecipientPrivateKey() { return recipientPrivateKey; }
-    public void setRecipientPrivateKey(String recipientPrivateKey) { this.recipientPrivateKey = recipientPrivateKey; }
-    public String getRecipientPrivateKeyPassphrase() { return recipientPrivateKeyPassphrase; }
-    public void setRecipientPrivateKeyPassphrase(String recipientPrivateKeyPassphrase) { this.recipientPrivateKeyPassphrase = recipientPrivateKeyPassphrase; }
+    public String getVerificationPublicKey() { return verificationPublicKey; }
+    public void setVerificationPublicKey(String verificationPublicKey) { this.verificationPublicKey = verificationPublicKey; }
+    public String getSigningPrivateKey() { return signingPrivateKey; }
+    public void setSigningPrivateKey(String signingPrivateKey) { this.signingPrivateKey = signingPrivateKey; }
+    public String getSigningPrivateKeyPassphrase() { return signingPrivateKeyPassphrase; }
+    public void setSigningPrivateKeyPassphrase(String signingPrivateKeyPassphrase) { this.signingPrivateKeyPassphrase = signingPrivateKeyPassphrase; }
+    public String getEncryptionPublicKey() { return encryptionPublicKey; }
+    public void setEncryptionPublicKey(String encryptionPublicKey) { this.encryptionPublicKey = encryptionPublicKey; }
+    public String getDecryptionPrivateKey() { return decryptionPrivateKey; }
+    public void setDecryptionPrivateKey(String decryptionPrivateKey) { this.decryptionPrivateKey = decryptionPrivateKey; }
+    public String getDecryptionPrivateKeyPassphrase() { return decryptionPrivateKeyPassphrase; }
+    public void setDecryptionPrivateKeyPassphrase(String decryptionPrivateKeyPassphrase) { this.decryptionPrivateKeyPassphrase = decryptionPrivateKeyPassphrase; }
     public boolean isEnabled() { return enabled; }
     public void setEnabled(boolean enabled) { this.enabled = enabled; }
     public Set<String> getEnvironmentIds() { return environmentIds; }

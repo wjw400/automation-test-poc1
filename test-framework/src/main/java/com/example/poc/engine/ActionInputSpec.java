@@ -4,6 +4,9 @@ public class ActionInputSpec {
     private String source;
     private String path;
     private String format;
+    private String pointer;
+    public String getPointer() { return pointer; }
+    public void setPointer(String pointer) { this.pointer = pointer; }
 
     public String getSource() { return source; }
     public void setSource(String source) { this.source = source; }

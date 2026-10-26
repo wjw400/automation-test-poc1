@@ -38,6 +38,16 @@ public class AgentRuntimeRegistry {
                 .toList();
     }
 
+    public String resolveModel(AgentRuntime runtime, String requestedModel) {
+        String model = requestedModel == null || requestedModel.isBlank()
+                ? runtime.capabilities().defaultModel()
+                : requestedModel.trim();
+        if (!runtime.capabilities().models().contains(model)) {
+            throw new IllegalArgumentException("Model is not enabled for " + runtime.type() + ": " + model);
+        }
+        return model;
+    }
+
     private String normalize(String value) { return value.trim().toUpperCase(Locale.ROOT); }
 
     public record RuntimeDescriptor(String type, AgentRuntimeCapabilities capabilities) {}

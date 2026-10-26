@@ -3,7 +3,6 @@ package com.example.poc.platform.openapi;
 import com.example.poc.platform.catalog.PlatformCatalogService;
 import com.example.poc.platform.pipeline.BuiltinPipelineCatalogService;
 import com.example.poc.platform.pipeline.BuiltinPipelineCatalogService.PipelineCatalogRecord;
-import com.example.poc.platform.pipeline.BuiltinPipelineCatalogService.PipelineStepRecord;
 import com.example.poc.platform.persistence.entity.ApiOperationEntity;
 import com.example.poc.platform.persistence.entity.ApiSpecEntity;
 import com.example.poc.platform.persistence.repo.ApiOperationRepository;
@@ -16,7 +15,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.stereotype.Service;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.type.TypeReference;
@@ -32,27 +30,25 @@ public class OpenApiContractService {
     private final BuiltinPipelineCatalogService pipelineCatalogService;
     private final ApiSpecRepository apiSpecRepository;
     private final ApiOperationRepository apiOperationRepository;
+    private final OperationProcessingService processingService;
     private final ObjectMapper yamlMapper = YAMLMapper.builder().build();
-    private final Map<String, ApiSpecContractRecord> cache = new ConcurrentHashMap<>();
 
     public OpenApiContractService(
             PlatformCatalogService catalogService,
             BuiltinPipelineCatalogService pipelineCatalogService,
             ApiSpecRepository apiSpecRepository,
-            ApiOperationRepository apiOperationRepository) {
+            ApiOperationRepository apiOperationRepository,
+            OperationProcessingService processingService) {
         this.catalogService = catalogService;
         this.pipelineCatalogService = pipelineCatalogService;
         this.apiSpecRepository = apiSpecRepository;
         this.apiOperationRepository = apiOperationRepository;
+        this.processingService = processingService;
     }
 
     public ApiSpecContractRecord getSpecContract(String projectId, String apiSpecId) {
         ApiSpecEntity spec = requireSpec(projectId, apiSpecId);
-        String key = spec.getId() + ":" + spec.getUpdatedAt();
-        return cache.computeIfAbsent(key, unused -> {
-            cache.keySet().removeIf(candidate -> candidate.startsWith(spec.getId() + ":") && !candidate.equals(key));
-            return parse(spec);
-        });
+        return parse(spec);
     }
 
     public OperationContractRecord getOperationContract(String projectId, String operationId) {
@@ -116,12 +112,17 @@ public class OpenApiContractService {
         String location = method.toUpperCase(Locale.ROOT) + " " + path;
         List<ContractDiagnosticRecord> diagnostics = new ArrayList<>();
         Map<String, Object> processing = object(raw.get("x-platform-processing"));
-        Map<String, Object> legacyPayload = object(raw.get("x-platform-payload"));
-        if (!legacyPayload.isEmpty() && processing.isEmpty()) {
-            diagnostics.add(diagnostic("WARNING", "LEGACY_PAYLOAD_EXTENSION",
-                    "x-platform-payload is deprecated; migrate this operation to x-platform-processing", location));
+        OperationProcessingService.Settings settings = entity == null ? null : processingService.settings(entity);
+        if (settings != null && settings.configuration() != null) {
+            Map<String, Object> effective = new LinkedHashMap<>();
+            effective.put("request", normalizedRule(settings.configuration().getRequest()));
+            Map<String, Object> responseRules = new LinkedHashMap<>();
+            settings.configuration().getResponses().forEach((status, rule) -> responseRules.put(status, normalizedRule(rule)));
+            effective.put("response", responseRules);
+            processing = effective;
         }
-
+        if (settings != null && settings.needsReview()) diagnostics.add(diagnostic("ERROR", "PROCESSING_REVIEW_REQUIRED", "Review processing settings after OpenAPI reimport", location));
+        if (settings != null && settings.importError() != null && !"MANUAL".equals(settings.source())) diagnostics.add(diagnostic("ERROR", "INVALID_PROCESSING_EXTENSION", settings.importError(), location));
         List<Object> rawParameters = new ArrayList<>(pathParameters);
         rawParameters.addAll(list(raw.get("parameters")));
         List<ParameterContractRecord> parameters = rawParameters.stream()
@@ -133,40 +134,31 @@ public class OpenApiContractService {
                 .toList();
 
         Map<String, Object> requestExtension = object(processing.get("request"));
-        Map<String, Object> legacyRequestExtension = object(legacyPayload.get("request"));
         ContentContractRecord businessRequest = businessSchema(
-                document, firstPresent(requestExtension.get("businessSchema"), object(legacyRequestExtension.get("business")).get("schema")),
-                raw.get("x-plaintext-request-schema"), diagnostics, location + " business request");
+                document, requestExtension.get("businessSchema"), diagnostics, location + " business request");
         ContentContractRecord wireRequest = requestBody(document, raw.get("requestBody"), diagnostics, location + " wire request");
-        ProcessingContractRecord requestProcessing = !requestExtension.isEmpty()
-                ? processing(requestExtension, diagnostics, location + " request processing")
-                : legacyProcessing(object(legacyRequestExtension.get("transform")), "REQUEST", diagnostics, location + " legacy request processing");
+        ProcessingContractRecord requestProcessing = processing(requestExtension, diagnostics, location + " request processing");
 
         List<ResponseContractRecord> responses = new ArrayList<>();
         Map<String, Object> responseExtensions = object(processing.get("response"));
-        Map<String, Object> legacyResponseExtensions = object(legacyPayload.get("responses"));
         for (Map.Entry<String, Object> entry : object(raw.get("responses")).entrySet()) {
             String status = entry.getKey();
             Map<String, Object> response = resolve(document, object(entry.getValue()), diagnostics, location + " response " + status);
             Map<String, Object> responseExtension = object(responseExtensions.get(status));
-            Map<String, Object> legacyResponseExtension = object(legacyResponseExtensions.get(status));
-            boolean firstSuccess = status.startsWith("2") && responses.stream().noneMatch(item -> item.status().startsWith("2"));
             responses.add(new ResponseContractRecord(
                     status,
                     text(response.get("description")),
-                    businessSchema(document, firstPresent(responseExtension.get("businessSchema"), object(legacyResponseExtension.get("business")).get("schema")),
-                            firstSuccess ? raw.get("x-plaintext-response-schema") : null,
-                            diagnostics, location + " business response " + status),
+                    businessSchema(document, responseExtension.get("businessSchema"), diagnostics, location + " business response " + status),
                     content(document, object(response.get("content")), diagnostics, location + " wire response " + status),
-                    !responseExtension.isEmpty()
-                            ? processing(responseExtension, diagnostics, location + " response processing " + status)
-                            : legacyProcessing(object(legacyResponseExtension.get("transform")), "RESPONSE", diagnostics,
-                                    location + " legacy response processing " + status)));
+                    processing(responseExtension, diagnostics, location + " response processing " + status)));
         }
         specDiagnostics.addAll(diagnostics);
-        boolean hasResponseProcessing = responses.stream().anyMatch(response -> response.processing() != null);
-        boolean hasRequestProcessing = requestProcessing != null;
-        boolean encrypted = (requestProcessing != null && requestProcessing.pipeline() != null && requestProcessing.pipeline().requiresRuntimeProfile())
+        boolean hasResponseProcessing = responses.stream().anyMatch(response -> response.processing() != null)
+                || (settings != null && settings.configuration() != null && settings.configuration().getResponses().values().stream().anyMatch(rule -> !"none".equals(rule.getProtection())));
+        boolean hasRequestProcessing = requestProcessing != null
+                || (settings != null && settings.configuration() != null && !"none".equals(settings.configuration().getRequest().getProtection()));
+        boolean encrypted = (settings != null && settings.configuration() != null && settings.configuration().requiresProfile())
+                || (requestProcessing != null && requestProcessing.pipeline() != null && requestProcessing.pipeline().requiresRuntimeProfile())
                 || responses.stream().anyMatch(response -> response.processing() != null
                         && response.processing().pipeline() != null
                         && response.processing().pipeline().requiresRuntimeProfile());
@@ -183,16 +175,13 @@ public class OpenApiContractService {
                         hasResponseProcessing,
                         encrypted,
                         businessRequest != null && diagnostics.stream().noneMatch(item -> "ERROR".equals(item.severity()))),
-                Map.copyOf(raw), List.copyOf(diagnostics));
+                Map.copyOf(raw), List.copyOf(diagnostics), settings);
     }
 
     private ContentContractRecord businessSchema(
-            Map<String, Object> document, Object value, Object legacySchema,
+            Map<String, Object> document, Object value,
             List<ContractDiagnosticRecord> diagnostics, String location) {
-        if (value != null) {
-            return schema("application/json", value, null, document, diagnostics, location);
-        }
-        return legacySchema == null ? null : schema("application/json", legacySchema, null, document, diagnostics, location);
+        return value == null ? null : schema("application/json", value, null, document, diagnostics, location);
     }
 
     private ContentContractRecord requestBody(Map<String, Object> document, Object value, List<ContractDiagnosticRecord> diagnostics, String location) {
@@ -224,6 +213,7 @@ public class OpenApiContractService {
     }
 
     private ProcessingContractRecord processing(Map<String, Object> value, List<ContractDiagnosticRecord> diagnostics, String location) {
+        if (value.containsKey("protection")) return null;
         if (value.isEmpty()) {
             return null;
         }
@@ -246,35 +236,6 @@ public class OpenApiContractService {
             validateOptionNames(parameters, pipeline.parameters(), "parameters", diagnostics, location);
         }
         return new ProcessingContractRecord(pipelineReference, pipeline, inputs, outputs, parameters);
-    }
-
-    private ProcessingContractRecord legacyProcessing(
-            Map<String, Object> transform, String direction, List<ContractDiagnosticRecord> diagnostics, String location) {
-        List<PipelineStepRecord> steps = new ArrayList<>();
-        for (Object rawStep : list(transform.get("steps"))) {
-            Map<String, Object> step = object(rawStep);
-            String type = text(step.get("type"));
-            if (type != null) {
-                steps.add(new PipelineStepRecord(type, type, type.replace('-', ' '), null));
-            }
-        }
-        if (steps.isEmpty()) {
-            return null;
-        }
-        boolean requiresProfile = steps.stream().anyMatch(step -> step.uses().contains("pgp"));
-        PipelineCatalogRecord pipeline = new PipelineCatalogRecord(
-                "legacy/inline-processing",
-                1,
-                "Legacy inline processing",
-                "Processing steps adapted from x-platform-payload. Migrate this operation to a built-in pipeline reference.",
-                direction,
-                requiresProfile,
-                Map.of(),
-                Map.of(),
-                Map.of(),
-                List.copyOf(steps),
-                List.of());
-        return new ProcessingContractRecord("legacy/inline-processing@1", pipeline, Map.of(), Map.of(), Map.of());
     }
 
     private void validateOptionNames(
@@ -366,10 +327,6 @@ public class OpenApiContractService {
         return text == null || text.isBlank() ? fallback : text;
     }
 
-    private static Object firstPresent(Object primary, Object fallback) {
-        return primary == null ? fallback : primary;
-    }
-
     private static boolean bool(Object value) {
         return value instanceof Boolean booleanValue && booleanValue;
     }
@@ -402,7 +359,14 @@ public class OpenApiContractService {
                                            String description, List<String> tags, List<ParameterContractRecord> parameters,
                                            PayloadContractRecord request, List<ResponseContractRecord> responses,
                                            OperationCapabilitiesRecord capabilities, Map<String, Object> rawOperation,
-                                           List<ContractDiagnosticRecord> diagnostics) { }
+                                           List<ContractDiagnosticRecord> diagnostics, OperationProcessingService.Settings processingSettings) { }
+
+    private static Map<String, Object> normalizedRule(com.example.poc.engine.OperationProcessingSpec.MessageRule rule) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("protection", rule.getProtection());
+        if (rule.getBusinessSchema() != null) result.put("businessSchema", rule.getBusinessSchema());
+        return result;
+    }
 
     public record ParameterContractRecord(String name, String location, boolean required, Object schema, Object example,
                                           String description) { }

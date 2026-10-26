@@ -11,6 +11,7 @@ import java.util.regex.Pattern;
 public class VariableResolver {
     private static final Pattern TOKEN = Pattern.compile("\\$\\{([^}]+)}");
     private static final Pattern EXACT_TOKEN = Pattern.compile("^\\$\\{([^}]+)}$");
+    private static final Pattern POSTMAN_TOKEN = Pattern.compile("\\{\\{[^{}]+}}");
 
     public Object resolveObject(Object value, TestContext context) {
         return resolveObject(value, context, Collections.emptyMap());
@@ -43,6 +44,10 @@ public class VariableResolver {
     }
 
     public String resolveString(String value, TestContext context, Map<String, Object> artifacts) {
+        if (POSTMAN_TOKEN.matcher(value).find()) {
+            throw new IllegalArgumentException(
+                    "Postman-style placeholders are not supported; use ${variableName} instead of {{variableName}}");
+        }
         Matcher matcher = TOKEN.matcher(value);
         StringBuffer resolved = new StringBuffer();
         while (matcher.find()) {

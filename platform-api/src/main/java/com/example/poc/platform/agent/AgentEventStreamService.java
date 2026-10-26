@@ -113,9 +113,7 @@ public class AgentEventStreamService {
                         .data(event));
                 lastSequence = event.sequence();
             } catch (IOException | IllegalStateException error) {
-                closed = true;
-                emitter.complete();
-                remove(this);
+                disconnect();
             }
         }
 
@@ -124,8 +122,7 @@ public class AgentEventStreamService {
             try {
                 emitter.send(SseEmitter.event().comment("keepalive"));
             } catch (IOException | IllegalStateException error) {
-                close();
-                remove(this);
+                disconnect();
             }
         }
 
@@ -133,7 +130,17 @@ public class AgentEventStreamService {
             if (closed) return;
             closed = true;
             cancelHeartbeat();
-            emitter.complete();
+            try {
+                emitter.complete();
+            } catch (Exception ignored) {
+                // The client can disconnect between the last successful send and completion.
+            }
+        }
+
+        private void disconnect() {
+            closed = true;
+            cancelHeartbeat();
+            remove(this);
         }
 
         private void cancelHeartbeat() {

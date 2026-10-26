@@ -19,8 +19,11 @@ public class ScenarioDraftEntity {
     @Column(nullable = false)
     private String projectId;
 
-    @Column(nullable = false)
+    @Column
     private String scenarioId;
+
+    // Historical provenance; the source Suite may have been deleted.
+    private String sourceSuiteId;
 
     @Column(nullable = false)
     private long sourceRevision;
@@ -85,6 +88,8 @@ public class ScenarioDraftEntity {
     public void setProjectId(String projectId) { this.projectId = projectId; }
     public String getScenarioId() { return scenarioId; }
     public void setScenarioId(String scenarioId) { this.scenarioId = scenarioId; }
+    public String getSourceSuiteId() { return sourceSuiteId; }
+    public void setSourceSuiteId(String sourceSuiteId) { this.sourceSuiteId = sourceSuiteId; }
     public long getSourceRevision() { return sourceRevision; }
     public void setSourceRevision(long sourceRevision) { this.sourceRevision = sourceRevision; }
     public String getBaseContent() { return baseContent; }

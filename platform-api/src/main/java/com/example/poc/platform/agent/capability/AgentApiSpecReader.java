@@ -31,6 +31,8 @@ public class AgentApiSpecReader {
     private final AgentToolPolicy policy;
     private final AgentContextRedactor redactor;
     private final JsonCodec jsonCodec;
+    private final com.example.poc.platform.openapi.OperationProcessingService processingService;
+    private final com.example.poc.platform.openapi.OperationAuthoringContractService authoringContracts;
     private final ObjectMapper yamlMapper = YAMLMapper.builder().build();
 
     public AgentApiSpecReader(
@@ -38,12 +40,16 @@ public class AgentApiSpecReader {
             ApiOperationRepository operationRepository,
             AgentToolPolicy policy,
             AgentContextRedactor redactor,
-            JsonCodec jsonCodec) {
+            JsonCodec jsonCodec,
+            com.example.poc.platform.openapi.OperationProcessingService processingService,
+            com.example.poc.platform.openapi.OperationAuthoringContractService authoringContracts) {
         this.specRepository = specRepository;
         this.operationRepository = operationRepository;
         this.policy = policy;
         this.redactor = redactor;
         this.jsonCodec = jsonCodec;
+        this.processingService = processingService;
+        this.authoringContracts = authoringContracts;
     }
 
     public Map<String, Object> listSpecs(AgentTaskRecord task, Map<String, Object> input) {
@@ -68,6 +74,7 @@ public class AgentApiSpecReader {
 
     public Map<String, Object> searchOperations(AgentTaskRecord task, Map<String, Object> input) {
         String apiSpecRefId = text(input, "apiSpecRefId");
+        String operationId = text(input, "operationId");
         String query = text(input, "query").toLowerCase(Locale.ROOT);
         String method = text(input, "method").toUpperCase(Locale.ROOT);
         String path = text(input, "path").toLowerCase(Locale.ROOT);
@@ -82,6 +89,7 @@ public class AgentApiSpecReader {
         List<Map<String, Object>> matches = new ArrayList<>();
         for (ApiOperationEntity operation : candidates) {
             if (!task.projectId().equals(operation.getProjectId())) continue;
+            if (!operationId.isBlank() && !operationId.equalsIgnoreCase(operation.getOperationId())) continue;
             if (!method.isBlank() && !method.equalsIgnoreCase(operation.getMethod())) continue;
             if (!path.isBlank() && !safe(operation.getPath()).toLowerCase(Locale.ROOT).contains(path)) continue;
             if (!query.isBlank() && !searchable(
@@ -116,6 +124,10 @@ public class AgentApiSpecReader {
         value.put("requestBody", jsonCodec.readObjectMap(operation.getRequestBodyJson()));
         value.put("responses", jsonCodec.readObjectMap(operation.getResponsesJson()));
         value.put("dslOperation", dslOperation(operation, spec));
+        value.put("processingSettings", processingService.settings(operation));
+        var authoring = authoringContracts.describe(operation);
+        value.put("authoring", authoring == null ? Map.of() : authoring.agentView());
+        value.put("processingGuidance", "API processing runs automatically. Write business request data and use business.response.body for assertions/extraction; do not add duplicate PGP Actions. beforeSend runs before API encryption; afterRequestProcessing runs after envelope construction; afterReceive runs after API decryption. Use processingMode manual only to intentionally replace automatic handling.");
         value.put("trustLevel", "UNTRUSTED_API_SPEC_CONTENT");
         return Map.of("operation", value);
     }

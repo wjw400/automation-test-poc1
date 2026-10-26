@@ -17,12 +17,13 @@ import {
   ProfileOutlined,
   ReadOutlined,
   RightOutlined,
+  RobotOutlined,
   SearchOutlined,
   UploadOutlined,
 } from '@ant-design/icons'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App, Button, Dropdown, Input, Modal, Select, Typography, Upload } from 'antd'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useTranslation } from 'react-i18next'
 import { platformApi } from '../api/platformApi'
@@ -47,6 +48,7 @@ import type {
   ResourceReferenceRecord,
   RunRecord,
   ScenarioDraftRecord,
+  SuiteDraftRecord,
   SaveCaseInput,
   SaveEnvironmentInput,
   SaveProfileInput,
@@ -64,7 +66,7 @@ import { inspectAgentDraftApply } from '../utils/agentDraft'
 const { Text } = Typography
 
 type WorkbenchMode = 'scenarios' | 'suites' | 'apis' | 'processing' | 'environments' | 'profiles' | 'knowledge' | 'runs'
-type WorkbenchTabType = 'scenario' | 'suite' | 'apiSpec' | 'pipelineCatalog' | 'run' | 'suiteRun' | 'environment' | 'profile' | 'knowledge'
+type WorkbenchTabType = 'scenario' | 'suite' | 'projectAgent' | 'apiSpec' | 'pipelineCatalog' | 'run' | 'suiteRun' | 'environment' | 'profile' | 'knowledge'
 
 type WorkbenchTab = {
   key: string
@@ -72,6 +74,7 @@ type WorkbenchTab = {
   resourceId: string
   title: string
   dirty: boolean
+  agentOpen?: boolean
 }
 
 type FolderDialogState = {
@@ -86,18 +89,14 @@ export type WorkspaceUnsavedGuard = {
 }
 
 type WorkbenchPageProps = {
-  agentPanelOpen?: boolean
-  agentPanelPinned?: boolean
-  onAgentPanelOpenChange?: (open: boolean) => void
-  onAgentPanelPinnedChange?: (pinned: boolean) => void
+  projectAgentRequest?: number
+  onProjectAgentActiveChange?: (active: boolean) => void
   onUnsavedGuardChange?: (guard?: WorkspaceUnsavedGuard) => void
 }
 
 export function WorkbenchPage({
-  agentPanelOpen = false,
-  agentPanelPinned = false,
-  onAgentPanelOpenChange,
-  onAgentPanelPinnedChange,
+  projectAgentRequest = 0,
+  onProjectAgentActiveChange,
   onUnsavedGuardChange,
 }: WorkbenchPageProps = {}) {
   const { t } = useTranslation(['common', 'workspace', 'agent', 'scenario', 'suite', 'execution', 'config', 'api'])
@@ -127,7 +126,9 @@ export function WorkbenchPage({
   const [folderName, setFolderName] = useState('')
   const [folderParentId, setFolderParentId] = useState<string>()
   const [pendingAgentDrafts, setPendingAgentDrafts] = useState<Record<string, ScenarioDraftRecord>>({})
+  const [pendingSuiteAgentDrafts, setPendingSuiteAgentDrafts] = useState<Record<string, SuiteDraftRecord>>({})
   const saveHandlersRef = useRef(new Map<string, () => Promise<void>>())
+  const handledProjectAgentRequestRef = useRef(0)
 
   const projectsQuery = useQuery({
     queryKey: ['projects'],
@@ -227,6 +228,17 @@ export function WorkbenchPage({
       navigate(`/workspace?projectId=${encodeURIComponent(projectId)}&view=${targetMode}`)
     }
   }
+
+  const openProjectAgent = useCallback(() => {
+    if (!projectId) return
+    openTab('projectAgent', projectId, t('agent:projectTitle'))
+  }, [openTab, projectId, t])
+
+  useEffect(() => {
+    if (!projectAgentRequest || projectAgentRequest === handledProjectAgentRequestRef.current) return
+    handledProjectAgentRequestRef.current = projectAgentRequest
+    openProjectAgent()
+  }, [openProjectAgent, projectAgentRequest])
 
   const updateTab = useCallback((key: string, patch: Partial<WorkbenchTab>) => {
     setTabs((current) => {
@@ -898,15 +910,27 @@ export function WorkbenchPage({
   }, [projectId, runFilter, suiteRunsQuery.data])
 
   const activeTab = tabs.find((tab) => tab.key === activeTabKey)
-  const activeScenario = activeTab?.type === 'scenario'
-    ? (casesQuery.data ?? []).find((record) => record.id === activeTab.resourceId)
-    : undefined
+  useEffect(() => {
+    onProjectAgentActiveChange?.(activeTab?.type === 'projectAgent')
+  }, [activeTab?.type, onProjectAgentActiveChange])
+
+  const toggleAssetAgent = useCallback((tabKey: string) => {
+    setTabs((current) => current.map((tab) => tab.key === tabKey
+      ? { ...tab, agentOpen: !tab.agentOpen }
+      : tab))
+  }, [])
 
   const openAgentScenario = useCallback((scenarioId: string) => {
     const scenario = (casesQuery.data ?? []).find((record) => record.id === scenarioId)
     if (!scenario) return
     openTab('scenario', scenario.id, scenario.name)
   }, [casesQuery.data, openTab])
+
+  const openAgentSuite = useCallback((suiteId: string) => {
+    const suite = (suitesQuery.data ?? []).find((record) => record.id === suiteId)
+    if (!suite) return
+    openTab('suite', suite.id, suite.name)
+  }, [openTab, suitesQuery.data])
 
   const openAgentKnowledge = useCallback((knowledgeId: string) => {
     const record = (testKnowledgeQuery.data ?? []).find((item) => item.id === knowledgeId)
@@ -941,8 +965,27 @@ export function WorkbenchPage({
     openTab('scenario', scenario.id, scenario.name)
   }, [casesQuery.data, modal, openTab, t, tabs])
 
+  const applySuiteAgentDraft = useCallback(async (agentDraft: SuiteDraftRecord) => {
+    const suite = (suitesQuery.data ?? []).find((record) => record.id === agentDraft.suiteId)
+    if (!suite) throw new Error('Suite is no longer available')
+    if (suite.revision !== agentDraft.sourceRevision) throw new Error(t('agent:draftStale'))
+    const targetTab = tabs.find((tab) => tab.key === `suite:${suite.id}`)
+    if (targetTab?.dirty) {
+      await new Promise<void>((resolve, reject) => {
+        modal.confirm({ title: t('agent:replaceUnsavedTitle'), content: t('agent:replaceUnsavedDescription'), okText: t('agent:replaceUnsaved'), okButtonProps: { danger: true }, cancelText: t('common:actions.cancel'), onOk: () => resolve(), onCancel: () => reject(new Error(t('common:actions.cancel'))) })
+      })
+    }
+    setPendingSuiteAgentDrafts((current) => ({ ...current, [suite.id]: agentDraft }))
+    openTab('suite', suite.id, suite.name)
+  }, [modal, openTab, suitesQuery.data, t, tabs])
+
+  const applyContextAgentDraft = useCallback(async (agentDraft: ScenarioDraftRecord | SuiteDraftRecord) => {
+    if ('suiteId' in agentDraft) return applySuiteAgentDraft(agentDraft)
+    return applyAgentDraft(agentDraft)
+  }, [applyAgentDraft, applySuiteAgentDraft])
+
   return (
-    <div className={agentPanelOpen ? 'workbench-page agent-open' : 'workbench-page'}>
+    <div className="workbench-page">
       <aside className="workbench-context-sidebar">
         {mode === 'scenarios' ? (
           <ScenariosSidebar
@@ -1294,29 +1337,79 @@ export function WorkbenchPage({
               key={tab.key}
               className={tab.key === activeTabKey ? 'workbench-tab-pane active' : 'workbench-tab-pane'}
             >
-              {projectId ? renderTabContent({
-                tab,
-                projectId,
-                cases: casesQuery.data ?? [],
-                suites: suitesQuery.data ?? [],
-                runs: runsQuery.data ?? [],
-                suiteRuns: suiteRunsQuery.data ?? [],
-                apiSpecs: apiSpecsQuery.data ?? [],
-                testKnowledge: testKnowledgeQuery.data ?? [],
-                environments: environmentsQuery.data ?? [],
-                profiles: profilesQuery.data ?? [],
-                updateTab,
-                closeTab: closeTabNow,
-                replaceCreatedTab,
-                registerSaveHandler,
-                openTab,
-                agentDraft: tab.type === 'scenario' ? pendingAgentDrafts[tab.resourceId] : undefined,
-                onAgentDraftApplied: (scenarioId) => setPendingAgentDrafts((current) => {
-                  const next = { ...current }
-                  delete next[scenarioId]
-                  return next
-                }),
-              }) : null}
+              {projectId && tab.type === 'projectAgent' ? (
+                <AgentPanel
+                  key={`${projectId}:PROJECT`}
+                  presentation="workspace"
+                  projectId={projectId}
+                  scope={{ type: 'PROJECT' }}
+                  scenarios={casesQuery.data ?? []}
+                  suites={suitesQuery.data ?? []}
+                  operations={operationsQuery.data ?? []}
+                  runs={(runsQuery.data ?? []).filter((run) => run.projectId === projectId)}
+                  knowledge={testKnowledgeQuery.data ?? []}
+                  onOpenScenario={openAgentScenario}
+                  onOpenSuite={openAgentSuite}
+                  onOpenKnowledge={openAgentKnowledge}
+                  onApplyDraft={applyContextAgentDraft}
+                />
+              ) : null}
+              {projectId && tab.type !== 'projectAgent' ? (
+                <div className="asset-workspace">
+                  {renderTabContent({
+                    tab,
+                    projectId,
+                    cases: casesQuery.data ?? [],
+                    suites: suitesQuery.data ?? [],
+                    runs: runsQuery.data ?? [],
+                    suiteRuns: suiteRunsQuery.data ?? [],
+                    apiSpecs: apiSpecsQuery.data ?? [],
+                    testKnowledge: testKnowledgeQuery.data ?? [],
+                    environments: environmentsQuery.data ?? [],
+                    profiles: profilesQuery.data ?? [],
+                    updateTab,
+                    closeTab: closeTabNow,
+                    replaceCreatedTab,
+                    registerSaveHandler,
+                    openTab,
+                    agentDraft: tab.type === 'scenario' ? pendingAgentDrafts[tab.resourceId] : undefined,
+                    suiteAgentDraft: tab.type === 'suite' ? pendingSuiteAgentDrafts[tab.resourceId] : undefined,
+                    onAgentDraftApplied: (scenarioId) => setPendingAgentDrafts((current) => {
+                      const next = { ...current }
+                      delete next[scenarioId]
+                      return next
+                    }),
+                    onSuiteAgentDraftApplied: (suiteId) => setPendingSuiteAgentDrafts((current) => {
+                      const next = { ...current }
+                      delete next[suiteId]
+                      return next
+                    }),
+                    agentOpen: Boolean(tab.agentOpen),
+                    onToggleAgent: () => toggleAssetAgent(tab.key),
+                    agentPane: tab.agentOpen && (tab.type === 'scenario' || tab.type === 'suite') ? (
+                      <AgentPanel
+                        key={`${projectId}:${tab.key}`}
+                        presentation="embedded"
+                        targetDirty={Boolean(tab.dirty)}
+                        projectId={projectId}
+                        scope={tab.type === 'scenario'
+                          ? { type: 'SCENARIO', id: tab.resourceId }
+                          : { type: 'SUITE', id: tab.resourceId }}
+                        scenarios={casesQuery.data ?? []}
+                        suites={suitesQuery.data ?? []}
+                        operations={operationsQuery.data ?? []}
+                        runs={(runsQuery.data ?? []).filter((run) => run.projectId === projectId)}
+                        knowledge={testKnowledgeQuery.data ?? []}
+                        onClose={() => toggleAssetAgent(tab.key)}
+                        onOpenScenario={openAgentScenario}
+                        onOpenSuite={openAgentSuite}
+                        onOpenKnowledge={openAgentKnowledge}
+                        onApplyDraft={applyContextAgentDraft}
+                      />
+                    ) : undefined,
+                  })}
+                </div>
+              ) : null}
             </div>
           ))}
           {!activeTab ? (
@@ -1328,24 +1421,6 @@ export function WorkbenchPage({
           ) : null}
         </div>
       </main>
-
-      {agentPanelOpen && projectId ? (
-        <AgentPanel
-          projectId={projectId}
-          activeScenario={activeScenario}
-          scenarios={casesQuery.data ?? []}
-          suites={suitesQuery.data ?? []}
-          operations={operationsQuery.data ?? []}
-          runs={(runsQuery.data ?? []).filter((run) => run.projectId === projectId)}
-          knowledge={testKnowledgeQuery.data ?? []}
-          pinned={agentPanelPinned}
-          onPinnedChange={(pinned) => onAgentPanelPinnedChange?.(pinned)}
-          onClose={() => onAgentPanelOpenChange?.(false)}
-          onOpenScenario={openAgentScenario}
-          onOpenKnowledge={openAgentKnowledge}
-          onApplyDraft={applyAgentDraft}
-        />
-      ) : null}
 
       <Modal
         title={t('api:addSpec')}
@@ -1622,7 +1697,12 @@ type RenderTabOptions = {
   registerSaveHandler: (key: string, save?: () => Promise<void>) => void
   openTab: (type: WorkbenchTabType, resourceId: string, title: string) => void
   agentDraft?: ScenarioDraftRecord
+  suiteAgentDraft?: SuiteDraftRecord
   onAgentDraftApplied: (scenarioId: string) => void
+  onSuiteAgentDraftApplied: (suiteId: string) => void
+  agentOpen: boolean
+  onToggleAgent: () => void
+  agentPane?: ReactNode
 }
 
 function renderTabContent(options: RenderTabOptions) {
@@ -1640,6 +1720,9 @@ function renderTabContent(options: RenderTabOptions) {
         caseId={tab.resourceId}
         agentDraft={options.agentDraft}
         onAgentDraftApplied={options.onAgentDraftApplied}
+        agentOpen={options.agentOpen}
+        onAgentToggle={options.onToggleAgent}
+        agentPane={options.agentPane}
         {...commonCallbacks}
         onDeleted={() => closeTab(tab.key)}
       />
@@ -1651,6 +1734,11 @@ function renderTabContent(options: RenderTabOptions) {
         embedded
         projectId={projectId}
         suiteId={tab.resourceId}
+        agentDraft={options.suiteAgentDraft}
+        onAgentDraftApplied={options.onSuiteAgentDraftApplied}
+        agentOpen={options.agentOpen}
+        onAgentToggle={options.onToggleAgent}
+        agentPane={options.agentPane}
         {...commonCallbacks}
         onDeleted={() => closeTab(tab.key)}
       />
@@ -2259,6 +2347,7 @@ function AssetRow({
 function tabIcon(type: WorkbenchTabType) {
   if (type === 'scenario') return <ExperimentOutlined />
   if (type === 'suite') return <ProfileOutlined />
+  if (type === 'projectAgent') return <RobotOutlined />
   if (type === 'apiSpec') return <ApiOutlined />
   if (type === 'pipelineCatalog') return <ApartmentOutlined />
   if (type === 'suiteRun') return <ProfileOutlined />
@@ -2365,12 +2454,12 @@ function profileInputFromRecord(
   return {
     name: record.name,
     type: record.type,
-    senderPublicKey: record.senderPublicKey ?? '',
-    senderPrivateKey: record.senderPrivateKey ?? '',
-    senderPrivateKeyPassphrase: record.senderPrivateKeyPassphrase ?? '',
-    recipientPublicKey: record.recipientPublicKey ?? '',
-    recipientPrivateKey: record.recipientPrivateKey ?? '',
-    recipientPrivateKeyPassphrase: record.recipientPrivateKeyPassphrase ?? '',
+    verificationPublicKey: record.verificationPublicKey ?? '',
+    signingPrivateKey: record.signingPrivateKey ?? '',
+    signingPrivateKeyPassphrase: record.signingPrivateKeyPassphrase ?? '',
+    encryptionPublicKey: record.encryptionPublicKey ?? '',
+    decryptionPrivateKey: record.decryptionPrivateKey ?? '',
+    decryptionPrivateKeyPassphrase: record.decryptionPrivateKeyPassphrase ?? '',
     environmentIds: record.environmentIds ?? [],
     enabled: record.enabled,
     ...overrides,

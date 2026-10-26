@@ -12,12 +12,12 @@ variables:
   customerReference: AUTO-ORDER-1001
 profiles:
   secureEcho:
-    senderPublicKey: classpath:keys/server-public.asc
-    senderPrivateKey: classpath:keys/client-private.asc
-    senderPrivateKeyPassphrase: demo-client-passphrase
-    recipientPublicKey: classpath:keys/server-public.asc
-    recipientPrivateKey: classpath:keys/client-private.asc
-    recipientPrivateKeyPassphrase: demo-client-passphrase
+    verificationPublicKey: classpath:keys/server-public.asc
+    signingPrivateKey: classpath:keys/client-private.asc
+    signingPrivateKeyPassphrase: demo-client-passphrase
+    encryptionPublicKey: classpath:keys/server-public.asc
+    decryptionPrivateKey: classpath:keys/client-private.asc
+    decryptionPrivateKeyPassphrase: demo-client-passphrase
 steps:
   - name: Create partner order
     type: http
@@ -64,7 +64,9 @@ steps:
             target: decrypted.createdOrder
             format: json
     response:
-      status: 200
+      status:
+        operator: oneOf
+        expected: [200]
       assertions:
         - source: response.body
           path: $.code
@@ -117,7 +119,9 @@ steps:
             target: decrypted.reservedOrder
             format: json
     response:
-      status: 200
+      status:
+        operator: oneOf
+        expected: [200]
       assertions:
         - source: decrypted.reservedOrder
           path: $.id
@@ -168,7 +172,9 @@ steps:
             target: decrypted.dispatchedOrder
             format: json
     response:
-      status: 200
+      status:
+        operator: oneOf
+        expected: [200]
       assertions:
         - source: decrypted.dispatchedOrder
           path: $.status
@@ -221,7 +227,9 @@ steps:
             target: decrypted.queriedOrder
             format: json
     response:
-      status: 200
+      status:
+        operator: oneOf
+        expected: [200]
       assertions:
         - source: decrypted.queriedOrder
           path: $.id

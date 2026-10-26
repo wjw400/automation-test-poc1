@@ -119,7 +119,7 @@ public class AgentTaskService {
         validateContext(projectId, request.targetType(), request.targetId(), context);
         String runtimeType = normalize(defaultIfBlank(request.runtimeType(), properties.getDefaultRuntime()));
         var runtime = runtimeRegistry.require(runtimeType);
-        String modelId = defaultIfBlank(request.modelId(), runtime.capabilities().defaultModel());
+        String modelId = runtimeRegistry.resolveModel(runtime, request.modelId());
 
         AgentTaskEntity entity = new AgentTaskEntity();
         entity.setProjectId(projectId);
@@ -127,7 +127,8 @@ public class AgentTaskService {
         entity.setStatus("READY");
         entity.setTargetType(normalizeNullable(request.targetType()));
         entity.setTargetId(blankToNull(request.targetId()));
-        entity.setPermissionMode("DRAFT_ONLY");
+        entity.setPermissionMode(resolvePermissionMode(request.permissionMode(), entity.getTargetType()));
+        entity.setPermissionModeRevision(1);
         entity.setRuntimeType(runtime.type());
         entity.setModelId(modelId);
         entity.setCreatedBy(actorId);
@@ -138,7 +139,7 @@ public class AgentTaskService {
         appendEvent(entity, "task.created", Map.of(
                 "targetType", entity.getTargetType() == null ? "" : entity.getTargetType(),
                 "targetId", entity.getTargetId() == null ? "" : entity.getTargetId(),
-                "permissionMode", entity.getPermissionMode(),
+                "permissionMode", entity.getPermissionMode().name(),
                 "runtimeType", entity.getRuntimeType(),
                 "modelId", entity.getModelId() == null ? "" : entity.getModelId()));
         return toTaskRecord(entity);
@@ -187,6 +188,53 @@ public class AgentTaskService {
         task.setTitle(title.trim());
         taskRepository.saveAndFlush(task);
         appendEvent(task, "task.updated", Map.of("title", task.getTitle()));
+        return toTaskRecord(task);
+    }
+
+    @Transactional
+    public AgentTaskRecord changePermissionMode(
+            String taskId,
+            String actorId,
+            AgentPermissionMode requestedMode) {
+        AgentTaskEntity task = requireOwnedTaskForUpdate(taskId, actorId);
+        if ("RUNNING".equals(task.getStatus())) {
+            throw new AgentTaskConflictException(
+                    "TASK_ALREADY_RUNNING",
+                    "The Agent Task permission mode cannot change while a turn is running");
+        }
+        AgentPermissionMode previous = task.getPermissionMode();
+        AgentPermissionMode resolved = resolvePermissionMode(requestedMode, task.getTargetType());
+        if (previous == resolved) return toTaskRecord(task);
+
+        task.setPermissionMode(resolved);
+        task.setPermissionModeRevision(task.getPermissionModeRevision() + 1);
+        taskRepository.saveAndFlush(task);
+        appendEvent(task, "task.permission_mode.changed", Map.of(
+                "fromPermissionMode", previous.name(),
+                "permissionMode", resolved.name(),
+                "permissionModeRevision", task.getPermissionModeRevision()));
+        return toTaskRecord(task);
+    }
+
+    @Transactional
+    public AgentTaskRecord changeModel(String taskId, String actorId, String requestedModelId) {
+        AgentTaskEntity task = requireOwnedTaskForUpdate(taskId, actorId);
+        if ("RUNNING".equals(task.getStatus())) {
+            throw new AgentTaskConflictException(
+                    "TASK_ALREADY_RUNNING",
+                    "The Agent Task model cannot change while a turn is running");
+        }
+        var runtime = runtimeRegistry.require(task.getRuntimeType());
+        String resolvedModelId = runtimeRegistry.resolveModel(runtime, requestedModelId);
+        if (resolvedModelId.equals(task.getModelId())) return toTaskRecord(task);
+
+        String previousModelId = task.getModelId();
+        task.setModelId(resolvedModelId);
+        taskRepository.saveAndFlush(task);
+        appendEvent(task, "task.model.changed", Map.of(
+                "runtimeType", task.getRuntimeType(),
+                "fromModelId", previousModelId == null ? "" : previousModelId,
+                "modelId", resolvedModelId));
         return toTaskRecord(task);
     }
 
@@ -287,6 +335,9 @@ public class AgentTaskService {
         if ("RUNNING".equals(task.getStatus())) {
             throw new AgentTaskConflictException("TASK_ALREADY_RUNNING", "Agent Task already has a running turn");
         }
+        if ("WAITING_FOR_USER".equals(task.getStatus())) {
+            throw new AgentTaskConflictException("TASK_WAITING_FOR_USER", "Agent Task is waiting for a continuation decision");
+        }
         if (task.getIterationCount() >= properties.getMaxTurns()) {
             throw new AgentBudgetExceededException("Agent Task reached its maximum turn count");
         }
@@ -294,6 +345,9 @@ public class AgentTaskService {
 
         AgentMessageEntity message = appendMessage(task, "USER", content);
         task.setStatus("RUNNING");
+        task.setContinuationCount(0);
+        task.setPauseReason(null);
+        task.setPauseContextJson(null);
         task.setIterationCount(task.getIterationCount() + 1);
         task.setCompletedAt(null);
         taskRepository.saveAndFlush(task);
@@ -304,12 +358,38 @@ public class AgentTaskService {
                 "modelId", task.getModelId(),
                 "messageId", message.getId()));
 
-        List<AgentConversationMessage> history = messageRepository.findByTaskIdOrderBySequenceAsc(taskId).stream()
-                .map(entity -> new AgentConversationMessage(entity.getRole(), text(entity.getContentJson())))
-                .toList();
+        List<AgentConversationMessage> history = taskHistory(taskId);
         return new StartedTurn(
                 toTaskRecord(task),
                 new AgentTurnRequest(taskId, turnId, task.getModelId(), task.getTokenBudget(), history));
+    }
+
+    @Transactional
+    public StartedTurn beginContinuationTurn(String taskId, String turnId) {
+        AgentTaskEntity task = requireTaskForUpdate(taskId);
+        if (!"WAITING_FOR_USER".equals(task.getStatus())) {
+            throw new AgentTaskConflictException("TASK_NOT_WAITING_FOR_USER", "Agent Task is not waiting for a continuation decision");
+        }
+        runtimeRegistry.require(task.getRuntimeType());
+
+        String priorReason = defaultIfBlank(task.getPauseReason(), "UNKNOWN");
+        task.setStatus("RUNNING");
+        task.setContinuationCount(task.getContinuationCount() + 1);
+        task.setIterationCount(task.getIterationCount() + 1);
+        task.setPauseReason(null);
+        task.setPauseContextJson(null);
+        task.setCompletedAt(null);
+        taskRepository.saveAndFlush(task);
+        appendEvent(task, "continuation.started", Map.of(
+                "turnId", turnId,
+                "continuation", task.getContinuationCount()));
+        auditService.record(task.getId(), task.getProjectId(), task.getCreatedBy(), "agent.continuation.accepted", Map.of(
+                "turnId", turnId,
+                "pauseReason", priorReason,
+                "continuation", task.getContinuationCount()));
+        return new StartedTurn(
+                toTaskRecord(task),
+                new AgentTurnRequest(taskId, turnId, task.getModelId(), task.getTokenBudget(), taskHistory(taskId)));
     }
 
     @Transactional
@@ -419,6 +499,30 @@ public class AgentTaskService {
     }
 
     @Transactional
+    public AgentTaskRecord pauseTurn(String taskId, String turnId, AgentPauseReason reason, String internalCode) {
+        AgentTaskEntity task = requireTaskForUpdate(taskId);
+        if (!"RUNNING".equals(task.getStatus())) return toTaskRecord(task);
+        task.setStatus("WAITING_FOR_USER");
+        task.setPauseReason(reason.name());
+        task.setPauseContextJson(jsonCodec.write(redactor.redact(Map.of(
+                "sourceTurnId", turnId,
+                "internalCode", defaultIfBlank(internalCode, "UNKNOWN"),
+                "continuationCount", task.getContinuationCount()))));
+        task.setCompletedAt(null);
+        taskRepository.saveAndFlush(task);
+        appendEvent(task, "task.paused", Map.of(
+                "turnId", turnId,
+                "pauseReason", reason.name(),
+                "internalCode", defaultIfBlank(internalCode, "UNKNOWN")));
+        auditService.record(task.getId(), task.getProjectId(), task.getCreatedBy(), "agent.paused", Map.of(
+                "turnId", turnId,
+                "pauseReason", reason.name(),
+                "internalCode", defaultIfBlank(internalCode, "UNKNOWN"),
+                "continuationCount", task.getContinuationCount()));
+        return toTaskRecord(task);
+    }
+
+    @Transactional
     public AgentTaskRecord cancelTurn(String taskId, String turnId) {
         AgentTaskEntity task = requireTaskForUpdate(taskId);
         if (!"RUNNING".equals(task.getStatus())) return toTaskRecord(task);
@@ -430,17 +534,44 @@ public class AgentTaskService {
     }
 
     @Transactional
-    public AgentTaskRecord exhaustTurnBudget(String taskId) {
+    public AgentTaskRecord pauseForTurnBudget(String taskId, String content) {
         AgentTaskEntity task = requireTaskForUpdate(taskId);
-        if ("RUNNING".equals(task.getStatus())) return toTaskRecord(task);
-        task.setStatus("FAILED");
+        if ("RUNNING".equals(task.getStatus()) || "WAITING_FOR_USER".equals(task.getStatus())) return toTaskRecord(task);
+        AgentMessageEntity message = appendMessage(task, "USER", content);
+        task.setStatus("WAITING_FOR_USER");
+        task.setPauseReason(AgentPauseReason.EXECUTION_ALLOWANCE_REACHED.name());
+        task.setPauseContextJson(jsonCodec.write(Map.of(
+                "sourceTurnId", "budget",
+                "internalCode", "TURN_BUDGET_EXCEEDED",
+                "messageId", message.getId(),
+                "continuationCount", task.getContinuationCount())));
+        task.setCompletedAt(null);
+        taskRepository.saveAndFlush(task);
+        appendEvent(task, "task.paused", Map.of(
+                "turnId", "budget"));
+        auditService.record(task.getId(), task.getProjectId(), task.getCreatedBy(), "agent.paused", Map.of(
+                "turnId", "budget",
+                "pauseReason", AgentPauseReason.EXECUTION_ALLOWANCE_REACHED.name(),
+                "internalCode", "TURN_BUDGET_EXCEEDED",
+                "continuationCount", task.getContinuationCount()));
+        return toTaskRecord(task);
+    }
+
+    @Transactional
+    public AgentTaskRecord declineContinuation(String taskId, String actorId) {
+        AgentTaskEntity task = requireOwnedTaskForUpdate(taskId, actorId);
+        if (!"WAITING_FOR_USER".equals(task.getStatus())) {
+            throw new AgentTaskConflictException("TASK_NOT_WAITING_FOR_USER", "Agent Task is not waiting for a continuation decision");
+        }
+        String reason = defaultIfBlank(task.getPauseReason(), "UNKNOWN");
+        task.setStatus("CANCELLED");
         task.setCompletedAt(Instant.now());
         taskRepository.saveAndFlush(task);
-        appendEvent(task, "task.failed", Map.of(
-                "turnId", "budget",
-                "code", "TURN_BUDGET_EXCEEDED",
-                "message", "Agent Task reached its maximum model call count",
-                "retryable", false));
+        appendEvent(task, "continuation.declined", Map.of());
+        appendEvent(task, "task.cancelled", Map.of("reason", "USER_DECLINED_CONTINUATION"));
+        auditService.record(task.getId(), task.getProjectId(), task.getCreatedBy(), "agent.continuation.declined", Map.of(
+                "pauseReason", reason,
+                "continuationCount", task.getContinuationCount()));
         return toTaskRecord(task);
     }
 
@@ -450,15 +581,14 @@ public class AgentTaskService {
         for (String id : ids) {
             AgentTaskEntity task = requireTaskForUpdate(id);
             if (!"RUNNING".equals(task.getStatus())) continue;
-            task.setStatus("FAILED");
-            task.setCompletedAt(Instant.now());
-            taskRepository.saveAndFlush(task);
-            appendEvent(task, "task.failed", Map.of(
-                    "turnId", "recovery",
-                    "code", "SERVICE_RESTARTED",
-                    "message", "Agent turn was interrupted by a service restart",
-                    "retryable", true));
+            pauseTurn(id, "recovery", AgentPauseReason.SERVICE_INTERRUPTED, "SERVICE_RESTARTED");
         }
+    }
+
+    private List<AgentConversationMessage> taskHistory(String taskId) {
+        return messageRepository.findByTaskIdOrderBySequenceAsc(taskId).stream()
+                .map(entity -> new AgentConversationMessage(entity.getRole(), text(entity.getContentJson())))
+                .toList();
     }
 
     private AgentMessageEntity appendMessage(AgentTaskEntity task, String role, String content) {
@@ -636,6 +766,7 @@ public class AgentTaskService {
         return new AgentTaskRecord(
                 entity.getId(), entity.getProjectId(), entity.getTitle(), entity.getStatus(),
                 entity.getTargetType(), entity.getTargetId(), entity.getPermissionMode(),
+                entity.getPermissionModeRevision(),
                 entity.getRuntimeType(), entity.getModelId(), entity.getCreatedBy(),
                 entity.getIterationCount(), entity.getTokenBudget(), context(entity.getContextJson()), revision(entity.getRevision()),
                 entity.getCreatedAt(), entity.getUpdatedAt(), entity.getCompletedAt());
@@ -677,6 +808,20 @@ public class AgentTaskService {
         return value == null || value.isBlank() ? defaultValue : value.trim();
     }
 
+    private AgentPermissionMode resolvePermissionMode(AgentPermissionMode requested, String targetType) {
+        AgentPermissionMode resolved = requested == null
+                ? AgentPermissionMode.defaultForTarget(targetType)
+                : requested;
+        if (resolved == AgentPermissionMode.AUTO_APPLY) {
+            throw new IllegalArgumentException("AUTO_APPLY is not enabled yet");
+        }
+        if (resolved == AgentPermissionMode.REVIEW_REQUIRED
+                && !("SCENARIO".equals(targetType) || "SUITE".equals(targetType))) {
+            throw new IllegalArgumentException("REVIEW_REQUIRED is currently available only for Scenario and Suite tasks");
+        }
+        return resolved;
+    }
+
     public record CreateAgentTaskRequest(
             @NotBlank String title,
             String targetType,
@@ -685,11 +830,25 @@ public class AgentTaskService {
             String modelId,
             String createdBy,
             @Min(1) @Max(1000000) Long tokenBudget,
-            AgentContextSelection context) {}
+            AgentContextSelection context,
+            AgentPermissionMode permissionMode) {
+        public CreateAgentTaskRequest(
+                String title,
+                String targetType,
+                String targetId,
+                String runtimeType,
+                String modelId,
+                String createdBy,
+                Long tokenBudget,
+                AgentContextSelection context) {
+            this(title, targetType, targetId, runtimeType, modelId, createdBy, tokenBudget, context, null);
+        }
+    }
 
     public record AgentTaskRecord(
             String id, String projectId, String title, String status,
-            String targetType, String targetId, String permissionMode,
+            String targetType, String targetId, AgentPermissionMode permissionMode,
+            int permissionModeRevision,
             String runtimeType, String modelId, String createdBy,
             int iterationCount, long tokenBudget, AgentContextSelection context, long revision,
             Instant createdAt, Instant updatedAt, Instant completedAt) {}

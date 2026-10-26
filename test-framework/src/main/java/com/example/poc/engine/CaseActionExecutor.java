@@ -7,7 +7,6 @@ import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import tools.jackson.core.JacksonException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -16,9 +15,11 @@ public class CaseActionExecutor {
     public static final String ENCODE_BASE64 = "data.encodeBase64";
     public static final String BUILD_JSON = "body.buildJson";
     public static final String DECRYPT_AND_VERIFY = "crypto.pgp.decryptAndVerify";
+    public static final String ENCRYPT = "crypto.pgp.encrypt";
+    public static final String DECRYPT = "crypto.pgp.decrypt";
 
-    public static final List<String> BEFORE_SEND_TYPES = List.of(SIGN_AND_ENCRYPT, ENCODE_BASE64, BUILD_JSON);
-    public static final List<String> AFTER_RECEIVE_TYPES = List.of(DECRYPT_AND_VERIFY);
+    public static final List<String> BEFORE_SEND_TYPES = List.of(SIGN_AND_ENCRYPT, ENCRYPT, ENCODE_BASE64, BUILD_JSON);
+    public static final List<String> AFTER_RECEIVE_TYPES = List.of(DECRYPT_AND_VERIFY, DECRYPT);
 
     private final ObjectMapper jsonMapper;
     private final VariableResolver variableResolver;
@@ -37,7 +38,12 @@ public class CaseActionExecutor {
         if (BUILD_JSON.equals(action.getType())) {
             return variableResolver.resolveObject(action.getTemplate(), context, state.getArtifacts());
         }
-        return read(action.getInput().getSource(), action.getInput().getPath(), state, context);
+        Object input = read(action.getInput().getSource(), action.getInput().getPath(), state, context);
+        if (action.getInput().getPointer() != null) {
+            if (input instanceof String text) input = jsonMapper.readValue(text, Object.class);
+            input = JsonBodyPointer.read(input, action.getInput().getPointer());
+        }
+        return input;
     }
 
     public Object execute(
@@ -47,9 +53,11 @@ public class CaseActionExecutor {
             Object input) {
         return switch (action.getType()) {
             case SIGN_AND_ENCRYPT -> signAndEncrypt(action, state, profile, input);
+            case ENCRYPT -> signAndEncrypt(action, state, profile, input);
             case ENCODE_BASE64 -> encodeBase64(action, state, input);
             case BUILD_JSON -> buildJson(action, state, input);
             case DECRYPT_AND_VERIFY -> decryptAndVerify(action, state, profile, input);
+            case DECRYPT -> decryptAndVerify(action, state, profile, input);
             default -> throw new IllegalArgumentException("Unsupported action type: " + action.getType());
         };
     }
@@ -61,7 +69,8 @@ public class CaseActionExecutor {
             Object input) {
         requireProfile(profile, action.getType());
         String plaintext = serialize(input, defaultValue(action.getInput().getFormat(), "text"));
-        String encrypted = pgpCryptoService.signAndEncrypt(plaintext, toPgpProfile(profile));
+        String encrypted = ENCRYPT.equals(action.getType()) ? pgpCryptoService.encrypt(plaintext, toPgpProfile(profile))
+                : pgpCryptoService.signAndEncrypt(plaintext, toPgpProfile(profile));
         write(action.getOutput(), encrypted, state);
         return encrypted;
     }
@@ -86,7 +95,7 @@ public class CaseActionExecutor {
 
     private Object buildJson(CaseActionSpec action, ActionExecutionState state, Object input) {
         Object body = input;
-        if (!(body instanceof Map<?, ?>) && !(body instanceof List<?>)) {
+        if (!(body instanceof Map<?, ?>) && !(body instanceof List<?>) && !("API".equals(action.getOrigin()) && body instanceof String)) {
             throw new IllegalArgumentException("body.buildJson template must resolve to a JSON object or array");
         }
         write(action.getOutput(), body, state);
@@ -99,7 +108,9 @@ public class CaseActionExecutor {
             CryptoProfile profile,
             Object input) {
         requireProfile(profile, action.getType());
-        String plaintext = pgpCryptoService.decryptAndVerify(Objects.toString(input, null), toPgpProfile(profile));
+        if (!(input instanceof String text) || text.isBlank()) throw new IllegalArgumentException("PGP ciphertext must be a non-empty string");
+        String plaintext = DECRYPT.equals(action.getType()) ? pgpCryptoService.decrypt(text, toPgpProfile(profile))
+                : pgpCryptoService.decryptAndVerify(text, toPgpProfile(profile));
         Object output = deserialize(plaintext, defaultValue(action.getOutput().getFormat(), "text"));
         write(action.getOutput(), output, state);
         return output;
@@ -234,12 +245,12 @@ public class CaseActionExecutor {
 
     private PgpProfileMaterial toPgpProfile(CryptoProfile profile) {
         PgpProfileMaterial material = new PgpProfileMaterial();
-        material.setSenderPublicKey(profile.getSenderPublicKey());
-        material.setSenderPrivateKey(profile.getSenderPrivateKey());
-        material.setSenderPrivateKeyPassphrase(profile.getSenderPrivateKeyPassphrase());
-        material.setRecipientPublicKey(profile.getRecipientPublicKey());
-        material.setRecipientPrivateKey(profile.getRecipientPrivateKey());
-        material.setRecipientPrivateKeyPassphrase(profile.getRecipientPrivateKeyPassphrase());
+        material.setVerificationPublicKey(profile.getVerificationPublicKey());
+        material.setSigningPrivateKey(profile.getSigningPrivateKey());
+        material.setSigningPrivateKeyPassphrase(profile.getSigningPrivateKeyPassphrase());
+        material.setEncryptionPublicKey(profile.getEncryptionPublicKey());
+        material.setDecryptionPrivateKey(profile.getDecryptionPrivateKey());
+        material.setDecryptionPrivateKeyPassphrase(profile.getDecryptionPrivateKeyPassphrase());
         return material;
     }
 }

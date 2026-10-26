@@ -6,12 +6,12 @@ import java.util.List;
 import java.util.Map;
 
 public class ResponseSpec {
-    private int status = 200;
+    private HttpStatusSpec status;
     private List<ValidationSpec> assertions = new ArrayList<>();
     private Map<String, Object> extract = new LinkedHashMap<>();
 
-    public int getStatus() { return status; }
-    public void setStatus(int status) { this.status = status; }
+    public HttpStatusSpec getStatus() { return status; }
+    public void setStatus(HttpStatusSpec status) { this.status = status; }
     public List<ValidationSpec> getAssertions() { return assertions; }
     public void setAssertions(List<ValidationSpec> assertions) {
         this.assertions = assertions == null ? new ArrayList<>() : assertions;

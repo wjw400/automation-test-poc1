@@ -3,6 +3,7 @@ package com.example.poc.platform.agent.scenario;
 import com.example.poc.engine.ApiStep;
 import com.example.poc.engine.CaseActionSpec;
 import com.example.poc.engine.ExtractValueSpec;
+import com.example.poc.engine.HttpStatusSpec;
 import com.example.poc.engine.ValidationSpec;
 import java.util.ArrayList;
 import java.util.List;
@@ -112,6 +113,12 @@ public class ScenarioCommandDecoder {
                         stepId(command, path),
                         requiredText(command, "path", path + ".path"),
                         requiredValue(command, "value", path + ".value"));
+            }
+            case "SetResponseStatus" -> {
+                rejectUnknownFields(command, Set.of("type", "stepId", "status"), path);
+                yield new ScenarioCommand.SetResponseStatus(
+                        stepId(command, path),
+                        codec.convert(requiredValue(command, "status", path + ".status"), HttpStatusSpec.class, path + ".status"));
             }
             case "AddBeforeAction" -> {
                 rejectUnknownFields(command, Set.of("type", "stepId", "action"), path);

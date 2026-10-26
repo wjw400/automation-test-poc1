@@ -1,10 +1,9 @@
 # Native OpenAPI Operation Inspector Design
 
-> **Superseded processing model:** The original `x-platform-payload` and
-> `Protocol` sections in this document describe the first implementation draft.
-> The active processing design is [builtin-processing-pipeline-catalog.md](builtin-processing-pipeline-catalog.md):
-> `x-platform-processing`, immutable built-in pipeline references, and the
-> read-only Pipeline Catalog are the current baseline.
+> **Processing contract:** Request and response processing use the versioned
+> `x-platform-processing` extension or manually maintained platform settings.
+> Effective configuration, execution order, and report snapshots are described in
+> [operation-processing-implementation.md](operation-processing-implementation.md).
 
 ## 1. Status
 
@@ -47,31 +46,22 @@ is transformed into the HTTP wire request:
 
 The standard OpenAPI `requestBody` must continue to describe the wire request because that is the actual HTTP contract. If the standard `requestBody` is replaced with the plaintext business schema, OpenAPI validation, generated clients, examples, and other consumers receive an inaccurate contract.
 
-The mock service OpenAPI already separates these two layers with:
-
-```yaml
-x-plaintext-request-schema:
-  $ref: '#/components/schemas/CreateOrderPayload'
-
-x-plaintext-response-schema:
-  $ref: '#/components/schemas/Order'
-
-requestBody:
-  $ref: '#/components/requestBodies/EncryptedRequest'
-```
-
-The remaining problem is presentation and reuse. A generic OpenAPI renderer does not treat these extensions as primary content, and the platform cannot use them consistently for test generation, validation, evidence, or AI context.
+The platform keeps the wire contract in standard OpenAPI fields. Business schemas
+and message processing rules come from effective operation settings, which may be
+imported through `x-platform-processing` or configured in the API workbench.
+The native inspector presents both views without requiring a service owner to
+modify an ordinary OpenAPI document.
 
 ## 3. Decision Summary
 
 This design makes the following decisions:
 
 1. Replace Stoplight Elements with a platform-native Operation Inspector through a phased migration.
-2. Keep the imported OpenAPI YAML as the canonical source of truth.
+2. Keep imported OpenAPI unchanged as the wire contract; use effective platform settings for business schemas and processing.
 3. Introduce a normalized `OperationContract` model shared by API reference, Case Designer, validation, evidence, and AI assistance.
 4. Show the business request by default and retain an explicit wire request view.
-5. Model business payloads and protocol transforms with a versioned `x-platform-payload` extension.
-6. Continue supporting the existing `x-plaintext-request-schema` and `x-plaintext-response-schema` extensions.
+5. Model business schemas and message protection through versioned `x-platform-processing` settings.
+6. Allow users to maintain the same operation settings manually after import.
 7. Resolve local `$ref` values only. External references are not fetched automatically.
 8. Do not attempt to implement the entire OpenAPI ecosystem. Support the subset required by the platform and imported specifications.
 9. Preserve access to the raw OpenAPI source after Stoplight is removed.
@@ -307,240 +297,69 @@ The first version may use a read-only preformatted block. A large code editor de
 
 ### 8.1 Extension Name
 
-The preferred extension is:
+Use `x-platform-processing`. Imported values and manual configuration produce
+one effective operation configuration. The platform executes the supported PGP
+behavior; the document does not supply scripts or implementation classes.
+
+### 8.2 Request and Response Example
 
 ```yaml
-x-platform-payload:
+x-platform-processing:
+  version: 1
+  request:
+    protection: pgp-sign-encrypt
+    businessSchema:
+      $ref: '#/components/schemas/CreateOrderPayload'
+    ciphertext:
+      location: json-pointer
+      pointer: /data/encryptdata
+  responses:
+    '200':
+      protection: pgp-decrypt-verify
+      businessSchema:
+        $ref: '#/components/schemas/Order'
+      ciphertext:
+        location: json-pointer
+        pointer: /result/payload
+    '400':
+      protection: none
+    '500':
+      protection: none
 ```
 
-The extension is versioned because it is a platform contract rather than an informal display hint.
-
-### 8.2 Complete Request and Response Example
-
-```yaml
-paths:
-  /secure/fulfillment/orders/create:
-    post:
-      tags:
-        - Order Fulfillment
-      summary: Create partner order
-      operationId: createFulfillmentOrder
-
-      parameters:
-        - $ref: '#/components/parameters/ProfileParam'
-
-      x-platform-payload:
-        version: 1
-
-        request:
-          business:
-            mediaType: application/json
-            schema:
-              $ref: '#/components/schemas/CreateOrderPayload'
-
-          profile:
-            runtimeProfileRequired: true
-            partnerSelector:
-              in: query
-              name: profile
-
-          transform:
-            steps:
-              - type: pgp-sign-encrypt
-                armored: true
-
-              - type: json-embed
-                pointer: /payload
-
-        responses:
-          '200':
-            business:
-              mediaType: application/json
-              schema:
-                $ref: '#/components/schemas/Order'
-
-            transform:
-              steps:
-                - type: json-extract
-                  pointer: /payload
-
-                - type: pgp-decrypt-verify
-                  outputMediaType: application/json
-
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/EncryptedPayloadRequest'
-
-      responses:
-        '200':
-          $ref: '#/components/responses/EncryptedSuccess'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '500':
-          $ref: '#/components/responses/InternalError'
-```
+Standard OpenAPI `requestBody` and `responses` continue to describe the actual
+wire messages. Business schema references resolve in the same imported document.
 
 ### 8.3 Business Payload
 
-```yaml
-business:
-  mediaType: application/json
-  schema:
-    $ref: '#/components/schemas/CreateOrderPayload'
-  example:
-    customerName: Automation Partner
-    items:
-      - productId: P100
-        quantity: 2
-```
+`businessSchema` accepts an inline Schema Object or a local `$ref`. The inspector
+uses the effective settings for business request and response views. There is no
+fallback to a different extension when a business schema is absent.
 
-Fields:
+### 8.4 Ciphertext Locations
 
-| Field | Required | Description |
-|---|---:|---|
-| `mediaType` | yes | Media type before request transformation or after response transformation |
-| `schema` | yes | Inline Schema Object or local `$ref` |
-| `example` | no | Explicit business example |
+Request and response mappings are independent. `json-pointer` supports nested
+fields such as `/data/encryptdata`; `body` represents the entire ASCII-armored
+HTTP body. An optional request `envelope` supplies surrounding JSON fields and
+existing variable references. See the implementation guide for escaping and arrays.
 
-If `example` is absent, the platform generates one from the schema.
+### 8.5 Supported Protection
 
-### 8.4 Profile Metadata
+Requests support `none`, `pgp-encrypt`, and `pgp-sign-encrypt`. Responses support
+`none`, `pgp-decrypt`, and `pgp-decrypt-verify`. Response rules match the actual
+HTTP status by exact code, status range, then explicit `default`.
 
-```yaml
-profile:
-  runtimeProfileRequired: true
-  partnerSelector:
-    in: query
-    name: profile
-```
+### 8.6 Runtime Profile
 
-`runtimeProfileRequired` means Case execution needs a platform runtime Profile containing the local and remote key material.
+Key material is provided by the selected runtime Profile. It is not embedded in
+the OpenAPI processing extension or copied into operation configuration.
 
-`partnerSelector` describes a wire-level parameter used by the remote service to select a trusted partner identity.
+### 8.7 Configuration Diagnostics
 
-These are related but distinct concepts:
-
-- the runtime Profile supplies client-side cryptographic material
-- the partner selector is sent to the service
-
-The OpenAPI extension never contains private keys, passphrases, or other secret material.
-
-### 8.5 Supported Request Transform Steps
-
-#### PGP Sign and Encrypt
-
-```yaml
-- type: pgp-sign-encrypt
-  armored: true
-```
-
-Maps to:
-
-```yaml
-type: crypto.pgp.signAndEncrypt
-```
-
-#### Base64 Encode
-
-```yaml
-- type: base64-encode
-  charset: UTF-8
-```
-
-Maps to:
-
-```yaml
-type: data.encodeBase64
-```
-
-#### JSON Embed
-
-```yaml
-- type: json-embed
-  pointer: /payload
-```
-
-Maps to a generated `body.buildJson` Action.
-
-A nested pointer is allowed:
-
-```yaml
-- type: json-embed
-  pointer: /secure/data
-```
-
-The platform generates:
-
-```json
-{
-  "secure": {
-    "data": "${artifacts.encryptedPayload}"
-  }
-}
-```
-
-### 8.6 Supported Response Transform Steps
-
-#### JSON Extract
-
-```yaml
-- type: json-extract
-  pointer: /payload
-```
-
-The platform converts the JSON Pointer to the corresponding supported runtime path representation.
-
-#### PGP Decrypt and Verify
-
-```yaml
-- type: pgp-decrypt-verify
-  outputMediaType: application/json
-```
-
-Maps to:
-
-```yaml
-type: crypto.pgp.decryptAndVerify
-```
-
-### 8.7 Transform Validation Rules
-
-Import diagnostics are generated when:
-
-- `version` is missing or unsupported
-- a transform step has no `type`
-- a transform step type is unsupported
-- a JSON Pointer is invalid
-- a referenced schema does not exist
-- request steps are in an invalid order
-- response steps are in an invalid order
-- a cryptographic transform requires a Profile but `runtimeProfileRequired` is false or absent
-- a response transform is declared for an undefined response status
-
-An invalid platform extension must not silently generate incorrect test Actions.
-
-### 8.8 Legacy Compatibility
-
-When `x-platform-payload` is absent, the parser supports:
-
-```yaml
-x-plaintext-request-schema:
-  $ref: '#/components/schemas/CreateOrderPayload'
-
-x-plaintext-response-schema:
-  $ref: '#/components/schemas/Order'
-```
-
-The compatibility adapter produces:
-
-- a business request contract from `x-plaintext-request-schema`
-- a business response contract for the primary successful response
-- no automatic transform unless sufficient metadata can be inferred safely
-
-The adapter must not infer encryption steps from a field description or field name alone.
+Report unsupported versions or protection values, invalid ciphertext mappings,
+unsupported properties, unresolved business schema references, and configurations
+that need review after reimport. Do not infer processing from descriptions or field
+names. Runtime schema validation remains a separate capability from schema display.
 
 ## 9. Normalized Contract Model
 
@@ -684,7 +503,7 @@ Example:
   "severity": "WARNING",
   "code": "UNRESOLVED_SCHEMA_REF",
   "message": "Schema reference could not be resolved",
-  "location": "POST /orders/create x-platform-payload.request.business.schema"
+  "location": "POST /orders/create x-platform-processing.request.businessSchema"
 }
 ```
 
@@ -734,10 +553,10 @@ platform-api/src/main/java/com/example/poc/platform/openapi/
 
 #### `OpenApiExtensionParser`
 
-- parse `x-platform-payload`
-- adapt legacy `x-plaintext-*` extensions
+- parse supported `x-platform-processing` declarations
+- combine imported declarations with saved operation settings
 - validate extension versions and shapes
-- validate transform step order
+- validate protection values and ciphertext locations
 - convert extension data into typed records
 
 #### `OpenApiReferenceResolver`
@@ -1270,133 +1089,42 @@ The UI may offer:
 
 ### 15.1 Operation Selection
 
-When a user selects an Operation:
+Selecting an operation preserves the operation reference and shows its effective
+processing configuration, source, and execution order. It does not copy automatic
+PGP Actions into the authored Case DSL.
 
-1. update the Operation snapshot
-2. fetch its `OperationContract`
-3. determine whether a business request is available
-4. determine whether protocol Actions can be generated
-5. offer the recommended configuration
+### 15.2 Configuration Review
 
-### 15.2 Recommendation Prompt
+Users configure protection and ciphertext locations on the API operation page.
+The Case Designer shows automatic processing as read-only execution information.
+Existing user Actions remain visible; duplicate PGP processing is blocked rather
+than silently ignored.
 
-For an empty Step:
+### 15.3 Business Request
 
-```text
-This operation defines a business request and an encrypted wire protocol.
+The Case stores business request data and variable references. The runtime
+serializes, protects, and wraps that data according to effective operation settings.
 
-Business JSON
--> PGP sign and encrypt
--> embed at /payload
+### 15.4 Automatic Request Actions
 
-[Apply recommended setup] [Select operation only]
-```
+The platform generates visible request protection and envelope Actions at runtime.
+They execute after user `beforeSend` Actions and before user
+`afterRequestProcessing` Actions. Generated Actions are marked as API-owned.
 
-For a Step with existing request data or Actions:
+### 15.5 Automatic Response Actions
 
-```text
-Applying the recommended setup will replace the current Request Body and
-protocol Actions.
-
-[Review changes] [Replace] [Cancel]
-```
-
-Existing user content must never be silently overwritten.
-
-### 15.3 Generated Request
-
-The Case continues to store the business request:
-
-```yaml
-request:
-  body:
-    customerName: Automation Partner
-    customerReference: AUTO-ORDER-1001
-    items:
-      - productId: P100
-        quantity: 2
-```
-
-The user does not edit ciphertext.
-
-### 15.4 Generated Request Actions
-
-For:
-
-```yaml
-steps:
-  - type: pgp-sign-encrypt
-    armored: true
-  - type: json-embed
-    pointer: /payload
-```
-
-generate:
-
-```yaml
-actions:
-  beforeSend:
-    - type: crypto.pgp.signAndEncrypt
-      name: Protect request payload
-      input:
-        source: request.body
-        format: json
-      output:
-        target: artifacts.encryptedPayload
-        format: text
-
-    - type: body.buildJson
-      name: Build wire request body
-      template:
-        payload: ${artifacts.encryptedPayload}
-      output:
-        target: request.body
-```
-
-### 15.5 Generated Response Actions
-
-For:
-
-```yaml
-steps:
-  - type: json-extract
-    pointer: /payload
-  - type: pgp-decrypt-verify
-    outputMediaType: application/json
-```
-
-generate:
-
-```yaml
-actions:
-  afterReceive:
-    - type: crypto.pgp.decryptAndVerify
-      name: Read secure response payload
-      input:
-        source: response.body
-        path: $.payload
-      output:
-        target: decrypted.securePayload
-        format: json
-```
-
-The Action generator owns deterministic artifact and decrypted output names. Name collisions are resolved before modifying the Step.
+The platform chooses a response rule from the actual HTTP status, then extracts,
+decrypts, and verifies as configured before user `afterReceive` Actions. It never
+falls back to plaintext parsing after failed decryption or signature verification.
+Explicit `manual` and `wire` processing modes support exceptional test cases.
 
 ### 15.6 Assertion Assistance
 
-When a business response schema exists, the Assertion editor may offer fields under:
-
-```text
-decrypted.securePayload
-```
-
-The wire response remains available under:
-
-```text
-response.body
-```
-
-This allows assertions against both envelope metadata and decrypted business data.
+Use `business.response.body` for the effective business JSON, and
+`wire.response.body` or `response.body` for the original response. Existing
+manually produced `decrypted.<name>` values remain available when their Actions
+run. A saved run uses its configuration and evidence snapshots for historical
+inspection.
 
 ## 16. Execution and Validation
 
@@ -1576,7 +1304,7 @@ Cover:
 - Operation with business request schema
 - Operation with business response schema
 - request and response transforms
-- legacy `x-plaintext-*`
+- effective settings from extension import and manual configuration
 - missing schema references
 - cyclic schema references
 - `allOf`
@@ -1655,10 +1383,10 @@ Use the mock service OpenAPI to verify:
 
 ### 22.1 Phase 1: Contract Foundation
 
-- document `x-platform-payload` version 1
+- document `x-platform-processing` version 1
 - implement normalized contract records
 - implement local reference resolution
-- implement extension compatibility adapter
+- implement effective operation processing settings
 - add contract endpoints
 - add parser and controller tests
 

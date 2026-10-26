@@ -36,6 +36,8 @@ V1 只完成一条端到端闭环：
 
 试用与验收：[Test Agent V1 试用指南](agent-v1-trial-guide.md)
 
+V1 之后的 Agent 写入权限演进见：[Test Agent 权限模式与正式资产写入设计](../test-agent-permission-modes.md)。该设计定义 `READ_ONLY`、`REVIEW_REQUIRED` 和 `AUTO_APPLY`，并明确不兼容历史 `DRAFT_ONLY` 数据。
+
 阶段必须按顺序推进。后续阶段可以提前做技术验证，但不能绕过前一阶段的完成门槛进入正式实现。
 
 ## 4. 开发前置条件

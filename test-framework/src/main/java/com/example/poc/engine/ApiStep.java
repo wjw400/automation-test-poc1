@@ -8,6 +8,18 @@ public class ApiStep {
     private RequestSpec request;
     private ActionPipelineSpec actions = new ActionPipelineSpec();
     private ResponseSpec response;
+    private String processingMode = "automatic";
+    private OperationProcessingSpec processing;
+    private java.util.Map<String, Object> processingSnapshot = new java.util.LinkedHashMap<>();
+
+    public String getProcessingMode() { return processingMode; }
+    public void setProcessingMode(String mode) { processingMode = mode; }
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL)
+    public OperationProcessingSpec getProcessing() { return processing; }
+    public void setProcessing(OperationProcessingSpec processing) { this.processing = processing; }
+    @com.fasterxml.jackson.annotation.JsonInclude(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_EMPTY)
+    public java.util.Map<String, Object> getProcessingSnapshot() { return processingSnapshot; }
+    public void setProcessingSnapshot(java.util.Map<String, Object> snapshot) { processingSnapshot = snapshot; }
 
     public String getName() {
         return name;

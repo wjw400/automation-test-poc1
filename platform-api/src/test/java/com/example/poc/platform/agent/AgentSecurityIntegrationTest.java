@@ -33,7 +33,7 @@ import tools.jackson.databind.ObjectMapper;
         "spring.jpa.hibernate.ddl-auto=create-drop",
         "spring.flyway.enabled=false",
         "agent.fake.chunk-delay=1ms",
-        "agent.turn-timeout=5s",
+        "agent.run-timeout=5s",
         "agent.deepseek.api-key="
 })
 @AutoConfigureMockMvc

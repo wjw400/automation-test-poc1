@@ -46,6 +46,30 @@ public class ApiOperationEntity {
 
     @Column(columnDefinition = "text")
     private String rawOperationJson;
+    @Column(columnDefinition = "text")
+    private String processingJson;
+    @Column(columnDefinition = "text")
+    private String importedProcessingJson;
+    private String processingSource;
+    private long processingRevision;
+    private boolean processingNeedsReview;
+    @Column(columnDefinition = "text")
+    private String processingImportError;
+    @jakarta.persistence.Version
+    private long rowVersion;
+
+    public String getProcessingJson() { return processingJson; }
+    public void setProcessingJson(String value) { processingJson = value; }
+    public String getImportedProcessingJson() { return importedProcessingJson; }
+    public void setImportedProcessingJson(String value) { importedProcessingJson = value; }
+    public String getProcessingSource() { return processingSource; }
+    public void setProcessingSource(String value) { processingSource = value; }
+    public long getProcessingRevision() { return processingRevision; }
+    public void setProcessingRevision(long value) { processingRevision = value; }
+    public boolean isProcessingNeedsReview() { return processingNeedsReview; }
+    public void setProcessingNeedsReview(boolean value) { processingNeedsReview = value; }
+    public String getProcessingImportError() { return processingImportError; }
+    public void setProcessingImportError(String value) { processingImportError = value; }
 
     @Column(nullable = false)
     private Instant createdAt;

@@ -74,7 +74,9 @@ steps:
             target: decrypted.order
             format: json
     response:
-      status: 200
+      status:
+        operator: oneOf
+        expected: [200]
       assertions:
         - source: response.body
           path: $.code
@@ -126,6 +128,33 @@ npm run dev
 ```
 
 Open `http://localhost:5173`. The Vite development server proxies `/api` requests to the platform API.
+
+## Agent model providers
+
+The Agent supports `FAKE`, `DEEPSEEK`, and `COPILOT` runtimes. New chats use
+`AGENT_DEFAULT_RUNTIME`; existing chats keep the runtime and model recorded when
+they were created. Copilot calls its `/responses` HTTP endpoint directly using
+the OpenAI Responses wire format; no Copilot SDK or CLI process is needed.
+
+See [Copilot setup](design/test-agent-implementation/copilot-setup.md) for REST
+authentication, request headers, model selection, and troubleshooting.
+
+For Copilot use, configure the API process with the Bearer token and model ID
+from a working Copilot `/responses` request:
+
+```powershell
+$env:COPILOT_ENABLED = 'true'
+$env:AGENT_DEFAULT_RUNTIME = 'COPILOT'
+$env:COPILOT_BASE_URL = 'https://api.githubcopilot.com'
+$env:COPILOT_API_TOKEN = '<Bearer token from your working REST request>'
+$env:COPILOT_MODEL = '<model ID supporting /responses>'
+mvn -pl platform-api spring-boot:run
+```
+
+Create a **new chat** after restarting the API. Reproduce any additional headers
+required by your working REST request using the Copilot configuration. The REST
+adapter does not read CLI login credentials or refresh tokens automatically.
+DeepSeek remains available through its existing configuration.
 
 ## Verification
 

@@ -1,5 +1,6 @@
 package com.example.poc.platform.agent.skill;
 
+import com.example.poc.platform.agent.AgentPermissionMode;
 import com.example.poc.platform.agent.AgentTaskService.AgentTaskRecord;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -18,7 +19,9 @@ import tools.jackson.dataformat.yaml.YAMLMapper;
 @Component
 public class AgentSkillRegistry {
     private static final List<String> TRUSTED_SKILL_PATHS = List.of(
-            "agent-skills/scenario-authoring/SKILL.md",
+        "agent-skills/scenario-authoring/SKILL.md",
+            "agent-skills/suite-authoring/SKILL.md",
+            "agent-skills/scenario-analysis/SKILL.md",
             "agent-skills/openapi-analysis/SKILL.md",
             "agent-skills/secure-payload/SKILL.md",
             "agent-skills/failure-analysis/SKILL.md");
@@ -42,11 +45,18 @@ public class AgentSkillRegistry {
 
     public List<AgentSkill> select(AgentTaskRecord task, String userText, String scenarioText) {
         List<AgentSkill> selected = new ArrayList<>();
-        if ("SCENARIO".equals(task.targetType())) addEnabled(selected, "scenario-authoring");
+        if ("SCENARIO".equals(task.targetType())) {
+            addEnabled(selected, task.permissionMode() == AgentPermissionMode.READ_ONLY
+                    ? "scenario-analysis"
+                    : "scenario-authoring");
+        }
+        if ("SUITE".equals(task.targetType())) {
+            addEnabled(selected, "suite-authoring");
+        }
         String userSearchable = userText.toLowerCase(Locale.ROOT);
         String searchable = (userText + "\n" + scenarioText).toLowerCase(Locale.ROOT);
         AgentSkill secure = skills.get("secure-payload");
-        if (secure != null && secure.enabled()
+        if (task.permissionMode() != AgentPermissionMode.READ_ONLY && secure != null && secure.enabled()
                 && secure.matchTerms().stream().map(term -> term.toLowerCase(Locale.ROOT)).anyMatch(searchable::contains)) {
             selected.add(secure);
         }
@@ -83,8 +93,14 @@ public class AgentSkillRegistry {
             String instructions = markdown.substring(end + 5).trim();
             ObjectMapper mapper = YAMLMapper.builder().build();
             Map<String, Object> metadata = mapper.readValue(frontMatter, new TypeReference<>() {});
+            String name = requiredText(metadata, "name", path);
+            if (List.of("scenario-authoring", "suite-authoring").contains(name)) {
+                try (var shared = new ClassPathResource("agent-skills/scenario-dsl-rules.md").getInputStream()) {
+                    instructions += "\n\n" + new String(shared.readAllBytes(), StandardCharsets.UTF_8).trim();
+                }
+            }
             return new AgentSkill(
-                    requiredText(metadata, "name", path),
+                    name,
                     requiredText(metadata, "description", path),
                     requiredText(metadata, "version", path),
                     requiredText(metadata, "riskLevel", path),

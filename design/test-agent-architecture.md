@@ -209,26 +209,19 @@ Plan 可以随着新证据修订，但每次修订必须：
 
 ## 7. UI 形态
 
-建议使用可跨页面保持的 Test Agent Panel。
+Test Agent 使用统一品牌和共享 Chat 组件，但按资源作用域采用不同承载方式：
 
-Panel 包含：
+- Scenario Agent 位于当前 Scenario 工作 Tab 的右侧 Sidecar
+- Suite Agent 位于当前 Suite 工作 Tab 的右侧 Sidecar
+- Project Agent 使用独立的 Project Agent 工作 Tab
 
-- `Conversation`：用户目标、澄清和说明
-- `Plan`：当前步骤、进度和完成条件
-- `Tool Activity`：读取、修改、校验和运行记录
-- `Artifacts`：Draft、Diff、Validation 和 Failure Analysis
-- `Approvals`：需要用户确认的动作
+对象级 Sidecar 让用户可以同时查看原生编辑器和 Agent 建议；Project Agent 独立 Tab 为跨资源 Context、Draft 和 Change Set 提供足够空间。
 
-页面内提供上下文入口：
+Chat 创建后 Scope 固定，History 按 Scope 隔离。模型和审批模式可以在非运行状态切换。Agent Task 在工作 Tab 切换后继续存在，但 UI 必须始终显示 Scope 和目标资产，防止修改错误资源。
 
-- API 页面：生成覆盖场景、解释 Schema
-- Scenario 页面：补充 Step、Header、Body、Extract 和 Assertions
-- Suite 页面：组合场景、检查覆盖和顺序
-- Execution 页面：分析失败、生成修复 Draft
+页面内入口根据当前上下文自动确定 Scope，不要求用户在打开 Chat 前选择 Agent 类型。对象级请求超出当前 Scope 时，通过 `Continue in Project Agent` 创建新的 Project Chat，不静默扩大原 Task 权限。
 
-点击 Artifact 应在平台工作区打开对应的原生 Tab。用户切换页面后，Agent Task 保持存在，但 Context 必须明确显示，防止修改错误资产。
-
-统一 Panel 不应成为一个脱离 Project 的独立聊天中心，也不应建立第二套 Scenario 或 Suite 编辑器。
+完整的入口、布局、能力矩阵、状态管理、跨 Scope 交接和验收标准见 [Test Agent 作用域、能力与 UI 布局设计](C:/Users/blaine/Documents/code/automation-test-poc1/design/test-agent-ui-scope-and-layout.md)。
 
 ## 8. 总体架构
 

@@ -4,6 +4,13 @@ import com.example.poc.engine.ApiStep;
 import com.example.poc.engine.ApiTestCase;
 import com.example.poc.engine.OperationSpec;
 import com.example.poc.platform.agent.AgentRequestIdentity;
+import com.example.poc.platform.agent.AgentTaskService;
+import com.example.poc.platform.catalog.PlatformCatalogService;
+import com.example.poc.platform.catalog.PlatformCatalogService.CaseRecord;
+import com.example.poc.platform.catalog.PlatformCatalogService.SuiteRecord;
+import com.example.poc.platform.catalog.PlatformCatalogService.UpsertCaseRequest;
+import com.example.poc.platform.catalog.PlatformCatalogService.UpsertSuiteCaseRequest;
+import com.example.poc.platform.catalog.PlatformCatalogService.UpsertSuiteRequest;
 import com.example.poc.platform.persistence.JsonCodec;
 import com.example.poc.platform.persistence.entity.ApiOperationEntity;
 import com.example.poc.platform.persistence.entity.CaseEntity;
@@ -40,6 +47,8 @@ public class ScenarioDraftService {
     private final ScenarioCommandEngine commandEngine;
     private final ScenarioDraftValidator validator;
     private final ScenarioDiffService diffService;
+    private final PlatformCatalogService catalogService;
+    private final AgentTaskService agentTaskService;
 
     public ScenarioDraftService(
             ProjectRepository projectRepository,
@@ -51,7 +60,9 @@ public class ScenarioDraftService {
             ScenarioCommandDecoder commandDecoder,
             ScenarioCommandEngine commandEngine,
             ScenarioDraftValidator validator,
-            ScenarioDiffService diffService) {
+            ScenarioDiffService diffService,
+            PlatformCatalogService catalogService,
+            AgentTaskService agentTaskService) {
         this.projectRepository = projectRepository;
         this.caseRepository = caseRepository;
         this.draftRepository = draftRepository;
@@ -62,6 +73,8 @@ public class ScenarioDraftService {
         this.commandEngine = commandEngine;
         this.validator = validator;
         this.diffService = diffService;
+        this.catalogService = catalogService;
+        this.agentTaskService = agentTaskService;
     }
 
     @Transactional
@@ -75,6 +88,13 @@ public class ScenarioDraftService {
             @Valid CreateScenarioDraftRequest request,
             String actorId,
             String agentTaskId) {
+        requireProject(projectId);
+        CaseEntity scenario = requireScenario(request.scenarioId());
+        requireScenarioProject(scenario, projectId);
+        if ("DELETED".equalsIgnoreCase(scenario.getStatus())) {
+            throw new IllegalArgumentException("Cannot create a Draft from a deleted Scenario");
+        }
+
         if (agentTaskId != null) {
             ScenarioDraftEntity existing = draftRepository
                     .findFirstByAgentTaskIdAndStatusOrderByUpdatedAtDesc(agentTaskId, "ACTIVE")
@@ -83,14 +103,12 @@ public class ScenarioDraftService {
                 if (!projectId.equals(existing.getProjectId()) || !request.scenarioId().equals(existing.getScenarioId())) {
                     throw new SecurityException("Agent Task cannot reuse a Draft for another target");
                 }
-                return toRecord(existing, currentDocument(existing));
+                if (existing.getSourceRevision() == revision(scenario.getRevision())) {
+                    return toRecord(existing, currentDocument(existing));
+                }
+                existing.setStatus("DISCARDED");
+                draftRepository.saveAndFlush(existing);
             }
-        }
-        requireProject(projectId);
-        CaseEntity scenario = requireScenario(request.scenarioId());
-        requireScenarioProject(scenario, projectId);
-        if ("DELETED".equalsIgnoreCase(scenario.getStatus())) {
-            throw new IllegalArgumentException("Cannot create a Draft from a deleted Scenario");
         }
 
         ApiTestCase parsed = codec.parse(scenario.getContent());
@@ -110,6 +128,159 @@ public class ScenarioDraftService {
         entity.setAgentTaskId(agentTaskId);
         entity = draftRepository.saveAndFlush(entity);
         return toRecord(entity, document);
+    }
+
+    /** Creates an unsaved Scenario Draft for Suite-driven authoring. */
+    @Transactional
+    public ScenarioDraftRecord createNew(
+            String projectId,
+            @Valid CreateNewScenarioDraftRequest request,
+            String actorId,
+            String agentTaskId) {
+        requireProject(projectId);
+        ApiTestCase scenario = codec.parse(request.content());
+        if (scenario.getName() == null || scenario.getName().isBlank()) {
+            scenario.setName(request.name());
+        }
+        String canonicalContent = codec.write(scenario);
+        if (agentTaskId != null) {
+            for (ScenarioDraftEntity existing : draftRepository
+                    .findByAgentTaskIdAndStatusOrderByUpdatedAtDesc(agentTaskId, "ACTIVE")) {
+                if (existing.getScenarioId() != null
+                        || !java.util.Objects.equals(request.sourceSuiteId(), existing.getSourceSuiteId())) {
+                    continue;
+                }
+                if (canonicalContent.equals(existing.getContent()) || canonicalContent.equals(existing.getBaseContent())) {
+                    return toRecord(existing, currentDocument(existing));
+                }
+                boolean sameName = false;
+                try {
+                    ApiTestCase existingScenario = codec.parse(existing.getContent());
+                    sameName = scenario.getName().equalsIgnoreCase(existingScenario.getName());
+                } catch (RuntimeException ignored) {
+                    // Keep an unreadable historical Draft isolated; it must not block new authoring.
+                }
+                if (sameName) {
+                    throw new ScenarioCommandException("SCENARIO_DRAFT_ALREADY_EXISTS",
+                            "Draft " + existing.getId() + " already exists for this Scenario. Read it with getScenarioDraft "
+                                    + "and refine it with applyNewScenarioCommands instead of recreating it.", "draftId");
+                }
+            }
+        }
+        List<String> stepIds = scenario.getSteps().stream().map(ignored -> UUID.randomUUID().toString()).toList();
+        ScenarioDraftEntity entity = new ScenarioDraftEntity();
+        entity.setProjectId(projectId);
+        entity.setSourceSuiteId(request.sourceSuiteId());
+        entity.setSourceRevision(0);
+        entity.setBaseContent(canonicalContent);
+        entity.setContent(canonicalContent);
+        entity.setBaseStepIdsJson(jsonCodec.write(stepIds));
+        entity.setStepIdsJson(jsonCodec.write(stepIds));
+        entity.setStatus("ACTIVE");
+        entity.setCreatedBy(actorId);
+        entity.setAgentTaskId(agentTaskId);
+        return toRecord(draftRepository.saveAndFlush(entity), new ScenarioDocument(scenario, stepIds));
+    }
+
+    /** Publishes a Suite-authored new Scenario Draft after explicit user confirmation. */
+    @Transactional
+    public PublishScenarioDraftResult publishNew(
+            String draftId,
+            String actorId,
+            @Valid PublishScenarioDraftRequest request) {
+        ScenarioDraftEntity entity = requireOwnedDraft(draftId, actorId);
+        if (entity.getSourceSuiteId() == null) {
+            throw new IllegalArgumentException("Only a new Scenario Draft created from a Suite can be published");
+        }
+
+        if (entity.getScenarioId() != null) {
+            CaseRecord scenario = catalogService.getCase(entity.getScenarioId());
+            SuiteRecord suite = request.addToSuite()
+                    ? addScenarioToSourceSuite(entity, scenario, request.expectedSuiteRevision())
+                    : null;
+            return new PublishScenarioDraftResult(scenario, suite, false);
+        }
+        if (!"ACTIVE".equals(entity.getStatus())) {
+            throw new IllegalArgumentException("Scenario Draft is not active: " + draftId);
+        }
+
+        ScenarioDocument document = currentDocument(entity);
+        ScenarioValidationResult validation = validator.validate(entity.getProjectId(), document);
+        if (!validation.valid()) {
+            throw new IllegalArgumentException("Scenario Draft must pass validation before it can be created");
+        }
+        ApiTestCase authored = document.scenario();
+        String name = authored.getName() == null ? "" : authored.getName().trim();
+        if (name.isBlank()) {
+            throw new IllegalArgumentException("Scenario Draft name is required");
+        }
+
+        CaseRecord scenario = catalogService.saveCase(entity.getProjectId(), new UpsertCaseRequest(
+                null,
+                name,
+                newScenarioCode(name),
+                authored.getDescription(),
+                null,
+                null,
+                null,
+                authored.getTags(),
+                authored.getDslVersion(),
+                entity.getContent(),
+                "ACTIVE"));
+        SuiteRecord suite = request.addToSuite()
+                ? addScenarioToSourceSuite(entity, scenario, request.expectedSuiteRevision())
+                : null;
+
+        entity.setScenarioId(scenario.id());
+        entity.setSourceRevision(scenario.revision());
+        entity.setStatus("PUBLISHED");
+        draftRepository.saveAndFlush(entity);
+        if (entity.getAgentTaskId() != null) {
+            Map<String, Object> details = new java.util.LinkedHashMap<>();
+            details.put("draftId", entity.getId());
+            details.put("scenarioId", scenario.id());
+            details.put("addedToSuite", suite != null);
+            if (suite != null) details.put("suiteId", suite.id());
+            agentTaskService.recordDecision(entity.getAgentTaskId(), actorId, "SCENARIO_SAVED", details);
+        }
+        return new PublishScenarioDraftResult(scenario, suite, true);
+    }
+
+    private SuiteRecord addScenarioToSourceSuite(
+            ScenarioDraftEntity draft,
+            CaseRecord scenario,
+            Long expectedSuiteRevision) {
+        SuiteRecord suite = catalogService.getSuite(draft.getSourceSuiteId());
+        if (!draft.getProjectId().equals(suite.projectId())) {
+            throw new SecurityException("Scenario Draft source Suite belongs to another Project");
+        }
+        if (suite.cases().stream().anyMatch(item -> scenario.id().equals(item.caseId()))) {
+            return suite;
+        }
+        if (expectedSuiteRevision != null && expectedSuiteRevision.longValue() != suite.revision()) {
+            throw new ScenarioDraftConflictException(
+                    "SOURCE_SUITE_CHANGED",
+                    "Source Suite changed before the Scenario was confirmed",
+                    expectedSuiteRevision,
+                    suite.revision());
+        }
+        List<UpsertSuiteCaseRequest> entries = new ArrayList<>();
+        suite.cases().forEach(item -> entries.add(new UpsertSuiteCaseRequest(
+                item.id(), item.caseId(), item.displayName(), item.order(), item.enabled(),
+                item.variableOverrides(), item.environmentId(), item.profileId())));
+        entries.add(new UpsertSuiteCaseRequest(
+                null, scenario.id(), null, entries.size() + 1, true, Map.of(), null, null));
+        return catalogService.saveSuite(draft.getProjectId(), new UpsertSuiteRequest(
+                suite.id(), suite.name(), suite.description(), suite.status(), entries));
+    }
+
+    private String newScenarioCode(String name) {
+        String normalized = name.toLowerCase(java.util.Locale.ROOT)
+                .replaceAll("[^a-z0-9]+", "-")
+                .replaceAll("^-+|-+$", "");
+        if (normalized.length() > 70) normalized = normalized.substring(0, 70).replaceAll("-+$", "");
+        if (normalized.isBlank()) normalized = "scenario";
+        return normalized + "-" + UUID.randomUUID().toString().substring(0, 8);
     }
 
     @Transactional(readOnly = true)
@@ -277,7 +448,8 @@ public class ScenarioDraftService {
                 validation,
                 diff,
                 entity.getCreatedAt(),
-                entity.getUpdatedAt());
+                entity.getUpdatedAt(),
+                entity.getSourceSuiteId());
     }
 
     private ScenarioDocument baseDocument(ScenarioDraftEntity entity) {
@@ -315,6 +487,9 @@ public class ScenarioDraftService {
     }
 
     private void ensureSourceUnchanged(ScenarioDraftEntity draft) {
+        if (draft.getScenarioId() == null || draft.getScenarioId().isBlank()) {
+            return;
+        }
         CaseEntity scenario = requireScenario(draft.getScenarioId());
         long currentRevision = revision(scenario.getRevision());
         if (currentRevision != draft.getSourceRevision()) {
@@ -381,6 +556,15 @@ public class ScenarioDraftService {
 
     public record CreateScenarioDraftRequest(@NotBlank String scenarioId) {}
 
+    public record CreateNewScenarioDraftRequest(
+            @NotBlank String name,
+            @NotBlank String content,
+            String sourceSuiteId) {}
+
+    public record PublishScenarioDraftRequest(boolean addToSuite, Long expectedSuiteRevision) {}
+
+    public record PublishScenarioDraftResult(CaseRecord scenario, SuiteRecord suite, boolean created) {}
+
     public record ScenarioStepReference(String id, int index, String name) {}
 
     public record ScenarioDraftRecord(
@@ -397,7 +581,8 @@ public class ScenarioDraftService {
             ScenarioValidationResult validation,
             ScenarioDraftDiff diff,
             Instant createdAt,
-            Instant updatedAt) {}
+            Instant updatedAt,
+            String sourceSuiteId) {}
 
     public record CommandExecutionResult(
             ScenarioDraftRecord draft,

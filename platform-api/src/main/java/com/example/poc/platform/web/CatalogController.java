@@ -106,12 +106,12 @@ public class CatalogController {
                 profileId,
                 request.name(),
                 request.type(),
-                request.senderPublicKey(),
-                request.senderPrivateKey(),
-                request.senderPrivateKeyPassphrase(),
-                request.recipientPublicKey(),
-                request.recipientPrivateKey(),
-                request.recipientPrivateKeyPassphrase(),
+                request.verificationPublicKey(),
+                request.signingPrivateKey(),
+                request.signingPrivateKeyPassphrase(),
+                request.encryptionPublicKey(),
+                request.decryptionPrivateKey(),
+                request.decryptionPrivateKeyPassphrase(),
                 request.environmentIds(),
                 request.enabled()));
     }

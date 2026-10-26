@@ -20,20 +20,33 @@ logging:
   file:
     name: ${PLATFORM_LOG_FILE:logs/platform-api.log}
   level:
-    com.example.poc.platform.agent: ${AGENT_LOG_LEVEL:INFO}
-    com.example.poc.platform.web.ApiExceptionHandler: ${API_ERROR_LOG_LEVEL:WARN}
+    com.example.poc.platform.agent: ${AGENT_LOG_LEVEL:DEBUG}
+    com.example.poc.platform.web.ApiExceptionHandler: ${API_ERROR_LOG_LEVEL:DEBUG}
 
 agent:
   default-runtime: ${AGENT_DEFAULT_RUNTIME:FAKE}
   max-turns: ${AGENT_MAX_TURNS:20}
-  max-tool-calls: ${AGENT_MAX_TOOL_CALLS:20}
+  max-tool-calls: ${AGENT_MAX_TOOL_CALLS:40}
   max-repeated-tool-calls: ${AGENT_MAX_REPEATED_TOOL_CALLS:3}
   max-no-progress-tool-calls: ${AGENT_MAX_NO_PROGRESS_TOOL_CALLS:3}
-  turn-timeout: ${AGENT_TURN_TIMEOUT:120s}
+  run-timeout: ${AGENT_RUN_TIMEOUT:2h}
+  inactivity-timeout: ${AGENT_INACTIVITY_TIMEOUT:5m}
+  model-request-timeout: ${AGENT_MODEL_REQUEST_TIMEOUT:3m}
+  tool-default-timeout: ${AGENT_TOOL_DEFAULT_TIMEOUT:30s}
   fake:
     chunk-delay: ${AGENT_FAKE_CHUNK_DELAY:10ms}
   deepseek:
     api-key: ${DEEPSEEK_API_KEY:}
     base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
     model: ${DEEPSEEK_MODEL:deepseek-v4-flash}
+    models: ${DEEPSEEK_MODELS:deepseek-v4-flash}
     temperature: ${DEEPSEEK_TEMPERATURE:0.2}
+  copilot:
+    enabled: ${COPILOT_ENABLED:false}
+    base-url: ${COPILOT_BASE_URL:https://api.githubcopilot.com}
+    api-token: ${COPILOT_API_TOKEN:}
+    api-version: ${COPILOT_API_VERSION:}
+    integration-id: ${COPILOT_INTEGRATION_ID:}
+    max-output-tokens: ${COPILOT_MAX_OUTPUT_TOKENS:8192}
+    model: ${COPILOT_MODEL:}
+    models: ${COPILOT_MODELS:}

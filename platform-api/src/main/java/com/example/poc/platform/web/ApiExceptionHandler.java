@@ -20,9 +20,16 @@ import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.context.request.async.AsyncRequestNotUsableException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+    @ExceptionHandler({com.example.poc.platform.openapi.OperationProcessingService.ConfigurationConflictException.class,
+            org.springframework.orm.ObjectOptimisticLockingFailureException.class})
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public Map<String, Object> handleProcessingConflict(Exception exception, HttpServletRequest request) {
+        return errorResponse(request, "error", "CONFIGURATION_CONFLICT", "message", "Configuration changed; reload before saving");
+    }
     private static final Logger log = LoggerFactory.getLogger(ApiExceptionHandler.class);
     private final AgentContextRedactor redactor;
 
@@ -48,7 +55,7 @@ public class ApiExceptionHandler {
                 "message", exception.getMessage());
     }
 
-    @ExceptionHandler({IllegalArgumentException.class, MethodArgumentNotValidException.class})
+    @ExceptionHandler({IllegalArgumentException.class, MethodArgumentNotValidException.class, org.springframework.http.converter.HttpMessageNotReadableException.class})
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public Map<String, Object> handleBadRequest(Exception exception, HttpServletRequest request) {
         logHandled(request, "BAD_REQUEST", exception);
@@ -131,6 +138,18 @@ public class ApiExceptionHandler {
                 "error", "RESOURCE_IN_USE",
                 "message", exception.getMessage(),
                 "references", exception.getReferences());
+    }
+
+    @ExceptionHandler(AsyncRequestNotUsableException.class)
+    public void handleDisconnectedAsyncRequest(
+            AsyncRequestNotUsableException exception,
+            HttpServletRequest request) {
+        log.debug(
+                "Async client disconnected requestId={} method={} path={} message={}",
+                requestId(request),
+                request.getMethod(),
+                request.getRequestURI(),
+                safeMessage(exception));
     }
 
     @ExceptionHandler(Exception.class)

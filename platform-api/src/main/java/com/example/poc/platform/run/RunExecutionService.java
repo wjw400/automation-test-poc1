@@ -17,6 +17,7 @@ import com.example.poc.platform.catalog.PlatformCatalogService.ProfileRecord;
 import com.example.poc.platform.catalog.PlatformCatalogService.SuiteCaseRecord;
 import com.example.poc.platform.catalog.PlatformCatalogService.SuiteRecord;
 import com.example.poc.platform.persistence.JsonCodec;
+import com.example.poc.platform.openapi.OperationProcessingService;
 import com.example.poc.platform.persistence.entity.RunEntity;
 import com.example.poc.platform.persistence.entity.StepRunEntity;
 import com.example.poc.platform.persistence.entity.SuiteRunEntity;
@@ -45,6 +46,8 @@ public class RunExecutionService {
     private final StepRunRepository stepRunRepository;
     private final SuiteRunRepository suiteRunRepository;
     private final JsonCodec jsonCodec;
+    private final OperationProcessingService processingService;
+    private final com.example.poc.platform.persistence.repo.ApiSpecRepository apiSpecs;
     private final ApiCaseRunner apiCaseRunner = new ApiCaseRunner();
     private final ObjectMapper yamlMapper = YAMLMapper.builder().build();
 
@@ -53,12 +56,16 @@ public class RunExecutionService {
             RunRepository runRepository,
             StepRunRepository stepRunRepository,
             SuiteRunRepository suiteRunRepository,
-            JsonCodec jsonCodec) {
+            JsonCodec jsonCodec,
+            OperationProcessingService processingService,
+            com.example.poc.platform.persistence.repo.ApiSpecRepository apiSpecs) {
         this.catalogService = catalogService;
         this.runRepository = runRepository;
         this.stepRunRepository = stepRunRepository;
         this.suiteRunRepository = suiteRunRepository;
         this.jsonCodec = jsonCodec;
+        this.processingService = processingService;
+        this.apiSpecs = apiSpecs;
     }
 
     @Transactional(readOnly = true)
@@ -253,6 +260,37 @@ public class RunExecutionService {
                 runtime.setProfile(profile.name());
             }
 
+            for (com.example.poc.engine.ApiStep step : testCase.getSteps()) {
+                step.setProcessing(null);
+                step.setProcessingSnapshot(new LinkedHashMap<>());
+                if (step.getOperation().getId() == null || step.getOperation().getId().isBlank()) continue;
+                var operation = processingService.requireOperation(managedCase.projectId(), step.getOperation().getId());
+                if (!operation.getMethod().equalsIgnoreCase(step.getOperation().getMethod()) || !operation.getPath().equals(step.getOperation().getPath())
+                        || !operation.getApiSpecId().equals(step.getOperation().getApiSpecId())) {
+                    throw new IllegalArgumentException("Operation reference changed; reselect the API operation in step " + step.getName());
+                }
+                var settings = processingService.settings(operation);
+                if (!"manual".equals(step.getProcessingMode())) {
+                    if (settings.needsReview()) throw new IllegalArgumentException("Review API processing settings after reimport: " + operation.getPath());
+                    if (settings.importError() != null && !"MANUAL".equals(settings.source())) throw new IllegalArgumentException(settings.importError());
+                    step.setProcessing(settings.configuration());
+                }
+                Map<String, Object> snapshot = new LinkedHashMap<>();
+                snapshot.put("operationId", operation.getId());
+                snapshot.put("method", operation.getMethod());
+                snapshot.put("path", operation.getPath());
+                snapshot.put("apiSpecId", operation.getApiSpecId());
+                snapshot.put("source", settings.source());
+                snapshot.put("revision", settings.revision());
+                snapshot.put("mode", step.getProcessingMode());
+                snapshot.put("configuration", settings.configuration());
+                var spec = apiSpecs.findById(operation.getApiSpecId()).orElseThrow(() -> new NoSuchElementException("API specification not found"));
+                Map<String, Object> document = yamlMapper.readValue(spec.getContent(), new TypeReference<Map<String, Object>>() {});
+                snapshot.put("apiSpecUpdatedAt", spec.getUpdatedAt() == null ? null : spec.getUpdatedAt().toString());
+                snapshot.put("components", document.get("components"));
+                snapshot.put("operationContract", jsonCodec.readObjectMap(operation.getRawOperationJson()));
+                step.setProcessingSnapshot(snapshot);
+            }
             return yamlMapper.writeValueAsString(testCase);
         } catch (JacksonException e) {
             throw new IllegalArgumentException(
@@ -263,12 +301,12 @@ public class RunExecutionService {
 
     private CryptoProfile toCryptoProfile(ProfileRecord profile) {
         CryptoProfile cryptoProfile = new CryptoProfile();
-        cryptoProfile.setSenderPublicKey(profile.senderPublicKey());
-        cryptoProfile.setSenderPrivateKey(profile.senderPrivateKey());
-        cryptoProfile.setSenderPrivateKeyPassphrase(profile.senderPrivateKeyPassphrase());
-        cryptoProfile.setRecipientPublicKey(profile.recipientPublicKey());
-        cryptoProfile.setRecipientPrivateKey(profile.recipientPrivateKey());
-        cryptoProfile.setRecipientPrivateKeyPassphrase(profile.recipientPrivateKeyPassphrase());
+        cryptoProfile.setVerificationPublicKey(profile.verificationPublicKey());
+        cryptoProfile.setSigningPrivateKey(profile.signingPrivateKey());
+        cryptoProfile.setSigningPrivateKeyPassphrase(profile.signingPrivateKeyPassphrase());
+        cryptoProfile.setEncryptionPublicKey(profile.encryptionPublicKey());
+        cryptoProfile.setDecryptionPrivateKey(profile.decryptionPrivateKey());
+        cryptoProfile.setDecryptionPrivateKeyPassphrase(profile.decryptionPrivateKeyPassphrase());
         return cryptoProfile;
     }
 
@@ -323,6 +361,8 @@ public class RunExecutionService {
         entity.setDecryptedPayloadsJson(jsonCodec.write(step.getDecryptedPayloads()));
         entity.setValidationsJson(jsonCodec.write(step.getValidations()));
         entity.setExtractedValuesJson(jsonCodec.write(step.getExtractedValues()));
+        entity.setProcessingSnapshotJson(jsonCodec.write(step.getProcessingSnapshot()));
+        entity.setBusinessRequestJson(jsonCodec.write(step.getBusinessRequest()));
         return entity;
     }
 
@@ -382,7 +422,9 @@ public class RunExecutionService {
                 jsonCodec.read(entity.getActionsJson(), new TypeReference<List<ActionExecutionReport>>() {}, List.of()),
                 jsonCodec.readObjectMap(entity.getDecryptedPayloadsJson()),
                 jsonCodec.read(entity.getValidationsJson(), new TypeReference<List<ValidationReport>>() {}, List.of()),
-                jsonCodec.readObjectMap(entity.getExtractedValuesJson()));
+                jsonCodec.readObjectMap(entity.getExtractedValuesJson()),
+                jsonCodec.readObjectMap(entity.getProcessingSnapshotJson()),
+                jsonCodec.read(entity.getBusinessRequestJson(), new TypeReference<Object>() {}, null));
     }
 
     public record StartRunRequest(
@@ -443,6 +485,8 @@ public class RunExecutionService {
             List<ActionExecutionReport> actions,
             Map<String, Object> decryptedPayloads,
             List<ValidationReport> validations,
-            Map<String, Object> extractedValues) {
+            Map<String, Object> extractedValues,
+            Map<String, Object> processingSnapshot,
+            Object businessRequest) {
     }
 }
